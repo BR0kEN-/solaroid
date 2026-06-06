@@ -1,0 +1,59 @@
+import type { SupabaseClient } from './client.ts'
+import { DATE_FORMATTER } from './config.ts'
+import { Input } from './schema.ts'
+
+function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
+  const date = DATE_FORMATTER.format()
+  const month = `${date.slice(0, 7)}-01`
+
+  return {
+    day: {
+      plant_id: token.plant_id,
+      date,
+      production: input.today.production,
+      export: input.today.export,
+      import_day: input.today.import.day,
+      import_night: input.today.import.night,
+      consumption_day: input.today.consumption.day,
+      consumption_night: input.today.consumption.night,
+      uah_usd_rate: input.today.currency.uahUsd,
+      uah_eur_rate: input.today.currency.uahEur,
+    },
+    month: {
+      plant_id: token.plant_id,
+      date: month,
+      production: input.thisMonth.production,
+      export: input.thisMonth.export,
+      import_day: input.thisMonth.import.day,
+      import_night: input.thisMonth.import.night,
+      consumption_day: input.thisMonth.consumption.day,
+      consumption_night: input.thisMonth.consumption.night,
+    },
+    tariff: {
+      plant_id: token.plant_id,
+      date: month,
+      price_import_day: input.thisMonth.monetary.import.day,
+      price_import_night: input.thisMonth.monetary.import.night,
+      price_export: input.thisMonth.monetary.export.value,
+      export_taxes: input.thisMonth.monetary.export.taxes,
+    },
+  }
+}
+
+async function write(request: Request, token: Solaroid.Supabase.Access.Token, client: SupabaseClient) {
+  const rows = getRows(Input.parse(await request.json()), token)
+
+  await client.upsertPlantRow('days', rows.day)
+  await client.upsertPlantRow('months', rows.month)
+  // Storing tariff only once, no updates allowed. That's
+  // intentional because tariffs don't change mid-month.
+  await client.upsertPlantRow('month_tariffs', rows.tariff, true)
+
+  return {
+    date: rows.day.date,
+  }
+}
+
+export {
+  write,
+}

@@ -5,6 +5,10 @@
 !/.editorconfig
 !/README.md
 
+!/dashboard/
+/dashboard/*
+!/dashboard/**/
+
 !/supabase/
 /supabase/*
 !/supabase/config.toml
