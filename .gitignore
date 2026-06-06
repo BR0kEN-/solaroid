@@ -4,3 +4,7 @@
 !.git*
 !/.editorconfig
 !/README.md
+
+!/supabase/
+/supabase/*
+!/supabase/**/
