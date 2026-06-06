@@ -7,4 +7,5 @@
 
 !/supabase/
 /supabase/*
+!/supabase/config.toml
 !/supabase/**/
