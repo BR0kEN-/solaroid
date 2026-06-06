@@ -20,7 +20,7 @@ export class SupabaseClient {
   async getAccessToken(tokenHash: string): Promise<Solaroid.Supabase.Access.Token | undefined> {
     const { data, error } = await this.client
       .from('access_tokens')
-      .select(`id,plant_id,reads!access_token_read_scopes(plant_id)`)
+      .select(`id,plant_id,reads:access_token_read_scopes(plant_id)`)
       .eq('token_hash', tokenHash)
       .limit(1)
 
