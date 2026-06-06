@@ -1,11 +1,9 @@
 import { z } from 'zod'
-import { INGEST_TOKEN, CORS_HEADERS } from './config.ts'
+import { ForbiddenError, MethodNotAllowedError, UnauthorizedError } from './errors.ts'
+import { CORS_HEADERS } from './config.ts'
+import { SupabaseClient } from './client.ts'
 
-class UnauthorizedError extends Error {
-  constructor() {
-    super('Unauthorized')
-  }
-}
+const BEARER_PREFIX = 'Bearer '
 
 class Responder {
   protected readonly methods!: string
@@ -37,6 +35,10 @@ class Responder {
 
     if (error instanceof UnauthorizedError) {
       status = 401
+    } else if (error instanceof ForbiddenError) {
+      status = 403
+    } else if (error instanceof MethodNotAllowedError) {
+      status = 405
     } else if (error instanceof z.ZodError) {
       status = 422
       data = {
@@ -56,6 +58,25 @@ class Responder {
   }
 }
 
+function bearerToken(request: Request): string {
+  const authorization = request.headers.get('Authorization')
+
+  if (!authorization?.startsWith(BEARER_PREFIX)) {
+    throw new UnauthorizedError()
+  }
+
+  return authorization.slice(BEARER_PREFIX.length)
+}
+
+async function tokenHash(request: Request) {
+  const token = bearerToken(request)
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 function serve(
   handlers: Record<Solaroid.Supabase.Http.Method, Solaroid.Supabase.Http.Handler>,
 ) {
@@ -68,16 +89,19 @@ function serve(
 
     const handler = handlers[request.method]
 
-    if (!handler) {
-      return responder.json({ ok: false, error: 'Method not allowed' }, 405)
-    }
-
-    if (`Bearer ${INGEST_TOKEN}` !== request.headers.get('Authorization')) {
-      return responder.error(new UnauthorizedError())
-    }
-
     try {
-      return responder.json({ ok: true, ...await handler(await request.json()) })
+      if (!handler) {
+        throw new MethodNotAllowedError()
+      }
+
+      const client = new SupabaseClient()
+      const accessToken = await client.getAccessToken(await tokenHash(request))
+
+      if (!accessToken) {
+        throw new UnauthorizedError()
+      }
+
+      return responder.json({ ok: true, ...await handler(request, accessToken, client) })
     } catch (error) {
       console.error(error)
       return responder.error(error)

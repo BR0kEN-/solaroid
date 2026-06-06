@@ -4,7 +4,6 @@ function requiredVar(name: string): string | never {
   return value
 }
 
-const INGEST_TOKEN = requiredVar('INGEST_TOKEN')
 const SUPABASE_URL = requiredVar('SUPABASE_URL')
 const { default: SUPABASE_SERVICE_ROLE_KEY } = JSON.parse(requiredVar('SUPABASE_SECRET_KEYS'))
 const CORS_HEADERS = {
@@ -23,7 +22,6 @@ const DATE_FORMATTER = new Intl.DateTimeFormat(
 )
 
 export {
-  INGEST_TOKEN,
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
   CORS_HEADERS,
