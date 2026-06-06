@@ -2,11 +2,7 @@ import type { SupabaseClient } from './client.ts'
 import { ForbiddenError } from './errors.ts'
 
 function read(request: Request, token: Solaroid.Supabase.Access.Token, client: SupabaseClient) {
-  const plantId = new URL(request.url).searchParams.get('plant')
-
-  if (!plantId) {
-    throw new Error('The plant ID must be provided.')
-  }
+  const plantId = new URL(request.url).searchParams.get('plant') || token.plant_id
 
   if (token.plant_id !== plantId && !token.reads.includes(plantId)) {
     throw new ForbiddenError()
