@@ -1,0 +1,54 @@
+export interface MonthRow {
+  readonly month: string
+  readonly date: Date
+  readonly production: number
+  readonly export: number
+  readonly importDay: number
+  readonly importNight: number
+  readonly consumedDay: number
+  readonly consumedNight: number
+  readonly consumedTotal: number
+  readonly importTotal: number
+  readonly balance: number
+  readonly exportPrice: number
+  readonly exportVat: number
+  readonly exportMilitary: number
+  readonly importPriceDay: number
+  readonly importPriceNight: number
+  readonly consumedPayment: number
+  readonly electricityPayment: number
+  readonly electricitySavings: number
+  readonly usdRate: number
+  readonly roiUsd: number
+}
+
+export interface DataState {
+  readonly rows: readonly MonthRow[]
+  readonly dailyRows: readonly MonthRow[]
+  readonly investmentUsd: number
+  readonly launchDate?: Date
+  readonly sheetUpdatedAt?: Date
+  readonly isLoading: boolean
+  readonly updatedAt: Date
+  readonly error?: string
+}
+
+export type LoadedData = Omit<DataState, 'isLoading' | 'updatedAt' | 'error'>
+
+export type ExportTax = readonly [type: string, value: number]
+
+export interface Tariff {
+  readonly importDay: number
+  readonly importNight: number
+  readonly export: number
+  readonly exportTaxes: readonly ExportTax[]
+}
+
+export interface EnergySnapshot {
+  readonly production: number
+  readonly export: number
+  readonly importDay: number
+  readonly importNight: number
+  readonly consumedDay: number
+  readonly consumedNight: number
+}

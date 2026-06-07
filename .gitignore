@@ -8,6 +8,8 @@
 !/dashboard/
 /dashboard/*
 !/dashboard/**/
+/dashboard/node_modules/
+/dashboard/dist/
 
 !/supabase/
 /supabase/*
