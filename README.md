@@ -42,9 +42,6 @@ rest_command:
       Authorization: "Bearer RAW_TOKEN_VALUE"
     payload: >
       {
-        "metadata": {
-          "plantId": "my_plant"
-        },
         "today": {
           "production": {{ states('sensor.inverter_today_production')|float(0) }},
           "export": {{ states('sensor.inverter_today_energy_export')|float(0) }},
