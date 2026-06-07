@@ -1,10 +1,10 @@
 import type { SupabaseClient } from './client.ts'
-import { DATE_FORMATTER } from './config.ts'
 import { Input } from './schema.ts'
+import { dateUtil } from './utils/date.ts'
 
 function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
-  const date = DATE_FORMATTER.format()
-  const month = `${date.slice(0, 7)}-01`
+  const date = dateUtil.format.ymd()
+  const month = dateUtil.getMonthStart(date)
 
   return {
     day: {

@@ -67,6 +67,14 @@ export async function loadPlantData(plantId: string): Promise<PlantComparison> {
   return toLoadedPlant({ plant, months, days, tariffs })
 }
 
+export async function loadPlantDateRange(plantId: string, from: string, to = from): Promise<PlantComparison> {
+  assertConfig()
+
+  const { plant, months, days, tariffs } = await fetchDashboardData(plantId, { from, to })
+
+  return toLoadedPlant({ plant, months, days, tariffs })
+}
+
 function toLoadedPlant({
   plant,
   months,
@@ -81,8 +89,9 @@ function toLoadedPlant({
   const monthlyRates = averageUsdRateByMonth(days)
   const fallbackUsdRate = latestPositiveRate(days)
   const tariffByMonth = new Map(tariffs.map((tariff) => [tariff.date, tariff]))
-  const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthlyRates.get(month.date) ?? fallbackUsdRate))
-  const dailyRows = days.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date))))
+  const commercialDate = parseDate(plant.commercial_date)
+  const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthlyRates.get(month.date) ?? fallbackUsdRate, commercialDate))
+  const dailyRows = days.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialDate))
 
   return {
     plantId: plant.id,
@@ -90,6 +99,7 @@ function toLoadedPlant({
     dailyRows,
     investmentUsd: plant.investment_usd,
     launchDate: parseDate(plant.launch_date),
+    commercialDate,
     sheetUpdatedAt: latestUpdatedAt([plant.updated_at, ...months.map((row) => row.updated_at), ...days.map((row) => row.updated_at), ...tariffs.map((row) => row.updated_at)]),
   }
 }
@@ -99,10 +109,20 @@ function assertConfig() {
   if (!accessToken()) throw new Error('VITE_ACCESS_TOKEN is not configured and no token was provided in the URL hash')
 }
 
-async function fetchDashboardData(plantIdOverride?: string) {
+async function fetchDashboardData(
+  plantIdOverride?: string,
+  range?: {
+    readonly from: string
+    readonly to: string
+  },
+) {
   const currentPlantId = plantIdOverride ?? plantId()
   const url = new URL(API_URL)
   if (currentPlantId) url.searchParams.set('plant', currentPlantId)
+  if (range) {
+    url.searchParams.set('from', range.from)
+    url.searchParams.set('to', range.to)
+  }
 
   const response = await fetch(url, {
     headers: {
@@ -154,7 +174,7 @@ function queryParam(name: string) {
   return new URLSearchParams(window.location.search).get(name) ?? ''
 }
 
-function toMonthRow(row: MonthRecord, tariffRecord: TariffRecord | undefined, usdRate: number): MonthRow {
+function toMonthRow(row: MonthRecord, tariffRecord: TariffRecord | undefined, usdRate: number, commercialDate: Date): MonthRow {
   const tariff = toTariff(tariffRecord)
   return toDashboardRow({
     row,
@@ -162,10 +182,11 @@ function toMonthRow(row: MonthRecord, tariffRecord: TariffRecord | undefined, us
     usdRate,
     date: parseDate(row.date),
     month: displayMonth(row.date),
+    commercialDate,
   })
 }
 
-function toDailyRow(row: DayRecord, tariffRecord: TariffRecord | undefined): MonthRow {
+function toDailyRow(row: DayRecord, tariffRecord: TariffRecord | undefined, commercialDate: Date): MonthRow {
   const tariff = toTariff(tariffRecord)
   return toDashboardRow({
     row,
@@ -173,6 +194,7 @@ function toDailyRow(row: DayRecord, tariffRecord: TariffRecord | undefined): Mon
     usdRate: row.uah_usd_rate,
     date: parseDate(row.date),
     month: row.date,
+    commercialDate,
   })
 }
 
@@ -182,17 +204,20 @@ function toDashboardRow({
   usdRate,
   date,
   month,
+  commercialDate,
 }: {
-  row: MonthRecord
-  tariff: Tariff
-  usdRate: number
-  date: Date
-  month: string
+  readonly row: MonthRecord
+  readonly tariff: Tariff
+  readonly usdRate: number
+  readonly date: Date
+  readonly month: string
+  readonly commercialDate: Date
 }): MonthRow {
   const snapshot = toSnapshot(row)
+  const isCommercial = date >= commercialDate
   const rowConsumedPrice = consumedPrice(snapshot, tariff)
-  const rowPayment = payment(snapshot, tariff)
-  const rowSavings = savings(snapshot, tariff)
+  const rowPayment = payment(snapshot, tariff, isCommercial)
+  const rowSavings = savings(snapshot, tariff, isCommercial)
 
   return {
     month,
@@ -216,6 +241,7 @@ function toDashboardRow({
     electricitySavings: rowSavings,
     usdRate,
     roiUsd: usdRate ? rowSavings / usdRate : 0,
+    isCommercial,
   }
 }
 

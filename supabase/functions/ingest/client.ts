@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from './config.ts'
+import { dateUtil } from './utils/date.ts'
 
 export class SupabaseClient {
   protected readonly client
@@ -49,15 +50,7 @@ export class SupabaseClient {
   }
 
   async getPlant(plantId: Solaroid.Supabase.Plant.Id): Promise<Solaroid.Supabase.Json> {
-    const { data: plant, error } = await this.client
-      .from('plants')
-      .select('*')
-      .eq('id', plantId)
-      .order('id', { ascending: true })
-      .single()
-
-    if (error) throw new Error('plants lookup failed', { cause: error })
-
+    const plant = await this.#getPlantMetadata(plantId)
     const [days, months, tariffs] = await Promise.all(
       ['days', 'months', 'month_tariffs'].map((table) => this.#getPlantRows(plantId, table)),
     )
@@ -70,11 +63,67 @@ export class SupabaseClient {
     }
   }
 
-  async #getPlantRows(plantId: Solaroid.Supabase.Plant.Id, table: string): Promise<readonly Solaroid.Supabase.Json[]> {
+  async getPlantDataForGranularity(
+    plantId: Solaroid.Supabase.Plant.Id,
+    granularity: Solaroid.Supabase.Date.Granularity,
+  ) {
+    let table: string
+    let range: Solaroid.Supabase.Date.Range
+    let month: Solaroid.Supabase.Date.Range
+
+    if (dateUtil.granularity.is.day(granularity)) {
+      table = 'days'
+      range = { from: granularity }
+      month = { from: dateUtil.getMonthStart(granularity) }
+    } else if (dateUtil.granularity.is.month(granularity)) {
+      table = 'months'
+      range = { from: `${granularity}-01`, to: `${granularity}-31` }
+      month = { from: range.from }
+    } else if (dateUtil.granularity.is.year(granularity)) {
+      table = 'months'
+      range = { from: `${granularity}-01-01`, to: `${granularity}-12-31` }
+      month = range
+    } else {
+      throw new Error('Invalid granularity.')
+    }
+
+    return {
+      plant: await this.#getPlantMetadata(plantId),
+      records: await this.#getPlantRows(plantId, table, range),
+      tariffs: await this.#getPlantRows(plantId, 'month_tariffs', month),
+    }
+  }
+
+  async #getPlantMetadata(plantId: Solaroid.Supabase.Plant.Id) {
     const { data, error } = await this.client
+      .from('plants')
+      .select('*')
+      .eq('id', plantId)
+      .order('id', { ascending: true })
+      .single()
+
+    if (error) throw new Error('plant lookup failed', { cause: error })
+
+    return data
+  }
+
+  async #getPlantRows(
+    plantId: Solaroid.Supabase.Plant.Id,
+    table: string,
+    range?: Solaroid.Supabase.Date.Range,
+  ): Promise<readonly Solaroid.Supabase.Json[]> {
+    let query = this.client
       .from(table)
       .select('*')
       .eq('plant_id', plantId)
+
+    if (range) {
+      query = query
+        .gte('date', range.from)
+        .lte('date', range.to ?? range.from)
+    }
+
+    const { data, error } = await query
       .order('plant_id', { ascending: true })
       .order('date', { ascending: true })
 

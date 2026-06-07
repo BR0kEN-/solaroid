@@ -20,6 +20,7 @@ export interface MonthRow {
   readonly electricitySavings: number
   readonly usdRate: number
   readonly roiUsd: number
+  readonly isCommercial: boolean
 }
 
 export interface DataState {
@@ -29,6 +30,7 @@ export interface DataState {
   readonly readablePlantIds: readonly string[]
   readonly investmentUsd: number
   readonly launchDate?: Date
+  readonly commercialDate?: Date
   readonly sheetUpdatedAt?: Date
   readonly isLoading: boolean
   readonly updatedAt: Date
@@ -43,6 +45,7 @@ export interface PlantComparison {
   readonly dailyRows: readonly MonthRow[]
   readonly investmentUsd: number
   readonly launchDate?: Date
+  readonly commercialDate?: Date
   readonly sheetUpdatedAt?: Date
 }
 
