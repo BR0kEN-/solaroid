@@ -299,6 +299,7 @@ h2 {
 .chart-panel,
 .data-section,
 .forecast-section,
+.plant-comparison-section,
 .payback-band,
 .daily-compare {
   background: var(--panel);
@@ -452,6 +453,118 @@ h2 {
 
 .forecast-detail .muted {
   color: var(--muted);
+}
+
+.plant-comparison-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.plant-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.plant-comparison-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.plant-comparison-controls label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.plant-comparison-controls label span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.plant-comparison-controls select,
+.plant-comparison-controls button {
+  min-height: 40px;
+  color: var(--text);
+  background: var(--control);
+  border: 0;
+  border-radius: 8px;
+}
+
+.plant-comparison-controls select {
+  width: 100%;
+  padding: 0 34px 0 12px;
+}
+
+.plant-comparison-controls button {
+  padding: 0 16px;
+  font-weight: 700;
+}
+
+.plant-comparison-controls button:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.plant-comparison-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.plant-comparison-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.plant-comparison-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.plant-comparison-head span {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: var(--control);
+  border-radius: 999px;
+}
+
+.plant-comparison-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plant-comparison-metrics span {
+  min-width: 0;
+}
+
+.plant-comparison-metrics small,
+.plant-comparison-period {
+  display: block;
+  color: var(--muted);
+}
+
+.plant-comparison-metrics strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  font-size: 0.94rem;
 }
 
 .payback-band {
@@ -1113,6 +1226,7 @@ tbody tr:hover {
   .chart-panel,
   .data-section,
   .forecast-section,
+  .plant-comparison-section,
   .payback-band {
     padding: 12px;
   }
@@ -1128,6 +1242,10 @@ tbody tr:hover {
 
   .kpi-card strong {
     font-size: 1.05rem;
+  }
+
+  .plant-comparison-controls {
+    grid-template-columns: 1fr;
   }
 
   .legend {

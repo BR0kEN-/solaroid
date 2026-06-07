@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, Tariff } from '../domain/types'
+import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, Tariff } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -44,12 +44,40 @@ interface ApiResponse {
   readonly days?: readonly DayRecord[]
   readonly months?: readonly MonthRecord[]
   readonly tariffs?: readonly TariffRecord[]
+  readonly reads?: readonly string[]
 }
 
 export async function loadDashboardData(): Promise<LoadedData> {
   assertConfig()
 
-  const { plant, months, days, tariffs } = await fetchDashboardData()
+  const { plant, months, days, tariffs, reads } = await fetchDashboardData()
+  const loaded = toLoadedPlant({ plant, months, days, tariffs })
+
+  return {
+    ...loaded,
+    readablePlantIds: reads,
+  }
+}
+
+export async function loadPlantData(plantId: string): Promise<PlantComparison> {
+  assertConfig()
+
+  const { plant, months, days, tariffs } = await fetchDashboardData(plantId)
+
+  return toLoadedPlant({ plant, months, days, tariffs })
+}
+
+function toLoadedPlant({
+  plant,
+  months,
+  days,
+  tariffs,
+}: {
+  readonly plant: PlantRecord
+  readonly months: readonly MonthRecord[]
+  readonly days: readonly DayRecord[]
+  readonly tariffs: readonly TariffRecord[]
+}): PlantComparison {
   const monthlyRates = averageUsdRateByMonth(days)
   const fallbackUsdRate = latestPositiveRate(days)
   const tariffByMonth = new Map(tariffs.map((tariff) => [tariff.date, tariff]))
@@ -57,6 +85,7 @@ export async function loadDashboardData(): Promise<LoadedData> {
   const dailyRows = days.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date))))
 
   return {
+    plantId: plant.id,
     rows,
     dailyRows,
     investmentUsd: plant.investment_usd,
@@ -70,8 +99,8 @@ function assertConfig() {
   if (!accessToken()) throw new Error('VITE_ACCESS_TOKEN is not configured and no token was provided in the URL hash')
 }
 
-async function fetchDashboardData() {
-  const currentPlantId = plantId()
+async function fetchDashboardData(plantIdOverride?: string) {
+  const currentPlantId = plantIdOverride ?? plantId()
   const url = new URL(API_URL)
   if (currentPlantId) url.searchParams.set('plant', currentPlantId)
 
@@ -101,6 +130,7 @@ async function fetchDashboardData() {
     days: data.days ?? [],
     months: data.months ?? [],
     tariffs: data.tariffs ?? [],
+    reads: data.reads ?? [],
   }
 }
 

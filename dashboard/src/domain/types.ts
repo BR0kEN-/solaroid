@@ -23,8 +23,10 @@ export interface MonthRow {
 }
 
 export interface DataState {
+  readonly plantId: string
   readonly rows: readonly MonthRow[]
   readonly dailyRows: readonly MonthRow[]
+  readonly readablePlantIds: readonly string[]
   readonly investmentUsd: number
   readonly launchDate?: Date
   readonly sheetUpdatedAt?: Date
@@ -34,6 +36,15 @@ export interface DataState {
 }
 
 export type LoadedData = Omit<DataState, 'isLoading' | 'updatedAt' | 'error'>
+
+export interface PlantComparison {
+  readonly plantId: string
+  readonly rows: readonly MonthRow[]
+  readonly dailyRows: readonly MonthRow[]
+  readonly investmentUsd: number
+  readonly launchDate?: Date
+  readonly sheetUpdatedAt?: Date
+}
 
 export type ExportTax = readonly [type: string, value: number]
 

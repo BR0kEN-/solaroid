@@ -11,8 +11,8 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { loadDashboardData } from "./data/supabase";
-import type { DataState, LoadedData, MonthRow } from "./domain/types";
+import { loadDashboardData, loadPlantData } from "./data/supabase";
+import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
 import "./styles.css";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
@@ -50,6 +50,12 @@ const i18n = {
     expectedIncome: "Expected income",
     soFar: "so far",
     forecastInfo: "Forecast values are projected from the current month pace: value so far divided by elapsed days in the month, then multiplied by the total number of days in that month. The colored comparison shows the projected value against the previous month's actual value.",
+    plantComparison: "Plant comparison",
+    activePlant: "current",
+    compare: "Compare",
+    compareFirstPlant: "First plant",
+    compareSecondPlant: "Second plant",
+    comparisonHint: "Select two plants to compare using the current monthly filters.",
     latestRoi: "Latest ROI",
     latestRoiInfo: "ROI shows how much investment was effectively recovered during the latest month. It includes the value of electricity consumed from your own solar production plus any export income, minus grid electricity costs. Net payment is only the cash balance for the month: export income minus grid electricity costs.",
     refresh: "Refresh",
@@ -130,6 +136,12 @@ const i18n = {
     expectedIncome: "Очікуваний дохід",
     soFar: "зараз",
     forecastInfo: "Прогноз рахується за поточним темпом місяця: значення зараз ділиться на кількість днів, що вже минули в цьому місяці, і множиться на загальну кількість днів у місяці. Кольорове порівняння показує прогнозоване значення відносно фактичного значення попереднього місяця.",
+    plantComparison: "Порівняння станцій",
+    activePlant: "поточна",
+    compare: "Порівняти",
+    compareFirstPlant: "Перша станція",
+    compareSecondPlant: "Друга станція",
+    comparisonHint: "Оберіть дві станції для порівняння за поточними місячними фільтрами.",
     latestRoi: "Останнє ПІ",
     latestRoiInfo: "ПІ показує, скільки інвестиції фактично повернулось за останній місяць. Воно включає вартість електроенергії, спожитої з власної генерації, плюс дохід від експорту, мінус витрати на електроенергію з мережі. Баланс — це лише грошовий результат місяця: дохід від експорту мінус витрати на електроенергію з мережі.",
     refresh: "Оновити",
@@ -459,10 +471,32 @@ function netExportPrice(row: MonthRow) {
   return netExportRate(row);
 }
 
+function filteredMonthlyRows(
+  sourceRows: readonly MonthRow[],
+  range: RangeKey,
+  monthFilter: string,
+  yearFilter: string,
+) {
+  const rangeMonths: Record<Exclude<RangeKey, "all">, number> = {
+    "1m": 1,
+    "3m": 3,
+    "6m": 6,
+    "12m": 12,
+  };
+  const base = range === "all" ? sourceRows : sourceRows.slice(-rangeMonths[range]);
+  return base.filter((row) => {
+    const monthMatches = monthFilter === "all" || String(row.date.getMonth() + 1) === monthFilter;
+    const yearMatches = yearFilter === "all" || String(row.date.getFullYear()) === yearFilter;
+    return monthMatches && yearMatches;
+  });
+}
+
 function useDashboardData(): DashboardDataState {
   const [state, setState] = useState<DashboardDataHookState>(() => ({
     rows: [],
     dailyRows: [],
+    readablePlantIds: [],
+    plantId: "",
     investmentUsd: 0,
     isLoading: true,
     isRefreshing: false,
@@ -522,6 +556,11 @@ function App() {
   const [firstDay, setFirstDay] = useState("");
   const [secondDay, setSecondDay] = useState("");
   const [isDailyCompareOpen, setDailyCompareOpen] = useState(false);
+  const [firstPlantId, setFirstPlantId] = useState("");
+  const [secondPlantId, setSecondPlantId] = useState("");
+  const [comparisonPlants, setComparisonPlants] = useState<readonly PlantComparison[]>([]);
+  const [comparisonError, setComparisonError] = useState("");
+  const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<"latestRoi" | "netPayment" | "totalExport" | "totalImport" | "usdRate" | "forecast" | "investment" | null>(null);
   const lang = APP_LANG;
   const t = i18n[lang];
@@ -550,6 +589,17 @@ function App() {
     if (viewMode !== "daily") setDailyCompareOpen(false);
   }, [viewMode]);
 
+  const readablePlantOptions = useMemo(
+    () => [dataState.plantId, ...dataState.readablePlantIds].filter((plantId, index, plantIds) => plantId && plantIds.indexOf(plantId) === index),
+    [dataState.plantId, dataState.readablePlantIds],
+  );
+
+  useEffect(() => {
+    if (!readablePlantOptions.length) return;
+    if (!firstPlantId) setFirstPlantId(dataState.plantId || readablePlantOptions[0]);
+    if (!secondPlantId) setSecondPlantId(readablePlantOptions.find((plantId) => plantId !== (dataState.plantId || readablePlantOptions[0])) ?? readablePlantOptions[0]);
+  }, [dataState.plantId, firstPlantId, readablePlantOptions, secondPlantId]);
+
   useEffect(() => {
     if (!infoModal) return undefined;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -560,19 +610,38 @@ function App() {
   }, [infoModal]);
 
   const rows = useMemo(() => {
-    const rangeMonths: Record<Exclude<RangeKey, "all">, number> = {
-      "1m": 1,
-      "3m": 3,
-      "6m": 6,
-      "12m": 12,
-    };
-    const base = range === "all" ? dataState.rows : dataState.rows.slice(-rangeMonths[range]);
-    return base.filter((row) => {
-      const monthMatches = monthFilter === "all" || String(row.date.getMonth() + 1) === monthFilter;
-      const yearMatches = yearFilter === "all" || String(row.date.getFullYear()) === yearFilter;
-      return monthMatches && yearMatches;
-    });
+    return filteredMonthlyRows(dataState.rows, range, monthFilter, yearFilter);
   }, [dataState.rows, monthFilter, range, yearFilter]);
+
+  const runPlantComparison = async () => {
+    const selectedPlantIds = [firstPlantId, secondPlantId].filter(Boolean);
+    if (selectedPlantIds.length < 2 || firstPlantId === secondPlantId) return;
+
+    setPlantComparisonLoading(true);
+    setComparisonError("");
+
+    try {
+      const loadedPlants = await Promise.all(
+        selectedPlantIds.map((plantId) => (
+          plantId === dataState.plantId
+            ? Promise.resolve({
+              plantId: dataState.plantId,
+              rows: dataState.rows,
+              dailyRows: dataState.dailyRows,
+              investmentUsd: dataState.investmentUsd,
+              launchDate: dataState.launchDate,
+              sheetUpdatedAt: dataState.sheetUpdatedAt,
+            })
+            : loadPlantData(plantId)
+        )),
+      );
+      setComparisonPlants(loadedPlants);
+    } catch (error) {
+      setComparisonError(error instanceof Error ? error.message : "Could not load plant comparison");
+    } finally {
+      setPlantComparisonLoading(false);
+    }
+  };
 
   const totals = useMemo(() => {
     const roi = rows.reduce((sum, row) => sum + row.roiUsd, 0);
@@ -936,6 +1005,27 @@ function App() {
           ) : null}
         </section>
 
+        {!showPlaceholders && dataState.readablePlantIds.length ? (
+          <PlantComparisonSection
+            activePlantId={dataState.plantId}
+            availablePlantIds={readablePlantOptions}
+            firstPlantId={firstPlantId}
+            secondPlantId={secondPlantId}
+            setFirstPlantId={setFirstPlantId}
+            setSecondPlantId={setSecondPlantId}
+            onCompare={runPlantComparison}
+            plants={comparisonPlants}
+            isLoading={isPlantComparisonLoading}
+            error={comparisonError}
+            range={range}
+            monthFilter={monthFilter}
+            yearFilter={yearFilter}
+            t={t}
+            currency={currency}
+            lang={lang}
+          />
+        ) : null}
+
         <section className="payback-band">
           {showPlaceholders ? (
             <>
@@ -1189,6 +1279,112 @@ function ForecastDetail({
         </span>
       ) : null}
     </span>
+  );
+}
+
+function PlantComparisonSection({
+  activePlantId,
+  availablePlantIds,
+  firstPlantId,
+  secondPlantId,
+  setFirstPlantId,
+  setSecondPlantId,
+  onCompare,
+  plants,
+  isLoading,
+  error,
+  range,
+  monthFilter,
+  yearFilter,
+  t,
+  currency,
+  lang,
+}: {
+  readonly activePlantId: string;
+  readonly availablePlantIds: readonly string[];
+  readonly firstPlantId: string;
+  readonly secondPlantId: string;
+  readonly setFirstPlantId: (plantId: string) => void;
+  readonly setSecondPlantId: (plantId: string) => void;
+  readonly onCompare: () => void;
+  readonly plants: readonly PlantComparison[];
+  readonly isLoading: boolean;
+  readonly error: string;
+  readonly range: RangeKey;
+  readonly monthFilter: string;
+  readonly yearFilter: string;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}) {
+  return (
+    <section className="plant-comparison-section">
+      <div className="section-heading">
+        <div>
+          <h2>{t.plantComparison}</h2>
+          <p>{t.comparisonHint}</p>
+        </div>
+      </div>
+      <div className="plant-comparison-controls">
+        <label>
+          <span>{t.compareFirstPlant}</span>
+          <select value={firstPlantId} onChange={(event) => setFirstPlantId(event.target.value)}>
+            {availablePlantIds.map((plantId) => (
+              <option key={plantId} value={plantId}>
+                {plantId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>{t.compareSecondPlant}</span>
+          <select value={secondPlantId} onChange={(event) => setSecondPlantId(event.target.value)}>
+            {availablePlantIds.map((plantId) => (
+              <option key={plantId} value={plantId}>
+                {plantId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" onClick={onCompare} disabled={isLoading || !firstPlantId || !secondPlantId || firstPlantId === secondPlantId}>
+          {isLoading ? "..." : t.compare}
+        </button>
+      </div>
+      {error ? <small className="negative">{error}</small> : null}
+      <div className="plant-comparison-grid">
+        {plants.map((plant) => {
+          const rows = filteredMonthlyRows(plant.rows, range, monthFilter, yearFilter);
+          const production = rows.reduce((sum, row) => sum + row.production, 0);
+          const roi = sumRowsRoiMoney(rows, currency);
+          const net = sumRowsFromUah(rows, (row) => row.electricityPayment, currency);
+          const latest = rows.at(-1);
+
+          return (
+            <article className="plant-comparison-card" key={plant.plantId}>
+              <div className="plant-comparison-head">
+                <h3>{plant.plantId}</h3>
+                {plant.plantId === activePlantId ? <span>{t.activePlant}</span> : null}
+              </div>
+              <div className="plant-comparison-metrics">
+                <span>
+                  <small>{t.production}</small>
+                  <strong>{formatKwh(production, lang)}</strong>
+                </span>
+                <span>
+                  <small>{t.roi}</small>
+                  <strong className={roi >= 0 ? "positive" : "negative"}>{formatDisplayMoney(roi, currency, lang)}</strong>
+                </span>
+                <span>
+                  <small>{t.net}</small>
+                  <strong className={net >= 0 ? "positive" : "negative"}>{formatDisplayMoney(net, currency, lang)}</strong>
+                </span>
+              </div>
+              <small className="plant-comparison-period">{latest ? formatPeriodLabel(latest, lang) : "-"}</small>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
