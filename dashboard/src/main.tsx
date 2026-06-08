@@ -11,14 +11,29 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { loadDashboardData, loadPlantData } from "./data/supabase";
+import { loadDashboardData, loadPlantDateRange } from "./data/supabase";
+import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
 import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
 import "./styles.css";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
-type ViewMode = "monthly" | "daily";
+type ViewMode = "monthly" | "daily" | "comparison";
 type Currency = "UAH" | "USD";
 type Lang = "en" | "uk";
+type InfoModal =
+  | "latestRoi"
+  | "netPayment"
+  | "totalExport"
+  | "totalImport"
+  | "usdRate"
+  | "importPrice"
+  | "roi"
+  | "forecast"
+  | "investment"
+  | {
+    readonly kind: "importSplit" | "consumedSplit" | "exportPrice" | "netPayment";
+    readonly row: MonthRow;
+  };
 
 interface DashboardDataState extends DataState {
   readonly isRefreshing: boolean;
@@ -32,6 +47,7 @@ const i18n = {
     all: "All",
     monthly: "Monthly",
     daily: "Daily",
+    comparison: "Comparison",
     total: "Total",
     compareDays: "Compare days",
     firstDay: "First day",
@@ -49,13 +65,14 @@ const i18n = {
     expectedRoi: "Expected ROI",
     expectedIncome: "Expected income",
     soFar: "so far",
-    forecastInfo: "Forecast values are projected from the current month pace: value so far divided by elapsed days in the month, then multiplied by the total number of days in that month. The colored comparison shows the projected value against the previous month's actual value.",
+    forecastInfo: "Forecast values are projected from the current month daylight pace: value so far divided by elapsed daylight this month, then multiplied by total expected daylight for the month. The colored comparison shows the projected value against the previous month's actual value.",
     plantComparison: "Plant comparison",
     activePlant: "current",
     compare: "Compare",
     compareFirstPlant: "First plant",
     compareSecondPlant: "Second plant",
-    comparisonHint: "Select two plants to compare using the current monthly filters.",
+    compareDate: "Date",
+    comparisonHint: "Select two plants and two dates to compare daily performance.",
     latestRoi: "Latest ROI",
     latestRoiInfo: "ROI shows how much investment was effectively recovered during the latest month. It includes the value of electricity consumed from your own solar production plus any export income, minus grid electricity costs. Net payment is only the cash balance for the month: export income minus grid electricity costs.",
     refresh: "Refresh",
@@ -73,8 +90,22 @@ const i18n = {
     solarCoverage: "solar coverage",
     net: "Net",
     netPayment: "Net payment",
+    electricityCostWithoutSolar: "Electricity cost without solar",
+    formulaInputs: "Inputs",
+    importPrices: "Import prices",
+    exportPriceInput: "Export price",
+    usdRate: "USD/UAH rate",
+    dayCost: "Day cost",
+    nightCost: "Night cost",
+    exportedOffset: "Export offset",
+    remainingImport: "Remaining import",
+    netSurplus: "Net surplus",
+    exportUnpaid: "Export is unpaid before the commercial date",
+    netPaymentLogic: "Net payment is the cash result of monthly import/export balancing. Balance is import minus export. If export is larger than import, the balance is negative and the net surplus is paid using the export price after VAT and military tax. Otherwise, export offsets import proportionally between day and night import, then the remaining day/night import is charged at its own rate.",
     netPaymentInfo: "UAH totals are summed directly. In USD mode, each month is converted using that month's USD/UAH rate, then those converted values are summed. It is not the UAH total divided by the latest rate.",
     usdRateInfo: "Monthly USD/UAH is the average of the daily USD/UAH rates stored for that month. The dashboard uses this monthly average when converting monthly UAH values to USD.",
+    importPriceInfo: "Import prices are shown as day / night. Day is the rate from 7 AM to 11 PM; night is the rate from 11 PM to 7 AM.",
+    roiInfo: "ROI is not production multiplied by export price. It is the effective investment recovery for the period: the value of electricity consumed from the solar system plus export payout when commercial export is active, minus grid import costs. Before the commercial date, export is unpaid and does not offset import, so ROI is based only on inferred self-consumed solar energy: production minus export, valued by the weighted day/night import rate.",
     savings: "Savings",
     plantWorks: "Plant works",
     sinceLaunch: "since",
@@ -103,11 +134,16 @@ const i18n = {
     roi: "ROI",
     exportPrice: "Export price",
     netExport: "Export",
+    grossExportPrice: "Before taxes",
+    netExportPrice: "After taxes",
+    vat: "VAT",
+    militaryTax: "Military tax",
     importDay: "Import/day",
     importNight: "Import/night",
     consumedDay: "Consumed/day",
     consumedNight: "Consumed/night",
     day: "Day",
+    tableDay: "Day",
     night: "Night",
     sourceWarning: "Data fetch failed. Check Supabase access, plant id, and read policies.",
     currency: "Currency",
@@ -118,6 +154,7 @@ const i18n = {
     all: "Усі",
     monthly: "Місяці",
     daily: "Дні",
+    comparison: "Порівняння",
     total: "Разом",
     compareDays: "Порівняти дні",
     firstDay: "Перший день",
@@ -135,13 +172,14 @@ const i18n = {
     expectedRoi: "Очікуване ПІ",
     expectedIncome: "Очікуваний дохід",
     soFar: "зараз",
-    forecastInfo: "Прогноз рахується за поточним темпом місяця: значення зараз ділиться на кількість днів, що вже минули в цьому місяці, і множиться на загальну кількість днів у місяці. Кольорове порівняння показує прогнозоване значення відносно фактичного значення попереднього місяця.",
+    forecastInfo: "Прогноз рахується за поточним темпом світлового часу місяця: значення зараз ділиться на кількість світлового часу, що вже минув у цьому місяці, і множиться на очікуваний світловий час усього місяця. Кольорове порівняння показує прогнозоване значення відносно фактичного значення попереднього місяця.",
     plantComparison: "Порівняння станцій",
     activePlant: "поточна",
     compare: "Порівняти",
     compareFirstPlant: "Перша станція",
     compareSecondPlant: "Друга станція",
-    comparisonHint: "Оберіть дві станції для порівняння за поточними місячними фільтрами.",
+    compareDate: "Дата",
+    comparisonHint: "Оберіть дві станції та дві дати для порівняння денних показників.",
     latestRoi: "Останнє ПІ",
     latestRoiInfo: "ПІ показує, скільки інвестиції фактично повернулось за останній місяць. Воно включає вартість електроенергії, спожитої з власної генерації, плюс дохід від експорту, мінус витрати на електроенергію з мережі. Баланс — це лише грошовий результат місяця: дохід від експорту мінус витрати на електроенергію з мережі.",
     refresh: "Оновити",
@@ -159,8 +197,22 @@ const i18n = {
     solarCoverage: "покриття сонцем",
     net: "Баланс",
     netPayment: "Баланс оплати",
+    electricityCostWithoutSolar: "Вартість електрики без сонця",
+    formulaInputs: "Вхідні дані",
+    importPrices: "Ціни імпорту",
+    exportPriceInput: "Ціна експорту",
+    usdRate: "Курс USD/UAH",
+    dayCost: "Вартість дня",
+    nightCost: "Вартість ночі",
+    exportedOffset: "Покриття експортом",
+    remainingImport: "Залишок імпорту",
+    netSurplus: "Чистий надлишок",
+    exportUnpaid: "До комерційної дати експорт не оплачується",
+    netPaymentLogic: "Баланс оплати — це грошовий результат місячного балансу імпорту й експорту. Баланс рахується як імпорт мінус експорт. Якщо експорт більший за імпорт, баланс відʼємний і чистий надлишок оплачується за ціною експорту після ПДВ і військового збору. Інакше експорт пропорційно покриває денний і нічний імпорт, а залишок денного/нічного імпорту оплачується за відповідним тарифом.",
     netPaymentInfo: "Суми в гривнях додаються напряму. У режимі USD кожен місяць конвертується за його курсом, а потім конвертовані значення додаються. Це не сума в гривнях, поділена на останній курс.",
     usdRateInfo: "Місячний курс USD/UAH — це середнє значення денних курсів USD/UAH, збережених за цей місяць. Дашборд використовує це середнє для конвертації місячних значень у гривнях в USD.",
+    importPriceInfo: "Ціни імпорту показані як день / ніч. День — тариф з 7:00 до 23:00; ніч — тариф з 23:00 до 7:00.",
+    roiInfo: "ПІ — це не генерація, помножена на ціну експорту. Це фактичне повернення інвестицій за період: вартість електроенергії, спожитої з сонячної системи, плюс виплата за експорт після початку комерційного експорту, мінус витрати на імпорт з мережі. До комерційної дати експорт не оплачується і не перекриває імпорт, тому ПІ рахується лише з орієнтовно спожитої власної сонячної енергії: генерація мінус експорт, оцінені за зваженим денним/нічним тарифом імпорту.",
     savings: "Економія",
     plantWorks: "Станція працює",
     sinceLaunch: "з",
@@ -189,11 +241,16 @@ const i18n = {
     roi: "ПІ",
     exportPrice: "Ціна експорту",
     netExport: "Експорт",
+    grossExportPrice: "До податків",
+    netExportPrice: "Після податків",
+    vat: "ПДВ",
+    militaryTax: "Військовий збір",
     importDay: "Імпорт/день",
     importNight: "Імпорт/ніч",
     consumedDay: "Спожито/день",
     consumedNight: "Спожито/ніч",
     day: "День",
+    tableDay: "День",
     night: "Ніч",
     sourceWarning: "Не вдалось завантажити дані. Перевірте доступ до Supabase, id станції та політики читання.",
     currency: "Валюта",
@@ -240,6 +297,14 @@ function formatKwh(value: number, lang: Lang = APP_LANG) {
   return `${formatNumber(value, 2, 2)} ${lang === "uk" ? "кВт·г" : "kWh"}`;
 }
 
+function energyUnit(lang: Lang) {
+  return lang === "uk" ? "кВт·г" : "kWh";
+}
+
+function currencyUnit(currency: Currency) {
+  return currency === "UAH" ? "₴" : "$";
+}
+
 function formatMoney(value: number, currency: Currency, lang: Lang, compact = false) {
   return new Intl.NumberFormat(lang === "uk" ? "uk-UA" : "en-US", {
     style: "currency",
@@ -267,6 +332,22 @@ function rowRoiMoney(row: MonthRow, currency: Currency) {
 
 function formatDisplayMoney(value: number, currency: Currency, lang: Lang, compact = false) {
   return formatMoney(value, currency, lang, compact);
+}
+
+function formatTableMoney(value: number, currency: Currency, lang: Lang, compact = false) {
+  const parts = new Intl.NumberFormat(lang === "uk" ? "uk-UA" : "en-US", {
+    style: "currency",
+    currency,
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: compact ? 0 : 2,
+    maximumFractionDigits: compact ? 0 : 2,
+  }).formatToParts(value);
+
+  return parts
+    .filter((part) => part.type !== "currency")
+    .map((part) => part.value)
+    .join("")
+    .trim();
 }
 
 function formatUahMoney(value: number, currency: Currency, lang: Lang, usdRate: number, compact = false) {
@@ -371,6 +452,13 @@ function formatDayLabel(date: Date, lang: Lang) {
   }).format(date);
 }
 
+function formatDayMonthLabel(date: Date, lang: Lang) {
+  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+    day: "numeric",
+    month: "short",
+  }).format(date);
+}
+
 function formatDateTimeLabel(date: Date, lang: Lang) {
   return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
     day: "numeric",
@@ -391,6 +479,10 @@ function formatMonthOnly(date: Date, lang: Lang) {
   return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
     month: "long",
   }).format(date);
+}
+
+function monthKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function formatPeriodLabel(row: MonthRow, lang: Lang = APP_LANG) {
@@ -446,14 +538,56 @@ function daysInMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
 }
 
-function elapsedDaysInMonth(date: Date, today = new Date()) {
-  if (!sameMonth(date, today)) return daysInMonth(date);
-  return Math.min(today.getDate(), daysInMonth(date));
+function dayOfYear(date: Date) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  return Math.floor((startOfDay(date).getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
 }
 
-function forecastMonthValue(value: number, date: Date) {
-  const elapsedDays = Math.max(1, elapsedDaysInMonth(date));
-  return (value / elapsedDays) * daysInMonth(date);
+function daylightMinutes(date: Date, latitude = FORECAST_LATITUDE) {
+  const latitudeRad = (latitude * Math.PI) / 180;
+  const declination = 0.409 * Math.sin(((2 * Math.PI) / 365) * dayOfYear(date) - 1.39);
+  const hourAngleValue = -Math.tan(latitudeRad) * Math.tan(declination);
+  const hourAngle = Math.acos(Math.min(1, Math.max(-1, hourAngleValue)));
+  return (24 * 60 * hourAngle) / Math.PI;
+}
+
+function daylightWindow(date: Date, latitude = FORECAST_LATITUDE, longitude = FORECAST_LONGITUDE) {
+  const noon = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12);
+  const timezoneOffsetHours = -noon.getTimezoneOffset() / 60;
+  const solarNoonHour = 12 + timezoneOffsetHours - longitude / 15;
+  const daylightHours = daylightMinutes(date, latitude) / 60;
+  return {
+    start: new Date(date.getFullYear(), date.getMonth(), date.getDate(), solarNoonHour - daylightHours / 2),
+    end: new Date(date.getFullYear(), date.getMonth(), date.getDate(), solarNoonHour + daylightHours / 2),
+  };
+}
+
+function elapsedDaylightMinutes(date: Date, asOf: Date) {
+  if (asOf < startOfDay(date)) return 0;
+  const { start, end } = daylightWindow(date);
+  if (asOf >= end) return daylightMinutes(date);
+  if (asOf <= start) return 0;
+  return Math.max(0, (asOf.getTime() - start.getTime()) / (60 * 1000));
+}
+
+function monthDaylightMinutes(date: Date) {
+  return Array.from({ length: daysInMonth(date) }, (_, index) =>
+    daylightMinutes(new Date(date.getFullYear(), date.getMonth(), index + 1)),
+  ).reduce((sum, minutes) => sum + minutes, 0);
+}
+
+function elapsedMonthDaylightMinutes(date: Date, asOf: Date) {
+  if (!sameMonth(date, asOf)) return monthDaylightMinutes(date);
+  return Array.from({ length: asOf.getDate() }, (_, index) => {
+    const currentDate = new Date(date.getFullYear(), date.getMonth(), index + 1);
+    return index + 1 === asOf.getDate() ? elapsedDaylightMinutes(currentDate, asOf) : daylightMinutes(currentDate);
+  }).reduce((sum, minutes) => sum + minutes, 0);
+}
+
+function forecastMonthValue(value: number, date: Date, asOf = new Date()) {
+  const totalDaylight = monthDaylightMinutes(date);
+  const elapsedDaylight = Math.max(60, elapsedMonthDaylightMinutes(date, asOf));
+  return (value / elapsedDaylight) * totalDaylight;
 }
 
 function formatActiveDuration(duration: { months: number; days: number }, lang: Lang) {
@@ -489,6 +623,10 @@ function filteredMonthlyRows(
     const yearMatches = yearFilter === "all" || String(row.date.getFullYear()) === yearFilter;
     return monthMatches && yearMatches;
   });
+}
+
+function firstDateKey(rows: readonly MonthRow[]) {
+  return rows.length ? dateKey(rows[rows.length - 1].date) : "";
 }
 
 function useDashboardData(): DashboardDataState {
@@ -558,10 +696,12 @@ function App() {
   const [isDailyCompareOpen, setDailyCompareOpen] = useState(false);
   const [firstPlantId, setFirstPlantId] = useState("");
   const [secondPlantId, setSecondPlantId] = useState("");
+  const [plantComparisonDate, setPlantComparisonDate] = useState("");
   const [comparisonPlants, setComparisonPlants] = useState<readonly PlantComparison[]>([]);
+  const [comparisonPlantCache, setComparisonPlantCache] = useState<Record<string, PlantComparison>>({});
   const [comparisonError, setComparisonError] = useState("");
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
-  const [infoModal, setInfoModal] = useState<"latestRoi" | "netPayment" | "totalExport" | "totalImport" | "usdRate" | "forecast" | "investment" | null>(null);
+  const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
   const lang = APP_LANG;
   const t = i18n[lang];
   const monthNames = useMemo(
@@ -583,7 +723,8 @@ function App() {
     const previous = dataState.dailyRows.at(-2);
     if (!firstDay && previous) setFirstDay(previous.month);
     if (!secondDay && latest) setSecondDay(latest.month);
-  }, [dataState.dailyRows, firstDay, secondDay]);
+    if (!plantComparisonDate) setPlantComparisonDate(dateKey(new Date()));
+  }, [dataState.dailyRows, firstDay, plantComparisonDate, secondDay]);
 
   useEffect(() => {
     if (viewMode !== "daily") setDailyCompareOpen(false);
@@ -594,11 +735,43 @@ function App() {
     [dataState.plantId, dataState.readablePlantIds],
   );
 
+  const activePlantComparison = useMemo<PlantComparison>(() => ({
+    plantId: dataState.plantId,
+    rows: dataState.rows,
+    dailyRows: dataState.dailyRows,
+    investmentUsd: dataState.investmentUsd,
+    launchDate: dataState.launchDate,
+    commercialDate: dataState.commercialDate,
+    sheetUpdatedAt: dataState.sheetUpdatedAt,
+  }), [
+    dataState.commercialDate,
+    dataState.dailyRows,
+    dataState.investmentUsd,
+    dataState.launchDate,
+    dataState.plantId,
+    dataState.rows,
+    dataState.sheetUpdatedAt,
+  ]);
+
   useEffect(() => {
     if (!readablePlantOptions.length) return;
     if (!firstPlantId) setFirstPlantId(dataState.plantId || readablePlantOptions[0]);
     if (!secondPlantId) setSecondPlantId(readablePlantOptions.find((plantId) => plantId !== (dataState.plantId || readablePlantOptions[0])) ?? readablePlantOptions[0]);
   }, [dataState.plantId, firstPlantId, readablePlantOptions, secondPlantId]);
+
+  const ensureComparisonPlant = async (plantId: string, from: string, to = from) => {
+    if (!plantId) return undefined;
+    if (plantId === dataState.plantId) return activePlantComparison;
+    const cacheKey = `${plantId}:${from}:${to}`;
+    if (comparisonPlantCache[cacheKey]) return comparisonPlantCache[cacheKey];
+
+    const plant = await loadPlantDateRange(plantId, from, to);
+    setComparisonPlantCache((current) => ({
+      ...current,
+      [cacheKey]: plant,
+    }));
+    return plant;
+  };
 
   useEffect(() => {
     if (!infoModal) return undefined;
@@ -613,29 +786,27 @@ function App() {
     return filteredMonthlyRows(dataState.rows, range, monthFilter, yearFilter);
   }, [dataState.rows, monthFilter, range, yearFilter]);
 
+  const plantComparisonDateOptions = useMemo(
+    () => [...dataState.dailyRows].reverse(),
+    [dataState.dailyRows],
+  );
+
   const runPlantComparison = async () => {
     const selectedPlantIds = [firstPlantId, secondPlantId].filter(Boolean);
-    if (selectedPlantIds.length < 2 || firstPlantId === secondPlantId) return;
+    if (selectedPlantIds.length < 2 || !plantComparisonDate) return;
 
     setPlantComparisonLoading(true);
     setComparisonError("");
 
     try {
       const loadedPlants = await Promise.all(
-        selectedPlantIds.map((plantId) => (
-          plantId === dataState.plantId
-            ? Promise.resolve({
-              plantId: dataState.plantId,
-              rows: dataState.rows,
-              dailyRows: dataState.dailyRows,
-              investmentUsd: dataState.investmentUsd,
-              launchDate: dataState.launchDate,
-              sheetUpdatedAt: dataState.sheetUpdatedAt,
-            })
-            : loadPlantData(plantId)
-        )),
+        selectedPlantIds.map((plantId) => ensureComparisonPlant(plantId, plantComparisonDate)),
       );
-      setComparisonPlants(loadedPlants);
+      const plants = loadedPlants.filter((plant): plant is PlantComparison => Boolean(plant));
+      if (!plants.every((plant) => plant.dailyRows.some((row) => dateKey(row.date) === plantComparisonDate))) {
+        throw new Error("Selected date is not available for one of the plants");
+      }
+      setComparisonPlants(plants);
     } catch (error) {
       setComparisonError(error instanceof Error ? error.message : "Could not load plant comparison");
     } finally {
@@ -713,14 +884,15 @@ function App() {
 
   const forecast = useMemo(() => {
     const today = new Date();
+    const forecastAsOf = dataState.sheetUpdatedAt ?? today;
     const currentMonthRow = dataState.rows.find((row) => sameMonth(row.date, today)) ?? dataState.rows.at(-1);
     if (!currentMonthRow) return null;
     const currentIndex = dataState.rows.findIndex((row) => sameMonth(row.date, currentMonthRow.date));
     const previousMonthRow = currentIndex > 0 ? dataState.rows[currentIndex - 1] : undefined;
 
-    const production = forecastMonthValue(currentMonthRow.production, currentMonthRow.date);
-    const roi = forecastMonthValue(rowRoiMoney(currentMonthRow, currency), currentMonthRow.date);
-    const income = forecastMonthValue(moneyFromUah(currentMonthRow.electricityPayment, currency, currentMonthRow.usdRate), currentMonthRow.date);
+    const production = forecastMonthValue(currentMonthRow.production, currentMonthRow.date, forecastAsOf);
+    const roi = forecastMonthValue(rowRoiMoney(currentMonthRow, currency), currentMonthRow.date, forecastAsOf);
+    const income = forecastMonthValue(moneyFromUah(currentMonthRow.electricityPayment, currency, currentMonthRow.usdRate), currentMonthRow.date, forecastAsOf);
     const previousRoi = previousMonthRow ? rowRoiMoney(previousMonthRow, currency) : 0;
     const previousIncome = previousMonthRow ? moneyFromUah(previousMonthRow.electricityPayment, currency, previousMonthRow.usdRate) : 0;
 
@@ -734,13 +906,77 @@ function App() {
       income,
       incomeDelta: previousMonthRow ? income - previousIncome : 0,
     };
-  }, [currency, dataState.rows]);
+  }, [currency, dataState.rows, dataState.sheetUpdatedAt]);
 
   const showPlaceholders = dataState.isLoading;
   const infoModalContent = useMemo(() => {
+    if (typeof infoModal === "object" && infoModal?.kind === "importSplit") {
+      const row = infoModal.row;
+      return {
+        title: `${t.import} · ${row.month}`,
+        body: (
+          <SplitInfo
+            t={t}
+            lang={lang}
+            total={row.importTotal}
+            day={row.importDay}
+            night={row.importNight}
+          />
+        ),
+      };
+    }
+    if (typeof infoModal === "object" && infoModal?.kind === "consumedSplit") {
+      const row = infoModal.row;
+      return {
+        title: `${t.consumed} · ${row.month}`,
+        body: (
+          <SplitInfo
+            t={t}
+            lang={lang}
+            total={row.consumedTotal}
+            day={row.consumedDay}
+            night={row.consumedNight}
+          />
+        ),
+      };
+    }
+    if (typeof infoModal === "object" && infoModal?.kind === "exportPrice") {
+      const row = infoModal.row;
+      const grossPrice = moneyFromUah(row.exportPrice, currency, row.usdRate);
+      const netPrice = moneyFromUah(netExportPrice(row), currency, row.usdRate);
+      return {
+        title: `${t.exportPrice} · ${row.month}`,
+        body: (
+          <PriceInfo
+            rows={[
+              { label: t.grossExportPrice, value: `${formatDisplayMoney(grossPrice, currency, lang)} / ${energyUnit(lang)}` },
+              { label: t.vat, value: `${formatNumber(row.exportVat, 2, 2)}%` },
+              { label: t.militaryTax, value: `${formatNumber(row.exportMilitary, 2, 2)}%` },
+              { label: t.netExportPrice, value: `${formatDisplayMoney(netPrice, currency, lang)} / ${energyUnit(lang)}` },
+            ]}
+          />
+        ),
+      };
+    }
+    if (typeof infoModal === "object" && infoModal?.kind === "netPayment") {
+      const row = infoModal.row;
+      return {
+        title: `${t.netPayment} · ${row.month}`,
+        body: (
+          <NetPaymentInfo
+            row={row}
+            t={t}
+            currency={currency}
+            lang={lang}
+          />
+        ),
+      };
+    }
     if (infoModal === "latestRoi") return { title: t.latestRoi, body: t.latestRoiInfo };
-    if (infoModal === "netPayment") return { title: t.netPayment, body: t.netPaymentInfo };
+    if (infoModal === "netPayment") return { title: t.netPayment, body: t.netPaymentLogic };
     if (infoModal === "usdRate") return { title: "USD/UAH", body: t.usdRateInfo };
+    if (infoModal === "importPrice") return { title: `${t.import} ${t.exportPrice}`, body: t.importPriceInfo };
+    if (infoModal === "roi") return { title: t.roi, body: t.roiInfo };
     if (infoModal === "forecast") return { title: t.forecast, body: t.forecastInfo };
     if (infoModal === "investment") return { title: t.investment, body: t.investmentInfo };
     if (infoModal === "totalExport") {
@@ -795,10 +1031,17 @@ function App() {
                 <Info size={14} />
               </button>
             </div>
+            <div className="segmented currency" aria-label={t.currency}>
+              {(["UAH", "USD"] as Currency[]).map((item) => (
+                <button key={item} className={currency === item ? "selected" : ""} onClick={() => setCurrency(item)}>
+                  {item}
+                </button>
+              ))}
+            </div>
             <div className="segmented view" aria-label="View">
-              {(["monthly", "daily"] as ViewMode[]).map((item) => (
+              {(["monthly", "daily", "comparison"] as ViewMode[]).map((item) => (
                 <button key={item} className={viewMode === item ? "selected" : ""} onClick={() => setViewMode(item)}>
-                  {item === "monthly" ? t.monthly : t.daily}
+                  {item === "monthly" ? t.monthly : item === "daily" ? t.daily : t.comparison}
                 </button>
               ))}
             </div>
@@ -814,20 +1057,13 @@ function App() {
                   </button>
                 ))}
               </div>
-            ) : (
+            ) : viewMode === "daily" ? (
               <div className="segmented daily-tools" aria-label={t.compareDays}>
                 <button type="button" className={isDailyCompareOpen ? "selected" : ""} onClick={() => setDailyCompareOpen(true)}>
                   {t.compareDays}
                 </button>
               </div>
-            )}
-            <div className="segmented currency" aria-label={t.currency}>
-              {(["UAH", "USD"] as Currency[]).map((item) => (
-                <button key={item} className={currency === item ? "selected" : ""} onClick={() => setCurrency(item)}>
-                  {item}
-                </button>
-              ))}
-            </div>
+            ) : null}
             <button
               type="button"
               className={`icon-button refresh-button${dataState.isRefreshing ? " is-refreshing" : ""}`}
@@ -867,7 +1103,43 @@ function App() {
               t={t}
               currency={currency}
               lang={lang}
+              onUsdRateInfo={() => setInfoModal("usdRate")}
+              onImportPriceInfo={() => setInfoModal("importPrice")}
+              onNetPaymentHeaderInfo={() => setInfoModal("netPayment")}
+              onRoiInfo={() => setInfoModal("roi")}
+              onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
+              onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
+              onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
+              onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
             />
+          )
+        ) : viewMode === "comparison" ? (
+          showPlaceholders ? (
+            <KpiSkeletonGrid />
+          ) : dataState.readablePlantIds.length ? (
+            <PlantComparisonSection
+              activePlantId={dataState.plantId}
+              availablePlantIds={readablePlantOptions}
+              firstPlantId={firstPlantId}
+              secondPlantId={secondPlantId}
+              plantComparisonDate={plantComparisonDate}
+              plantComparisonDateOptions={plantComparisonDateOptions}
+              setFirstPlantId={setFirstPlantId}
+              setSecondPlantId={setSecondPlantId}
+              setPlantComparisonDate={setPlantComparisonDate}
+              onCompare={runPlantComparison}
+              plants={comparisonPlants}
+              isLoading={isPlantComparisonLoading}
+              error={comparisonError}
+              t={t}
+              currency={currency}
+              lang={lang}
+            />
+          ) : (
+            <div className="notice">
+              <strong>{t.plantComparison}</strong>
+              <small>{t.comparisonHint}</small>
+            </div>
           )
         ) : (
           <>
@@ -1005,27 +1277,6 @@ function App() {
           ) : null}
         </section>
 
-        {!showPlaceholders && dataState.readablePlantIds.length ? (
-          <PlantComparisonSection
-            activePlantId={dataState.plantId}
-            availablePlantIds={readablePlantOptions}
-            firstPlantId={firstPlantId}
-            secondPlantId={secondPlantId}
-            setFirstPlantId={setFirstPlantId}
-            setSecondPlantId={setSecondPlantId}
-            onCompare={runPlantComparison}
-            plants={comparisonPlants}
-            isLoading={isPlantComparisonLoading}
-            error={comparisonError}
-            range={range}
-            monthFilter={monthFilter}
-            yearFilter={yearFilter}
-            t={t}
-            currency={currency}
-            lang={lang}
-          />
-        ) : null}
-
         <section className="payback-band">
           {showPlaceholders ? (
             <>
@@ -1147,7 +1398,21 @@ function App() {
           {showPlaceholders ? (
             <DataTableSkeleton />
           ) : (
-            <DataTable rows={rows} t={t} currency={currency} lang={lang} onUsdRateInfo={() => setInfoModal("usdRate")} />
+            <DataTable
+              rows={rows}
+              period="monthly"
+              t={t}
+              currency={currency}
+              lang={lang}
+              onUsdRateInfo={() => setInfoModal("usdRate")}
+              onImportPriceInfo={() => setInfoModal("importPrice")}
+              onNetPaymentHeaderInfo={() => setInfoModal("netPayment")}
+              onRoiInfo={() => setInfoModal("roi")}
+              onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
+              onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
+              onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
+              onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
+            />
           )}
         </section>
           </>
@@ -1169,7 +1434,7 @@ function App() {
                   <X size={18} />
                 </button>
               </div>
-              <p>{infoModalContent.body}</p>
+              <div className="info-modal-body">{infoModalContent.body}</div>
             </section>
           </div>
         )}
@@ -1287,15 +1552,15 @@ function PlantComparisonSection({
   availablePlantIds,
   firstPlantId,
   secondPlantId,
+  plantComparisonDate,
+  plantComparisonDateOptions,
   setFirstPlantId,
   setSecondPlantId,
+  setPlantComparisonDate,
   onCompare,
   plants,
   isLoading,
   error,
-  range,
-  monthFilter,
-  yearFilter,
   t,
   currency,
   lang,
@@ -1304,19 +1569,25 @@ function PlantComparisonSection({
   readonly availablePlantIds: readonly string[];
   readonly firstPlantId: string;
   readonly secondPlantId: string;
+  readonly plantComparisonDate: string;
+  readonly plantComparisonDateOptions: readonly MonthRow[];
   readonly setFirstPlantId: (plantId: string) => void;
   readonly setSecondPlantId: (plantId: string) => void;
+  readonly setPlantComparisonDate: (date: string) => void;
   readonly onCompare: () => void;
   readonly plants: readonly PlantComparison[];
   readonly isLoading: boolean;
   readonly error: string;
-  readonly range: RangeKey;
-  readonly monthFilter: string;
-  readonly yearFilter: string;
   readonly t: Record<string, string>;
   readonly currency: Currency;
   readonly lang: Lang;
 }) {
+  const comparedPlants = plants.map((plant) => ({
+    ...plant,
+    selectedDate: plantComparisonDate,
+    row: plant.dailyRows.find((item) => dateKey(item.date) === plantComparisonDate),
+  }));
+
   return (
     <section className="plant-comparison-section">
       <div className="section-heading">
@@ -1326,6 +1597,16 @@ function PlantComparisonSection({
         </div>
       </div>
       <div className="plant-comparison-controls">
+        <label>
+          <span>{t.compareDate}</span>
+          <input
+            type="date"
+            value={plantComparisonDate}
+            min={firstDateKey(plantComparisonDateOptions)}
+            max={dateKey(new Date())}
+            onChange={(event) => setPlantComparisonDate(event.target.value)}
+          />
+        </label>
         <label>
           <span>{t.compareFirstPlant}</span>
           <select value={firstPlantId} onChange={(event) => setFirstPlantId(event.target.value)}>
@@ -1346,45 +1627,118 @@ function PlantComparisonSection({
             ))}
           </select>
         </label>
-        <button type="button" onClick={onCompare} disabled={isLoading || !firstPlantId || !secondPlantId || firstPlantId === secondPlantId}>
+        <button
+          type="button"
+          onClick={onCompare}
+          disabled={isLoading || !firstPlantId || !secondPlantId || !plantComparisonDate}
+        >
           {isLoading ? "..." : t.compare}
         </button>
       </div>
       {error ? <small className="negative">{error}</small> : null}
-      <div className="plant-comparison-grid">
-        {plants.map((plant) => {
-          const rows = filteredMonthlyRows(plant.rows, range, monthFilter, yearFilter);
-          const production = rows.reduce((sum, row) => sum + row.production, 0);
-          const roi = sumRowsRoiMoney(rows, currency);
-          const net = sumRowsFromUah(rows, (row) => row.electricityPayment, currency);
-          const latest = rows.at(-1);
-
-          return (
-            <article className="plant-comparison-card" key={plant.plantId}>
-              <div className="plant-comparison-head">
-                <h3>{plant.plantId}</h3>
-                {plant.plantId === activePlantId ? <span>{t.activePlant}</span> : null}
-              </div>
-              <div className="plant-comparison-metrics">
-                <span>
-                  <small>{t.production}</small>
-                  <strong>{formatKwh(production, lang)}</strong>
-                </span>
-                <span>
-                  <small>{t.roi}</small>
-                  <strong className={roi >= 0 ? "positive" : "negative"}>{formatDisplayMoney(roi, currency, lang)}</strong>
-                </span>
-                <span>
-                  <small>{t.net}</small>
-                  <strong className={net >= 0 ? "positive" : "negative"}>{formatDisplayMoney(net, currency, lang)}</strong>
-                </span>
-              </div>
-              <small className="plant-comparison-period">{latest ? formatPeriodLabel(latest, lang) : "-"}</small>
-            </article>
-          );
-        })}
-      </div>
+      <PlantComparisonCharts plants={comparedPlants} activePlantId={activePlantId} t={t} currency={currency} lang={lang} />
     </section>
+  );
+}
+
+function PlantComparisonCharts({
+  plants,
+  activePlantId,
+  t,
+  currency,
+  lang,
+}: {
+  readonly plants: readonly {
+    readonly plantId: string;
+    readonly selectedDate: string;
+    readonly row?: MonthRow;
+  }[];
+  readonly activePlantId: string;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}) {
+  if (!plants.length) return null;
+
+  const items = [
+    {
+      title: t.production,
+      values: plants.map((plant) => plant.row?.production ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.amber,
+    },
+    {
+      title: t.roi,
+      values: plants.map((plant) => (plant.row ? rowRoiMoney(plant.row, currency) : 0)),
+      format: (value: number) => formatDisplayMoney(value, currency, lang),
+      color: colors.green,
+    },
+    {
+      title: t.net,
+      values: plants.map((plant) => (plant.row ? moneyFromUah(plant.row.electricityPayment, currency, plant.row.usdRate) : 0)),
+      format: (value: number) => formatDisplayMoney(value, currency, lang),
+      color: colors.blue,
+    },
+  ];
+
+  return (
+    <div className="plant-comparison-chart-grid">
+      {items.map((item) => (
+        <article className="plant-comparison-chart" key={item.title}>
+          <h3>{item.title}</h3>
+          <div className="comparison-bars">
+            {plants.map((plant, index) => (
+              <ComparisonBar
+                key={`${item.title}-${plant.plantId}-${plant.selectedDate}-${index}`}
+                label={plant.plantId}
+                detail={plant.row ? formatDayLabel(plant.row.date, lang) : plant.selectedDate || "-"}
+                value={item.values[index] ?? 0}
+                formattedValue={item.format(item.values[index] ?? 0)}
+                max={Math.max(...item.values.map((value) => Math.abs(value)), 1)}
+                color={item.color}
+                isActive={plant.plantId === activePlantId}
+              />
+            ))}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ComparisonBar({
+  label,
+  detail,
+  value,
+  formattedValue,
+  max,
+  color,
+  isActive,
+}: {
+  readonly label: string;
+  readonly detail: string;
+  readonly value: number;
+  readonly formattedValue: string;
+  readonly max: number;
+  readonly color: string;
+  readonly isActive: boolean;
+}) {
+  const width = `${Math.max(3, (Math.abs(value) / max) * 100)}%`;
+
+  return (
+    <div className="comparison-bar-row">
+      <div className="comparison-bar-label">
+        <span className="comparison-bar-name">
+          <strong>{label}</strong>
+          {isActive ? <i>{i18n[APP_LANG].activePlant}</i> : null}
+        </span>
+        <small>{detail}</small>
+      </div>
+      <div className="comparison-bar-track">
+        <i style={{ width, background: value >= 0 ? color : colors.rose }} />
+      </div>
+      <b className={value >= 0 ? "positive" : "negative"}>{formattedValue}</b>
+    </div>
   );
 }
 
@@ -1642,8 +1996,8 @@ function RoiChart({
   investment,
 }: {
   readonly rows: readonly MonthRow[];
-  currency: Currency;
-  investment: number;
+  readonly currency: Currency;
+  readonly investment: number;
 }) {
   const t = i18n[APP_LANG];
   const isMobile = useMediaQuery("(max-width: 820px)");
@@ -2080,26 +2434,58 @@ function DailyDashboard({
   t,
   currency,
   lang,
+  onUsdRateInfo,
+  onImportPriceInfo,
+  onNetPaymentHeaderInfo,
+  onRoiInfo,
+  onImportSplitInfo,
+  onConsumedSplitInfo,
+  onExportPriceInfo,
+  onNetPaymentInfo,
 }: {
   readonly rows: readonly MonthRow[];
   readonly allRows: readonly MonthRow[];
-  firstDay: string;
-  secondDay: string;
-  setFirstDay: React.Dispatch<React.SetStateAction<string>>;
-  setSecondDay: React.Dispatch<React.SetStateAction<string>>;
-  isCompareOpen: boolean;
-  setCompareOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  t: Record<string, string>;
-  currency: Currency;
-  lang: Lang;
+  readonly firstDay: string;
+  readonly secondDay: string;
+  readonly setFirstDay: React.Dispatch<React.SetStateAction<string>>;
+  readonly setSecondDay: React.Dispatch<React.SetStateAction<string>>;
+  readonly isCompareOpen: boolean;
+  readonly setCompareOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+  readonly onUsdRateInfo: () => void;
+  readonly onImportPriceInfo: () => void;
+  readonly onNetPaymentHeaderInfo: () => void;
+  readonly onRoiInfo: () => void;
+  readonly onImportSplitInfo: (row: MonthRow) => void;
+  readonly onConsumedSplitInfo: (row: MonthRow) => void;
+  readonly onExportPriceInfo: (row: MonthRow) => void;
+  readonly onNetPaymentInfo: (row: MonthRow) => void;
 }) {
-  const latest = allRows.at(-1);
-  const chartRows = rows.length ? rows : allRows.slice(-30);
-  const dayOptions = useMemo(() => [...allRows].reverse(), [allRows]);
-  const first = allRows.find((row) => row.month === firstDay) ?? allRows.at(-2) ?? allRows.at(-1);
-  const second = allRows.find((row) => row.month === secondDay) ?? allRows.at(-1);
+  const monthOptions = useMemo(
+    () => [...new Map(allRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
+    [allRows, lang],
+  );
+  const [dailyMonthFilter, setDailyMonthFilter] = useState(monthOptions[0]?.[0] ?? "all");
+  const selectedRows = useMemo(
+    () => allRows.filter((row) => dailyMonthFilter === "all" || monthKey(row.date) === dailyMonthFilter),
+    [allRows, dailyMonthFilter],
+  );
+  const latest = selectedRows.at(-1);
+  const chartRows = selectedRows.length ? selectedRows : rows.length ? rows : allRows.slice(-30);
+  const dayOptions = useMemo(() => [...selectedRows].reverse(), [selectedRows]);
+  const first = selectedRows.find((row) => row.month === firstDay) ?? selectedRows.at(-2) ?? selectedRows.at(-1);
+  const second = selectedRows.find((row) => row.month === secondDay) ?? selectedRows.at(-1);
   const paymentDisplay = latest ? moneyFromUah(latest.electricityPayment, currency, latest.usdRate) : 0;
   const roiDisplay = latest ? rowRoiMoney(latest, currency) : 0;
+
+  useEffect(() => {
+    if (!monthOptions.length) return;
+    if (dailyMonthFilter !== "all" && !monthOptions.some(([key]) => key === dailyMonthFilter)) {
+      setDailyMonthFilter(monthOptions[0][0]);
+    }
+  }, [dailyMonthFilter, monthOptions]);
 
   useEffect(() => {
     if (!isCompareOpen) return undefined;
@@ -2236,6 +2622,41 @@ function DailyDashboard({
           <ImportMixChart rows={chartRows} />
         </ChartPanel>
       </section>
+
+      <section id="data" className="data-section">
+        <div className="section-heading">
+          <div>
+            <h2>{t.table}</h2>
+          </div>
+          <div className="filter-controls" aria-label={t.filterMonth}>
+            <label className="filter-box">
+              <select value={dailyMonthFilter} onChange={(event) => setDailyMonthFilter(event.target.value)}>
+                <option value="all">{t.allMonths}</option>
+                {monthOptions.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+        <DataTable
+          rows={selectedRows}
+          period="daily"
+          t={t}
+          currency={currency}
+          lang={lang}
+          onUsdRateInfo={onUsdRateInfo}
+          onImportPriceInfo={onImportPriceInfo}
+          onNetPaymentHeaderInfo={onNetPaymentHeaderInfo}
+          onRoiInfo={onRoiInfo}
+          onImportSplitInfo={onImportSplitInfo}
+          onConsumedSplitInfo={onConsumedSplitInfo}
+          onExportPriceInfo={onExportPriceInfo}
+          onNetPaymentInfo={onNetPaymentInfo}
+        />
+      </section>
     </>
   );
 }
@@ -2361,18 +2782,36 @@ function DailyCompareTable({
 
 function DataTable({
   rows,
+  period,
   t,
   currency,
   lang,
   onUsdRateInfo,
+  onImportPriceInfo,
+  onNetPaymentHeaderInfo,
+  onRoiInfo,
+  onImportSplitInfo,
+  onConsumedSplitInfo,
+  onExportPriceInfo,
+  onNetPaymentInfo,
 }: {
   readonly rows: readonly MonthRow[];
+  readonly period: "monthly" | "daily";
   readonly t: Record<string, string>;
   readonly currency: Currency;
   readonly lang: Lang;
   readonly onUsdRateInfo: () => void;
+  readonly onImportPriceInfo: () => void;
+  readonly onNetPaymentHeaderInfo: () => void;
+  readonly onRoiInfo: () => void;
+  readonly onImportSplitInfo: (row: MonthRow) => void;
+  readonly onConsumedSplitInfo: (row: MonthRow) => void;
+  readonly onExportPriceInfo: (row: MonthRow) => void;
+  readonly onNetPaymentInfo: (row: MonthRow) => void;
 }) {
   const newestFirst = [...rows].sort((a, b) => b.date.getTime() - a.date.getTime());
+  const kwh = energyUnit(lang);
+  const money = currencyUnit(currency);
   const totals = rows.reduce(
     (sum, row) => ({
       production: sum.production + row.production,
@@ -2398,38 +2837,50 @@ function DataTable({
       <table>
         <thead>
           <tr>
-            <Th label={t.month} />
-            <Th label={t.production} />
-            <Th label={t.export} />
-            <Th label={t.import} />
-            <Th label={t.consumed} />
-            <Th label={t.balance} />
-            <Th label={t.netExport} />
-            <Th label={t.importDay} />
-            <Th label={t.importNight} />
-            <Th label={t.netPayment} />
-            <Th label={t.roi} />
+            <Th label={period === "daily" ? t.tableDay : t.month} />
+            <Th label={`${t.production} (${kwh})`} />
+            <Th label={`${t.export} (${kwh})`} />
+            <Th label={`${t.import} (${kwh})`} />
+            <Th label={`${t.consumed} (${kwh})`} />
+            <Th label={`${t.balance} (${kwh})`} />
+            <Th label={`${t.netExport} (${money}/${kwh})`} />
+            <Th label={`${t.import} (${money}/${kwh})`} infoLabel={t.import} onInfo={onImportPriceInfo} />
+            <Th label={`${t.netPayment} (${money})`} infoLabel={t.netPayment} onInfo={onNetPaymentHeaderInfo} />
+            <Th label={`${t.roi} (${money})`} infoLabel={t.roi} onInfo={onRoiInfo} />
             <Th label="USD/UAH" infoLabel="USD/UAH" onInfo={onUsdRateInfo} />
           </tr>
         </thead>
         <tbody>
           {newestFirst.map((row) => (
             <tr key={row.month}>
-              <th>{row.month}</th>
-              <td>{formatKwh(row.production, lang)}</td>
-              <td>{formatKwh(row.export, lang)}</td>
-              <td>{formatKwh(row.importTotal, lang)}</td>
-              <td>{formatKwh(row.consumedTotal, lang)}</td>
+              <th>{period === "daily" ? formatDayMonthLabel(row.date, lang) : row.month}</th>
+              <td>{formatNumber(row.production, 2, 2)}</td>
+              <td>{formatNumber(row.export, 2, 2)}</td>
+              <td>
+                <TableValueInfo value={formatNumber(row.importTotal, 2, 2)} label={t.import} onInfo={() => onImportSplitInfo(row)} />
+              </td>
+              <td>
+                <TableValueInfo value={formatNumber(row.consumedTotal, 2, 2)} label={t.consumed} onInfo={() => onConsumedSplitInfo(row)} />
+              </td>
               <td className={row.balance < 0 ? "positive" : row.balance > 0 ? "negative" : "muted"}>
-                {formatKwh(row.balance, lang)}
+                {formatNumber(row.balance, 2, 2)}
               </td>
-              <td>{formatUahMoney(netExportPrice(row), currency, lang, row.usdRate)}</td>
-              <td>{formatUahMoney(row.importPriceDay, currency, lang, row.usdRate)}</td>
-              <td>{formatUahMoney(row.importPriceNight, currency, lang, row.usdRate)}</td>
+              <td>
+                <TableValueInfo
+                  value={formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang)}
+                  label={t.exportPrice}
+                  onInfo={() => onExportPriceInfo(row)}
+                />
+              </td>
+              <td>{formatTableMoney(moneyFromUah(row.importPriceDay, currency, row.usdRate), currency, lang)} / {formatTableMoney(moneyFromUah(row.importPriceNight, currency, row.usdRate), currency, lang)}</td>
               <td className={row.electricityPayment >= 0 ? "positive" : "negative"}>
-                {formatUahMoney(row.electricityPayment, currency, lang, row.usdRate)}
+                <TableValueInfo
+                  value={formatTableMoney(moneyFromUah(row.electricityPayment, currency, row.usdRate), currency, lang)}
+                  label={t.netPayment}
+                  onInfo={() => onNetPaymentInfo(row)}
+                />
               </td>
-              <td className="positive">{formatDisplayMoney(rowRoiMoney(row, currency), currency, lang)}</td>
+              <td className="positive">{formatTableMoney(rowRoiMoney(row, currency), currency, lang)}</td>
               <td>{formatNumber(row.usdRate, 2, 2)}</td>
             </tr>
           ))}
@@ -2437,26 +2888,375 @@ function DataTable({
         <tfoot>
           <tr>
             <th>{t.total}</th>
-            <td>{formatKwh(totals.production, lang)}</td>
-            <td>{formatKwh(totals.export, lang)}</td>
-            <td>{formatKwh(totals.importTotal, lang)}</td>
-            <td>{formatKwh(totals.consumedTotal, lang)}</td>
+            <td>{formatNumber(totals.production, 2, 2)}</td>
+            <td>{formatNumber(totals.export, 2, 2)}</td>
+            <td>{formatNumber(totals.importTotal, 2, 2)}</td>
+            <td>{formatNumber(totals.consumedTotal, 2, 2)}</td>
             <td className={totals.balance < 0 ? "positive" : totals.balance > 0 ? "negative" : "muted"}>
-              {formatKwh(totals.balance, lang)}
+              {formatNumber(totals.balance, 2, 2)}
             </td>
-            <td className="muted">-</td>
             <td className="muted">-</td>
             <td className="muted">-</td>
             <td className={totals.electricityPayment >= 0 ? "positive" : "negative"}>
-              {formatDisplayMoney(totals.electricityPayment, currency, lang)}
+              {formatTableMoney(totals.electricityPayment, currency, lang)}
             </td>
-            <td className="positive">{formatDisplayMoney(totals.roi, currency, lang)}</td>
+            <td className="positive">{formatTableMoney(totals.roi, currency, lang)}</td>
             <td className="muted">-</td>
           </tr>
         </tfoot>
       </table>
     </div>
   );
+}
+
+function TableValueInfo({
+  value,
+  label,
+  onInfo,
+}: {
+  readonly value: string;
+  readonly label: string;
+  readonly onInfo: () => void;
+}) {
+  return (
+    <span className="table-value-info">
+      {value}
+      <button type="button" className="table-info-button" aria-label={label} onClick={onInfo}>
+        <Info size={14} />
+      </button>
+    </span>
+  );
+}
+
+function SplitInfo({
+  t,
+  lang,
+  total,
+  day,
+  night,
+}: {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly total: number;
+  readonly day: number;
+  readonly night: number;
+}) {
+  return (
+    <dl className="split-info">
+      <div>
+        <dt>{t.total}</dt>
+        <dd>{formatKwh(total, lang)}</dd>
+      </div>
+      <div>
+        <dt>{t.day}</dt>
+        <dd>{formatKwh(day, lang)}</dd>
+      </div>
+      <div>
+        <dt>{t.night}</dt>
+        <dd>{formatKwh(night, lang)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function PriceInfo({
+  rows,
+}: {
+  readonly rows: readonly {
+    readonly label: string;
+    readonly value: string;
+  }[];
+}) {
+  return (
+    <dl className="split-info">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt>{row.label}</dt>
+          <dd>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function NetPaymentInfo({
+  row,
+  t,
+  currency,
+  lang,
+}: {
+  readonly row: MonthRow;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}) {
+  const displayMoney = (value: number) => formatDisplayMoney(moneyFromUah(value, currency, row.usdRate), currency, lang);
+  const displayMoneyMath = (value: number): React.ReactNode => {
+    const converted = displayMoney(value);
+    if (currency === "UAH") return <FormulaResult>{converted}</FormulaResult>;
+    return (
+      <>
+        {formatMoney(value, "UAH", lang)} / {formatNumber(row.usdRate, 2, 2)} = <FormulaResult>{converted}</FormulaResult>
+      </>
+    );
+  };
+  const importTotalValue = Math.max(row.importTotal, 0);
+  const dayCost = row.consumedDay * row.importPriceDay;
+  const nightCost = row.consumedNight * row.importPriceNight;
+  const inputRows: MathInfoRow[] = [
+    {
+      label: t.formulaInputs,
+      value: (
+        <StackedValues
+          rows={[
+            { label: t.import, value: `${formatKwh(row.importTotal, lang)} (${formatKwh(row.importDay, lang)} / ${formatKwh(row.importNight, lang)})` },
+            { label: t.export, value: formatKwh(row.export, lang) },
+            { label: t.balance, value: formatKwh(row.balance, lang) },
+            { label: t.consumed, value: `${formatKwh(row.consumedTotal, lang)} (${formatKwh(row.consumedDay, lang)} / ${formatKwh(row.consumedNight, lang)})` },
+          ]}
+        />
+      ),
+    },
+    {
+      label: t.importPrices,
+      value: (
+        <StackedValues
+          rows={[
+            { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
+            { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
+          ]}
+        />
+      ),
+    },
+    {
+      label: t.exportPriceInput,
+      value: (
+        <StackedValues
+          rows={[
+            { label: t.grossExportPrice, value: `${displayMoney(row.exportPrice)} / ${energyUnit(lang)}` },
+            { label: t.vat, value: `${formatNumber(row.exportVat, 2, 2)}%` },
+            { label: t.militaryTax, value: `${formatNumber(row.exportMilitary, 2, 2)}%` },
+            { label: t.netExportPrice, value: `${displayMoney(netExportPrice(row))} / ${energyUnit(lang)}` },
+          ]}
+        />
+      ),
+    },
+  ];
+  const rows: MathInfoRow[] = [
+    ...inputRows,
+    {
+      label: t.electricityCostWithoutSolar,
+      value: (
+        <StackedValues
+          rows={[
+            {
+              label: t.day,
+              value: (
+                <>
+                  {displayMoneyMath(dayCost)} = {formatKwh(row.consumedDay, lang)} × {displayMoney(row.importPriceDay)}
+                </>
+              ),
+            },
+            {
+              label: t.night,
+              value: (
+                <>
+                  {displayMoneyMath(nightCost)} = {formatKwh(row.consumedNight, lang)} × {displayMoney(row.importPriceNight)}
+                </>
+              ),
+            },
+            {
+              label: t.total,
+              value: (
+                <>
+                  {displayMoneyMath(row.consumedPayment)} = {displayMoney(dayCost)} + {displayMoney(nightCost)}
+                </>
+              ),
+            },
+          ]}
+        />
+      ),
+    },
+  ];
+
+  if (!row.isCommercial) {
+    rows.push(
+      {
+        label: t.exportedOffset,
+        value: `${t.exportUnpaid}: ${formatKwh(row.export, lang)} → ${displayMoney(0)}`,
+      },
+      {
+        label: t.netPayment,
+        value: (
+          <>
+            {displayMoneyMath(row.electricityPayment)} = -({formatKwh(row.importDay, lang)} × {displayMoney(row.importPriceDay)} + {formatKwh(row.importNight, lang)} × {displayMoney(row.importPriceNight)})
+          </>
+        ),
+      },
+    );
+  } else if (row.balance < 0) {
+    const surplus = Math.abs(row.balance);
+    rows.push(
+      {
+        label: t.netSurplus,
+        value: (
+          <>
+            <FormulaResult>{formatKwh(surplus, lang)}</FormulaResult> = {formatKwh(row.export, lang)} - {formatKwh(row.importTotal, lang)}
+          </>
+        ),
+      },
+      {
+        label: t.netPayment,
+        value: (
+          <>
+            {displayMoneyMath(row.electricityPayment)} = {formatKwh(surplus, lang)} × {displayMoney(netExportPrice(row))}
+          </>
+        ),
+      },
+    );
+  } else if (importTotalValue <= 0) {
+    rows.push({
+      label: t.netPayment,
+      value: displayMoneyMath(row.electricityPayment),
+    });
+  } else {
+    const dayShare = row.importDay / importTotalValue;
+    const nightShare = row.importNight / importTotalValue;
+    const coveredDay = row.export * dayShare;
+    const coveredNight = row.export * nightShare;
+    const coveredTotal = coveredDay + coveredNight;
+    const remainingDay = row.importDay - coveredDay;
+    const remainingNight = row.importNight - coveredNight;
+    const remainingTotal = remainingDay + remainingNight;
+    rows.push(
+      {
+        label: t.exportedOffset,
+        value: (
+          <StackedValues
+            rows={[
+              {
+                label: t.day,
+                value: (
+                  <>
+                    <FormulaResult>{formatKwh(coveredDay, lang)}</FormulaResult> = {formatKwh(row.export, lang)} × {formatNumber(dayShare * 100, 2, 2)}% ({formatKwh(row.importDay, lang)} / {formatKwh(row.importTotal, lang)})
+                  </>
+                ),
+              },
+              {
+                label: t.night,
+                value: (
+                  <>
+                    <FormulaResult>{formatKwh(coveredNight, lang)}</FormulaResult> = {formatKwh(row.export, lang)} × {formatNumber(nightShare * 100, 2, 2)}% ({formatKwh(row.importNight, lang)} / {formatKwh(row.importTotal, lang)})
+                  </>
+                ),
+              },
+              {
+                label: t.total,
+                value: (
+                  <>
+                    <FormulaResult>{formatKwh(coveredTotal, lang)}</FormulaResult> = {formatKwh(coveredDay, lang)} + {formatKwh(coveredNight, lang)}
+                  </>
+                ),
+              },
+            ]}
+          />
+        ),
+      },
+      {
+        label: t.remainingImport,
+        value: (
+          <StackedValues
+            rows={[
+              {
+                label: t.day,
+                value: (
+                  <>
+                    <FormulaResult>{formatKwh(remainingDay, lang)}</FormulaResult> = {formatKwh(row.importDay, lang)} - {formatKwh(coveredDay, lang)}
+                  </>
+                ),
+              },
+              {
+                label: t.night,
+                value: (
+                  <>
+                    <FormulaResult>{formatKwh(remainingNight, lang)}</FormulaResult> = {formatKwh(row.importNight, lang)} - {formatKwh(coveredNight, lang)}
+                  </>
+                ),
+              },
+              {
+                label: t.total,
+                value: (
+                  <>
+                    <FormulaResult>{formatKwh(remainingTotal, lang)}</FormulaResult> = {formatKwh(remainingDay, lang)} + {formatKwh(remainingNight, lang)}
+                  </>
+                ),
+              },
+            ]}
+          />
+        ),
+      },
+      {
+        label: t.netPayment,
+        value: (
+          <>
+            {displayMoneyMath(row.electricityPayment)} = -({formatKwh(remainingDay, lang)} × {displayMoney(row.importPriceDay)} + {formatKwh(remainingNight, lang)} × {displayMoney(row.importPriceNight)})
+          </>
+        ),
+      },
+    );
+  }
+
+  return <MathInfo rows={rows} />;
+}
+
+function MathInfo({
+  rows,
+}: {
+  readonly rows: readonly MathInfoRow[];
+}) {
+  return (
+    <dl className="math-info">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt>{row.label}</dt>
+          <dd>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+interface MathInfoRow {
+  readonly label: string;
+  readonly value: React.ReactNode;
+}
+
+function StackedValues({
+  rows,
+}: {
+  readonly rows: readonly {
+    readonly label: string;
+    readonly value: React.ReactNode;
+  }[];
+}) {
+  return (
+    <span className="stacked-values">
+      {rows.map((row) => (
+        <span key={row.label}>
+          <b>{row.label}</b>
+          <span>{row.value}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function FormulaResult({
+  children,
+}: {
+  readonly children: React.ReactNode;
+}) {
+  return <mark className="formula-result">{children}</mark>;
 }
 
 function Th({
