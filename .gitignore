@@ -8,6 +8,7 @@
 !/dashboard/
 /dashboard/*
 !/dashboard/**/
+!/dashboard/deploy.sh
 !/dashboard/index.html
 !/dashboard/package*.json
 !/dashboard/tsconfig.json
