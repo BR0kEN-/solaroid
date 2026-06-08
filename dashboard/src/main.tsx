@@ -11,15 +11,23 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { loadDashboardData, loadPlantGranularity } from "./data/supabase";
+import { loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
 import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
 import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
 import "./styles.css";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
 type ViewMode = "monthly" | "daily" | "comparison";
+type PlantComparisonMode = "daily" | "monthly" | "yearly";
 type Currency = "UAH" | "USD";
 type Lang = "en" | "uk";
+interface PlantComparisonResult {
+  readonly mode: PlantComparisonMode;
+  readonly date: string;
+  readonly month: string;
+  readonly year: string;
+  readonly plants: readonly PlantComparison[];
+}
 type InfoModal =
   | "latestRoi"
   | "netPayment"
@@ -67,12 +75,17 @@ const i18n = {
     soFar: "so far",
     forecastInfo: "Forecast values are projected from the current month daylight pace: value so far divided by elapsed daylight this month, then multiplied by total expected daylight for the month. The colored comparison shows the projected value against the previous month's actual value.",
     plantComparison: "Plant comparison",
+    compareDaily: "Daily",
+    compareMonthly: "Monthly",
+    compareYearly: "Yearly",
     activePlant: "current",
     compare: "Compare",
     compareFirstPlant: "First plant",
     compareSecondPlant: "Second plant",
     compareDate: "Date",
-    comparisonHint: "Select two plants and two dates to compare daily performance.",
+    compareMonth: "Month",
+    compareYear: "Year",
+    comparisonHint: "Select two plants and a period to compare performance.",
     latestRoi: "Latest ROI",
     latestRoiInfo: "ROI shows how much investment was effectively recovered during the latest month. It includes the value of electricity consumed from your own solar production plus any export income, minus grid electricity costs. Net payment is only the cash balance for the month: export income minus grid electricity costs.",
     refresh: "Refresh",
@@ -174,12 +187,17 @@ const i18n = {
     soFar: "зараз",
     forecastInfo: "Прогноз рахується за поточним темпом світлового часу місяця: значення зараз ділиться на кількість світлового часу, що вже минув у цьому місяці, і множиться на очікуваний світловий час усього місяця. Кольорове порівняння показує прогнозоване значення відносно фактичного значення попереднього місяця.",
     plantComparison: "Порівняння станцій",
+    compareDaily: "День",
+    compareMonthly: "Місяць",
+    compareYearly: "Рік",
     activePlant: "поточна",
     compare: "Порівняти",
     compareFirstPlant: "Перша станція",
     compareSecondPlant: "Друга станція",
     compareDate: "Дата",
-    comparisonHint: "Оберіть дві станції та дві дати для порівняння денних показників.",
+    compareMonth: "Місяць",
+    compareYear: "Рік",
+    comparisonHint: "Оберіть дві станції та період для порівняння показників.",
     latestRoi: "Останнє ПІ",
     latestRoiInfo: "ПІ показує, скільки інвестиції фактично повернулось за останній місяць. Воно включає вартість електроенергії, спожитої з власної генерації, плюс дохід від експорту, мінус витрати на електроенергію з мережі. Баланс — це лише грошовий результат місяця: дохід від експорту мінус витрати на електроенергію з мережі.",
     refresh: "Оновити",
@@ -378,6 +396,11 @@ function formatDeltaPct(delta: number, base: number) {
   if (!base) return "";
   const sign = delta > 0 ? "+" : "";
   return ` (${sign}${formatNumber((delta / Math.abs(base)) * 100)}%)`;
+}
+
+function chartLevel(value: number, max: number, minVisible = 3) {
+  if (value === 0) return 0;
+  return Math.max(minVisible, (Math.abs(value) / max) * 100);
 }
 
 function deltaTone(value: number) {
@@ -696,8 +719,11 @@ function App() {
   const [isDailyCompareOpen, setDailyCompareOpen] = useState(false);
   const [firstPlantId, setFirstPlantId] = useState("");
   const [secondPlantId, setSecondPlantId] = useState("");
+  const [plantComparisonMode, setPlantComparisonMode] = useState<PlantComparisonMode>("monthly");
   const [plantComparisonDate, setPlantComparisonDate] = useState("");
-  const [comparisonPlants, setComparisonPlants] = useState<readonly PlantComparison[]>([]);
+  const [plantComparisonMonth, setPlantComparisonMonth] = useState("");
+  const [plantComparisonYear, setPlantComparisonYear] = useState("");
+  const [comparisonResult, setComparisonResult] = useState<PlantComparisonResult | null>(null);
   const [comparisonPlantCache, setComparisonPlantCache] = useState<Record<string, PlantComparison>>({});
   const [comparisonError, setComparisonError] = useState("");
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
@@ -724,7 +750,13 @@ function App() {
     if (!firstDay && previous) setFirstDay(previous.month);
     if (!secondDay && latest) setSecondDay(latest.month);
     if (!plantComparisonDate) setPlantComparisonDate(dateKey(new Date()));
-  }, [dataState.dailyRows, firstDay, plantComparisonDate, secondDay]);
+    if (!plantComparisonMonth && latest) setPlantComparisonMonth(monthKey(latest.date));
+  }, [dataState.dailyRows, firstDay, plantComparisonDate, plantComparisonMonth, secondDay]);
+
+  useEffect(() => {
+    const latest = dataState.rows.at(-1);
+    if (!plantComparisonYear && latest) setPlantComparisonYear(String(latest.date.getFullYear()));
+  }, [dataState.rows, plantComparisonYear]);
 
   useEffect(() => {
     if (viewMode !== "daily") setDailyCompareOpen(false);
@@ -765,7 +797,7 @@ function App() {
     const cacheKey = `${plantId}:${granularity}`;
     if (comparisonPlantCache[cacheKey]) return comparisonPlantCache[cacheKey];
 
-    const plant = await loadPlantGranularity(plantId, granularity);
+    const plant = granularity === "all" ? await loadPlantData(plantId) : await loadPlantGranularity(plantId, granularity);
     setComparisonPlantCache((current) => ({
       ...current,
       [cacheKey]: plant,
@@ -791,22 +823,53 @@ function App() {
     [dataState.dailyRows],
   );
 
+  const plantComparisonMonthOptions = useMemo(
+    () => [...new Map(dataState.dailyRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
+    [dataState.dailyRows, lang],
+  );
+
+  const plantComparisonYearOptions = useMemo(
+    () => [...new Set(dataState.rows.map((row) => String(row.date.getFullYear())))].sort((a, b) => Number(b) - Number(a)),
+    [dataState.rows],
+  );
+
   const runPlantComparison = async () => {
     const selectedPlantIds = [firstPlantId, secondPlantId].filter(Boolean);
-    if (selectedPlantIds.length < 2 || !plantComparisonDate) return;
+    const selectedPeriod = plantComparisonMode === "yearly" ? plantComparisonYear : plantComparisonMode === "monthly" ? plantComparisonMonth : plantComparisonDate;
+    if (selectedPlantIds.length < 2 || !selectedPeriod) return;
 
     setPlantComparisonLoading(true);
     setComparisonError("");
 
     try {
+      const granularity = plantComparisonMode === "yearly" ? plantComparisonYear : plantComparisonMode === "monthly" ? "all" : plantComparisonDate;
       const loadedPlants = await Promise.all(
-        selectedPlantIds.map((plantId) => ensureComparisonPlant(plantId, plantComparisonDate)),
+        selectedPlantIds.map((plantId) => ensureComparisonPlant(plantId, granularity)),
       );
       const plants = loadedPlants.filter((plant): plant is PlantComparison => Boolean(plant));
-      if (!plants.every((plant) => plant.dailyRows.some((row) => dateKey(row.date) === plantComparisonDate))) {
-        throw new Error("Selected date is not available for one of the plants");
+      const hasSelectedPeriod = plants.every((plant) =>
+        plantComparisonMode === "yearly"
+          ? plant.rows.some((row) => String(row.date.getFullYear()) === plantComparisonYear)
+          : plantComparisonMode === "monthly"
+          ? plant.dailyRows.some((row) => monthKey(row.date) === plantComparisonMonth)
+          : plant.dailyRows.some((row) => dateKey(row.date) === plantComparisonDate),
+      );
+      if (!hasSelectedPeriod) {
+        throw new Error(
+          plantComparisonMode === "yearly"
+            ? "Selected year is not available for one of the plants"
+            : plantComparisonMode === "monthly"
+              ? "Selected month is not available for one of the plants"
+              : "Selected date is not available for one of the plants",
+        );
       }
-      setComparisonPlants(plants);
+      setComparisonResult({
+        mode: plantComparisonMode,
+        date: plantComparisonDate,
+        month: plantComparisonMonth,
+        year: plantComparisonYear,
+        plants,
+      });
     } catch (error) {
       setComparisonError(error instanceof Error ? error.message : "Could not load plant comparison");
     } finally {
@@ -1122,13 +1185,21 @@ function App() {
               availablePlantIds={readablePlantOptions}
               firstPlantId={firstPlantId}
               secondPlantId={secondPlantId}
+              plantComparisonMode={plantComparisonMode}
               plantComparisonDate={plantComparisonDate}
               plantComparisonDateOptions={plantComparisonDateOptions}
+              plantComparisonMonth={plantComparisonMonth}
+              plantComparisonMonthOptions={plantComparisonMonthOptions}
+              plantComparisonYear={plantComparisonYear}
+              plantComparisonYearOptions={plantComparisonYearOptions}
               setFirstPlantId={setFirstPlantId}
               setSecondPlantId={setSecondPlantId}
+              setPlantComparisonMode={setPlantComparisonMode}
               setPlantComparisonDate={setPlantComparisonDate}
+              setPlantComparisonMonth={setPlantComparisonMonth}
+              setPlantComparisonYear={setPlantComparisonYear}
               onCompare={runPlantComparison}
-              plants={comparisonPlants}
+              result={comparisonResult}
               isLoading={isPlantComparisonLoading}
               error={comparisonError}
               t={t}
@@ -1552,13 +1623,21 @@ function PlantComparisonSection({
   availablePlantIds,
   firstPlantId,
   secondPlantId,
+  plantComparisonMode,
   plantComparisonDate,
   plantComparisonDateOptions,
+  plantComparisonMonth,
+  plantComparisonMonthOptions,
+  plantComparisonYear,
+  plantComparisonYearOptions,
   setFirstPlantId,
   setSecondPlantId,
+  setPlantComparisonMode,
   setPlantComparisonDate,
+  setPlantComparisonMonth,
+  setPlantComparisonYear,
   onCompare,
-  plants,
+  result,
   isLoading,
   error,
   t,
@@ -1569,24 +1648,38 @@ function PlantComparisonSection({
   readonly availablePlantIds: readonly string[];
   readonly firstPlantId: string;
   readonly secondPlantId: string;
+  readonly plantComparisonMode: PlantComparisonMode;
   readonly plantComparisonDate: string;
   readonly plantComparisonDateOptions: readonly MonthRow[];
+  readonly plantComparisonMonth: string;
+  readonly plantComparisonMonthOptions: readonly [string, string][];
+  readonly plantComparisonYear: string;
+  readonly plantComparisonYearOptions: readonly string[];
   readonly setFirstPlantId: (plantId: string) => void;
   readonly setSecondPlantId: (plantId: string) => void;
+  readonly setPlantComparisonMode: (mode: PlantComparisonMode) => void;
   readonly setPlantComparisonDate: (date: string) => void;
+  readonly setPlantComparisonMonth: (month: string) => void;
+  readonly setPlantComparisonYear: (year: string) => void;
   readonly onCompare: () => void;
-  readonly plants: readonly PlantComparison[];
+  readonly result: PlantComparisonResult | null;
   readonly isLoading: boolean;
   readonly error: string;
   readonly t: Record<string, string>;
   readonly currency: Currency;
   readonly lang: Lang;
 }) {
-  const comparedPlants = plants.map((plant) => ({
+  const displayedResult = result?.mode === plantComparisonMode ? result : null;
+  const comparedPlants = (displayedResult?.plants ?? []).map((plant) => ({
     ...plant,
-    selectedDate: plantComparisonDate,
-    row: plant.dailyRows.find((item) => dateKey(item.date) === plantComparisonDate),
+    selectedDate: displayedResult?.date ?? plantComparisonDate,
+    row: plant.dailyRows.find((item) => dateKey(item.date) === (displayedResult?.date ?? plantComparisonDate)),
   }));
+  const compareDisabled =
+    isLoading ||
+    !firstPlantId ||
+    !secondPlantId ||
+    (plantComparisonMode === "yearly" ? !plantComparisonYear : plantComparisonMode === "monthly" ? !plantComparisonMonth : !plantComparisonDate);
 
   return (
     <section className="plant-comparison-section">
@@ -1595,18 +1688,49 @@ function PlantComparisonSection({
           <h2>{t.plantComparison}</h2>
           <p>{t.comparisonHint}</p>
         </div>
+        <div className="segmented plant-comparison-mode" aria-label={t.plantComparison}>
+          {(["yearly", "monthly", "daily"] as PlantComparisonMode[]).map((mode) => (
+            <button key={mode} type="button" className={plantComparisonMode === mode ? "selected" : ""} onClick={() => setPlantComparisonMode(mode)}>
+              {mode === "daily" ? t.compareDaily : mode === "yearly" ? t.compareYearly : t.compareMonthly}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="plant-comparison-controls">
-        <label>
-          <span>{t.compareDate}</span>
-          <input
-            type="date"
-            value={plantComparisonDate}
-            min={firstDateKey(plantComparisonDateOptions)}
-            max={dateKey(new Date())}
-            onChange={(event) => setPlantComparisonDate(event.target.value)}
-          />
-        </label>
+        {plantComparisonMode === "yearly" ? (
+          <label>
+            <span>{t.compareYear}</span>
+            <select value={plantComparisonYear} onChange={(event) => setPlantComparisonYear(event.target.value)}>
+              {plantComparisonYearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : plantComparisonMode === "monthly" ? (
+          <label>
+            <span>{t.compareMonth}</span>
+            <select value={plantComparisonMonth} onChange={(event) => setPlantComparisonMonth(event.target.value)}>
+              {plantComparisonMonthOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label>
+            <span>{t.compareDate}</span>
+            <input
+              type="date"
+              value={plantComparisonDate}
+              min={firstDateKey(plantComparisonDateOptions)}
+              max={dateKey(new Date())}
+              onChange={(event) => setPlantComparisonDate(event.target.value)}
+            />
+          </label>
+        )}
         <label>
           <span>{t.compareFirstPlant}</span>
           <select value={firstPlantId} onChange={(event) => setFirstPlantId(event.target.value)}>
@@ -1630,14 +1754,284 @@ function PlantComparisonSection({
         <button
           type="button"
           onClick={onCompare}
-          disabled={isLoading || !firstPlantId || !secondPlantId || !plantComparisonDate}
+          disabled={compareDisabled}
         >
           {isLoading ? "..." : t.compare}
         </button>
       </div>
       {error ? <small className="negative">{error}</small> : null}
-      <PlantComparisonCharts plants={comparedPlants} activePlantId={activePlantId} t={t} currency={currency} lang={lang} />
+      {plantComparisonMode === "yearly" || plantComparisonMode === "monthly" ? (
+        <PlantPeriodComparisonCharts
+          plants={displayedResult?.plants ?? []}
+          activePlantId={activePlantId}
+          mode={plantComparisonMode}
+          period={plantComparisonMode === "yearly" ? displayedResult?.year ?? "" : displayedResult?.month ?? ""}
+          t={t}
+          currency={currency}
+          lang={lang}
+        />
+      ) : (
+        <PlantComparisonCharts plants={comparedPlants} activePlantId={activePlantId} t={t} currency={currency} lang={lang} />
+      )}
     </section>
+  );
+}
+
+function PlantPeriodComparisonCharts({
+  plants,
+  activePlantId,
+  mode,
+  period,
+  t,
+  currency,
+  lang,
+}: {
+  readonly plants: readonly PlantComparison[];
+  readonly activePlantId: string;
+  readonly mode: "monthly" | "yearly";
+  readonly period: string;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}) {
+  if (!plants.length || !period) return null;
+
+  const periodPlants = plants.map((plant) => ({
+    plantId: plant.plantId,
+    rows:
+      mode === "yearly"
+        ? plant.rows.filter((row) => String(row.date.getFullYear()) === period)
+        : plant.dailyRows.filter((row) => monthKey(row.date) === period),
+  }));
+
+  if (!periodPlants.some((plant) => plant.rows.length)) return null;
+
+  const items = [
+    {
+      title: t.production,
+      value: (row: MonthRow) => row.production,
+      format: (value: number) => formatKwh(value, lang),
+      unit: energyUnit(lang),
+    },
+    {
+      title: t.export,
+      value: (row: MonthRow) => row.export,
+      format: (value: number) => formatKwh(value, lang),
+      unit: energyUnit(lang),
+    },
+    {
+      title: t.import,
+      value: (row: MonthRow) => row.importTotal,
+      format: (value: number) => formatKwh(value, lang),
+      unit: energyUnit(lang),
+    },
+    {
+      title: t.consumed,
+      value: (row: MonthRow) => row.consumedTotal,
+      format: (value: number) => formatKwh(value, lang),
+      unit: energyUnit(lang),
+    },
+    {
+      title: t.balance,
+      value: (row: MonthRow) => row.balance,
+      format: (value: number) => formatKwh(value, lang),
+      unit: energyUnit(lang),
+    },
+    {
+      title: t.roi,
+      value: (row: MonthRow) => rowRoiMoney(row, currency),
+      format: (value: number) => formatDisplayMoney(value, currency, lang),
+      unit: currencyUnit(currency),
+    },
+    {
+      title: t.netPayment,
+      value: (row: MonthRow) => moneyFromUah(row.electricityPayment, currency, row.usdRate),
+      format: (value: number) => formatDisplayMoney(value, currency, lang),
+      unit: currencyUnit(currency),
+    },
+  ];
+
+  return (
+    <div className="plant-comparison-chart-grid">
+      {items.map((item) => (
+        <article className="plant-comparison-chart chart-panel" key={item.title}>
+          <div className="chart-head plant-line-chart-head">
+            <h3>{item.title}</h3>
+            <div className="legend">
+              {periodPlants.map((plant, index) => (
+                <span key={plant.plantId}>
+                  <i style={{ background: comparisonLineColors[index % comparisonLineColors.length] }} /> {plant.plantId}
+                  {plant.plantId === activePlantId ? <em>{t.activePlant}</em> : null}
+                </span>
+              ))}
+            </div>
+          </div>
+          <PlantPeriodLineChart
+            plants={periodPlants}
+            mode={mode}
+            value={item.value}
+            format={item.format}
+            unit={item.unit}
+            lang={lang}
+          />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+const comparisonLineColors = [colors.amber, colors.blue];
+
+function PlantPeriodLineChart({
+  plants,
+  mode,
+  value,
+  format,
+  unit,
+  lang,
+}: {
+  readonly plants: readonly { readonly plantId: string; readonly rows: readonly MonthRow[] }[];
+  readonly mode: "monthly" | "yearly";
+  readonly value: (row: MonthRow) => number;
+  readonly format: (value: number) => string;
+  readonly unit: string;
+  readonly lang: Lang;
+}) {
+  const isMobile = useMediaQuery("(max-width: 820px)");
+  const width = 900;
+  const height = 280;
+  const pad = { left: 56, right: 22, top: 18, bottom: 42 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const periodKeys = useMemo(() => {
+    const keys = [...new Set(plants.flatMap((plant) => plant.rows.map((row) => dateKey(row.date))))].sort();
+    return isMobile ? keys.reverse() : keys;
+  }, [isMobile, plants]);
+  const values = plants.flatMap((plant) => plant.rows.map(value)).filter((item) => Number.isFinite(item));
+  const rawMin = Math.min(...values, 0);
+  const rawMax = Math.max(...values, 1);
+  const spread = rawMax - rawMin || 1;
+  const min = rawMin < 0 ? rawMin - spread * 0.04 : 0;
+  const max = rawMax + spread * 0.04;
+  const x = (date: string) => {
+    const index = Math.max(0, periodKeys.indexOf(date));
+    if (periodKeys.length <= 1) return pad.left + innerW / 2;
+    return pad.left + (index / (periodKeys.length - 1)) * innerW;
+  };
+  const y = (item: number) => pad.top + innerH - ((item - min) / (max - min || 1)) * innerH;
+  const rowByPlantAndDay = useMemo(
+    () =>
+      new Map(
+        plants.map((plant) => [
+          plant.plantId,
+          new Map(plant.rows.map((row) => [dateKey(row.date), row])),
+        ]),
+      ),
+    [plants],
+  );
+  const inspectors = useMemo(
+    () =>
+      new Map(
+        periodKeys.map((periodKey) => {
+          const date = new Date(`${periodKey}T00:00:00`);
+          return [
+            periodKey,
+            {
+              month: mode === "yearly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang),
+              items: plants.map((plant, index) => {
+                const row = rowByPlantAndDay.get(plant.plantId)?.get(periodKey);
+                return {
+                  label: plant.plantId,
+                  value: row ? format(value(row)) : "-",
+                  color: comparisonLineColors[index % comparisonLineColors.length],
+                };
+              }),
+            },
+          ];
+        }),
+      ),
+    [format, lang, mode, periodKeys, plants, rowByPlantAndDay, value],
+  );
+  const latestPeriod = [...periodKeys].sort().at(-1);
+  const { selection, target } = useChartInspector(latestPeriod ? inspectors.get(latestPeriod) ?? null : null);
+  const selectedPeriod = [...inspectors.entries()].find(([, inspector]) => inspector.month === selection?.month)?.[0];
+
+  return (
+    <>
+      <div className="chart-scroll plant-line-chart-scroll">
+        <svg className="chart plant-line-chart" viewBox={`0 0 ${width} ${height}`} role="img">
+          <g className="grid">
+            {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+              const tickValue = min + (max - min) * tick;
+              const tickY = y(tickValue);
+              return (
+                <g key={tick}>
+                  <line x1={pad.left} x2={width - pad.right} y1={tickY} y2={tickY} />
+                  <text x={pad.left - 10} y={tickY + 4} textAnchor="end">
+                    {formatAxisValue(tickValue)}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+          {min < 0 && max > 0 ? <line className="plant-line-zero" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} /> : null}
+          {plants.map((plant, plantIndex) => {
+            const points = plant.rows
+              .filter((row) => periodKeys.includes(dateKey(row.date)))
+              .map((row) => ({ row, x: x(dateKey(row.date)), y: y(value(row)), value: value(row) }))
+              .sort((first, second) => periodKeys.indexOf(dateKey(first.row.date)) - periodKeys.indexOf(dateKey(second.row.date)));
+            const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+            const color = comparisonLineColors[plantIndex % comparisonLineColors.length];
+            return (
+              <g key={plant.plantId}>
+                <path d={path} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                {points.map((point) => {
+                  const day = dateKey(point.row.date);
+                  return (
+                    <circle
+                      key={`${plant.plantId}-${point.row.month}`}
+                      className="plant-line-dot"
+                      cx={point.x}
+                      cy={point.y}
+                      r={selectedPeriod === day ? "5.5" : "4"}
+                      fill={color}
+                    />
+                  );
+                })}
+              </g>
+            );
+          })}
+          {periodKeys.map((periodKey) => {
+            const inspector = inspectors.get(periodKey);
+            const date = new Date(`${periodKey}T00:00:00`);
+            const xPosition = x(periodKey);
+            const targetWidth = Math.max(18, innerW / Math.max(periodKeys.length - 1, 1) * 0.48);
+            return (
+              <g key={periodKey}>
+                {inspector && (
+                  <MonthTarget
+                    x={xPosition - targetWidth / 2}
+                    y={pad.top}
+                    width={targetWidth}
+                    height={innerH}
+                    selection={inspector}
+                    active={selectedPeriod === periodKey}
+                    target={target}
+                  />
+                )}
+                <text className="plant-line-day-label" x={xPosition} y={height - 14} textAnchor="middle">
+                  {mode === "yearly" ? formatMonthOnly(date, lang) : formatDayMonthLabel(date, lang)}
+                </text>
+              </g>
+            );
+          })}
+          <text x={width - pad.right} y={pad.top + 4} textAnchor="end" className="plant-line-unit">
+            {unit}
+          </text>
+        </svg>
+      </div>
+      <ChartInspector selection={selection} hint={i18n[APP_LANG].tapBarOrDot} />
+    </>
   );
 }
 
@@ -1754,7 +2148,7 @@ function PlantComparisonCharts({
   return (
     <div className="plant-comparison-chart-grid">
       {items.map((item) => (
-        <article className="plant-comparison-chart" key={item.title}>
+        <article className="plant-comparison-chart chart-panel" key={item.title}>
           <h3>{item.title}</h3>
           <div className="comparison-bars">
             {plants.map((plant, index) => (
@@ -1796,7 +2190,7 @@ function ComparisonBar({
   readonly tone: string;
   readonly isActive: boolean;
 }) {
-  const width = `${Math.max(3, (Math.abs(value) / max) * 100)}%`;
+  const width = `${chartLevel(value, max)}%`;
 
   return (
     <div className="comparison-bar-row">
@@ -1808,7 +2202,7 @@ function ComparisonBar({
         <small>{detail}</small>
       </div>
       <div className="comparison-bar-track">
-        <i style={{ width, background: color }} />
+        <i style={{ width, minWidth: value === 0 ? 0 : undefined, background: color }} />
       </div>
       <b className={tone}>{formattedValue}</b>
     </div>
@@ -2819,8 +3213,8 @@ function DailyCompareTable({
           row.value === 0 ? "muted" : row.higherIsBetter ? (row.value > 0 ? "positive" : "negative") : row.value < 0 ? "positive" : "negative";
         const chartMax = Math.max(Math.abs(row.firstValue), Math.abs(row.secondValue), 1);
         const chartStyle = {
-          "--first-level": `${Math.max(8, (Math.abs(row.firstValue) / chartMax) * 100)}%`,
-          "--second-level": `${Math.max(8, (Math.abs(row.secondValue) / chartMax) * 100)}%`,
+          "--first-level": `${chartLevel(row.firstValue, chartMax, 8)}%`,
+          "--second-level": `${chartLevel(row.secondValue, chartMax, 8)}%`,
         } as React.CSSProperties;
         return (
           <article className="compare-card" key={row.label} style={chartStyle}>
