@@ -256,10 +256,20 @@ cd supabase/functions/ingest
 rtk deno check index.ts
 ```
 
+Supabase CLI login and project linking:
+
+```sh
+npx supabase login
+npx supabase link --project-ref PROJECT_REF
+npx supabase migration list --linked
+```
+
+Find `PROJECT_REF` in Supabase Dashboard -> Project Settings -> General -> Reference ID. The link command may ask for the remote database password.
+
 Supabase migrations are applied by the user, usually with:
 
 ```sh
-supabase db push
+npx supabase db push
 ```
 
 Do not run local Supabase tests unless the user asks. The user normally applies and verifies Supabase changes manually.
