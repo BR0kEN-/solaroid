@@ -41,6 +41,8 @@ interface ApiResponse {
   readonly ok: boolean
   readonly message?: string
   readonly plant?: PlantRecord
+  readonly year?: string
+  readonly years?: readonly string[]
   readonly days?: readonly DayRecord[]
   readonly months?: readonly MonthRecord[]
   readonly tariffs?: readonly TariffRecord[]
@@ -48,24 +50,18 @@ interface ApiResponse {
   readonly records?: readonly DayRecord[] | readonly MonthRecord[]
 }
 
-export async function loadDashboardData(): Promise<LoadedData> {
+export async function loadDashboardData(year?: string): Promise<LoadedData> {
   assertConfig()
 
-  const { plant, months, days, tariffs, reads } = await fetchDashboardData()
+  const { plant, months, days, tariffs, reads, year: loadedYear, years } = await fetchDashboardData(undefined, undefined, year)
   const loaded = toLoadedPlant({ plant, months, days, tariffs })
 
   return {
     ...loaded,
+    year: loadedYear,
+    years,
     readablePlantIds: reads,
   }
-}
-
-export async function loadPlantData(plantId: string): Promise<PlantComparison> {
-  assertConfig()
-
-  const { plant, months, days, tariffs } = await fetchDashboardData(plantId)
-
-  return toLoadedPlant({ plant, months, days, tariffs })
 }
 
 export async function loadPlantGranularity(plantId: string, granularity: string): Promise<PlantComparison> {
@@ -119,11 +115,13 @@ function assertConfig() {
 async function fetchDashboardData(
   plantIdOverride?: string,
   granularity?: string,
+  year?: string,
 ) {
   const currentPlantId = plantIdOverride ?? plantId()
   const url = new URL(API_URL)
   if (currentPlantId) url.searchParams.set('plant', currentPlantId)
   if (granularity) url.searchParams.set('granularity', granularity)
+  if (year) url.searchParams.set('year', year)
 
   const response = await fetch(url, {
     headers: {
@@ -153,6 +151,8 @@ async function fetchDashboardData(
     records: data.records ?? [],
     tariffs: data.tariffs ?? [],
     reads: data.reads ?? [],
+    year: data.year ?? '',
+    years: data.years ?? [],
   }
 }
 

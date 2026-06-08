@@ -11,12 +11,11 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
+import { loadDashboardData, loadPlantGranularity } from "./data/supabase";
 import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
 import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
 import "./styles.css";
 
-type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
 type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly" | "yearly";
 type Currency = "UAH" | "USD";
@@ -45,14 +44,13 @@ type InfoModal =
 
 interface DashboardDataState extends DataState {
   readonly isRefreshing: boolean;
-  readonly refresh: () => void;
+  readonly refresh: (year?: string) => void;
 }
 
 type DashboardDataHookState = Omit<DashboardDataState, "refresh">;
 
 const i18n = {
   en: {
-    all: "All",
     monthly: "Monthly",
     daily: "Daily",
     comparison: "Comparison",
@@ -139,7 +137,6 @@ const i18n = {
     table: "Data table",
     filterMonth: "Filter month",
     allMonths: "All months",
-    allYears: "All years",
     month: "Month",
     import: "Import",
     consumed: "Consumed",
@@ -164,7 +161,6 @@ const i18n = {
     tapBarOrDot: "Tap a bar or dot to inspect the value",
   },
   uk: {
-    all: "Усі",
     monthly: "Місяці",
     daily: "Дні",
     comparison: "Порівняння",
@@ -251,7 +247,6 @@ const i18n = {
     table: "Таблиця даних",
     filterMonth: "Фільтр місяця",
     allMonths: "Усі місяці",
-    allYears: "Усі роки",
     month: "Місяць",
     import: "Імпорт",
     consumed: "Спожито",
@@ -628,34 +623,24 @@ function netExportPrice(row: MonthRow) {
   return netExportRate(row);
 }
 
-function filteredMonthlyRows(
-  sourceRows: readonly MonthRow[],
-  range: RangeKey,
-  monthFilter: string,
-  yearFilter: string,
-) {
-  const rangeMonths: Record<Exclude<RangeKey, "all">, number> = {
-    "1m": 1,
-    "3m": 3,
-    "6m": 6,
-    "12m": 12,
-  };
-  const base = range === "all" ? sourceRows : sourceRows.slice(-rangeMonths[range]);
-  return base.filter((row) => {
-    const monthMatches = monthFilter === "all" || String(row.date.getMonth() + 1) === monthFilter;
-    const yearMatches = yearFilter === "all" || String(row.date.getFullYear()) === yearFilter;
-    return monthMatches && yearMatches;
-  });
-}
-
 function firstDateKey(rows: readonly MonthRow[]) {
   return rows.length ? dateKey(rows[rows.length - 1].date) : "";
+}
+
+function activePlantCoversGranularity(plant: PlantComparison, loadedYear: string, granularity: string) {
+  if (!loadedYear || !granularity.startsWith(loadedYear)) return false;
+  if (/^\d{4}$/.test(granularity)) return plant.rows.some((row) => String(row.date.getFullYear()) === granularity);
+  if (/^\d{4}-\d{2}$/.test(granularity)) return plant.dailyRows.some((row) => monthKey(row.date) === granularity);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(granularity)) return plant.dailyRows.some((row) => dateKey(row.date) === granularity);
+  return false;
 }
 
 function useDashboardData(): DashboardDataState {
   const [state, setState] = useState<DashboardDataHookState>(() => ({
     rows: [],
     dailyRows: [],
+    year: "",
+    years: [],
     readablePlantIds: [],
     plantId: "",
     investmentUsd: 0,
@@ -664,10 +649,10 @@ function useDashboardData(): DashboardDataState {
     updatedAt: new Date(),
   }));
 
-  const refresh = async () => {
+  const refresh = async (year?: string) => {
     setState((current) => ({ ...current, isRefreshing: true }));
     try {
-      const data: LoadedData = await loadDashboardData();
+      const data: LoadedData = await loadDashboardData(year);
       const refreshedAt = new Date();
       setState({ ...data, isLoading: false, isRefreshing: false, updatedAt: refreshedAt });
     } catch (error) {
@@ -687,8 +672,8 @@ function useDashboardData(): DashboardDataState {
 
   return {
     ...state,
-    refresh: () => {
-      void refresh();
+    refresh: (year?: string) => {
+      void refresh(year);
     },
   };
 }
@@ -710,9 +695,6 @@ function useMediaQuery(query: string) {
 function App() {
   const dataState = useDashboardData();
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
-  const [range, setRange] = useState<RangeKey>("all");
-  const [monthFilter, setMonthFilter] = useState("all");
-  const [yearFilter, setYearFilter] = useState("all");
   const [currency, setCurrency] = useState<Currency>("UAH");
   const [firstDay, setFirstDay] = useState("");
   const [secondDay, setSecondDay] = useState("");
@@ -730,17 +712,7 @@ function App() {
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
   const lang = APP_LANG;
   const t = i18n[lang];
-  const monthNames = useMemo(
-    () =>
-      Array.from({ length: 12 }, (_, index) =>
-        new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", { month: "short" }).format(new Date(2026, index, 1)),
-      ),
-    [lang],
-  );
-  const yearOptions = useMemo(
-    () => [...new Set(dataState.rows.map((row) => String(row.date.getFullYear())))].sort((a, b) => Number(b) - Number(a)),
-    [dataState.rows],
-  );
+  const yearOptions = dataState.years.length ? dataState.years : dataState.year ? [dataState.year] : [];
 
   const dailyRows = useMemo(() => dataState.dailyRows.slice(-30), [dataState.dailyRows]);
 
@@ -754,9 +726,8 @@ function App() {
   }, [dataState.dailyRows, firstDay, plantComparisonDate, plantComparisonMonth, secondDay]);
 
   useEffect(() => {
-    const latest = dataState.rows.at(-1);
-    if (!plantComparisonYear && latest) setPlantComparisonYear(String(latest.date.getFullYear()));
-  }, [dataState.rows, plantComparisonYear]);
+    if (!plantComparisonYear && dataState.year) setPlantComparisonYear(dataState.year);
+  }, [dataState.year, plantComparisonYear]);
 
   useEffect(() => {
     if (viewMode !== "daily") setDailyCompareOpen(false);
@@ -793,11 +764,11 @@ function App() {
 
   const ensureComparisonPlant = async (plantId: string, granularity: string) => {
     if (!plantId) return undefined;
-    if (plantId === dataState.plantId) return activePlantComparison;
+    if (plantId === dataState.plantId && activePlantCoversGranularity(activePlantComparison, dataState.year, granularity)) return activePlantComparison;
     const cacheKey = `${plantId}:${granularity}`;
     if (comparisonPlantCache[cacheKey]) return comparisonPlantCache[cacheKey];
 
-    const plant = granularity === "all" ? await loadPlantData(plantId) : await loadPlantGranularity(plantId, granularity);
+    const plant = await loadPlantGranularity(plantId, granularity);
     setComparisonPlantCache((current) => ({
       ...current,
       [cacheKey]: plant,
@@ -814,9 +785,7 @@ function App() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [infoModal]);
 
-  const rows = useMemo(() => {
-    return filteredMonthlyRows(dataState.rows, range, monthFilter, yearFilter);
-  }, [dataState.rows, monthFilter, range, yearFilter]);
+  const rows = dataState.rows;
 
   const plantComparisonDateOptions = useMemo(
     () => [...dataState.dailyRows].reverse(),
@@ -829,8 +798,8 @@ function App() {
   );
 
   const plantComparisonYearOptions = useMemo(
-    () => [...new Set(dataState.rows.map((row) => String(row.date.getFullYear())))].sort((a, b) => Number(b) - Number(a)),
-    [dataState.rows],
+    () => yearOptions,
+    [yearOptions],
   );
 
   const runPlantComparison = async () => {
@@ -842,7 +811,7 @@ function App() {
     setComparisonError("");
 
     try {
-      const granularity = plantComparisonMode === "yearly" ? plantComparisonYear : plantComparisonMode === "monthly" ? "all" : plantComparisonDate;
+      const granularity = plantComparisonMode === "yearly" ? plantComparisonYear : plantComparisonMode === "monthly" ? plantComparisonMonth : plantComparisonDate;
       const loadedPlants = await Promise.all(
         selectedPlantIds.map((plantId) => ensureComparisonPlant(plantId, granularity)),
       );
@@ -1108,19 +1077,7 @@ function App() {
                 </button>
               ))}
             </div>
-            {viewMode === "monthly" ? (
-              <div className="segmented" aria-label="Date range">
-                {(["all", "12m", "6m", "3m", "1m"] as RangeKey[]).map((item) => (
-                  <button
-                    key={item}
-                    className={range === item ? "selected" : ""}
-                    onClick={() => setRange(item)}
-                  >
-                    {item === "all" ? t.all : item.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            ) : viewMode === "daily" ? (
+            {viewMode === "daily" ? (
               <div className="segmented daily-tools" aria-label={t.compareDays}>
                 <button type="button" className={isDailyCompareOpen ? "selected" : ""} onClick={() => setDailyCompareOpen(true)}>
                   {t.compareDays}
@@ -1130,7 +1087,7 @@ function App() {
             <button
               type="button"
               className={`icon-button refresh-button${dataState.isRefreshing ? " is-refreshing" : ""}`}
-              onClick={dataState.refresh}
+              onClick={() => dataState.refresh(dataState.year)}
               disabled={dataState.isRefreshing}
               aria-label={t.refresh}
               title={t.refresh}
@@ -1443,20 +1400,9 @@ function App() {
             <div>
               <h2>{t.table}</h2>
             </div>
-            <div className="filter-controls" aria-label={t.filterMonth}>
+            <div className="filter-controls" aria-label={t.compareYear}>
               <label className="filter-box">
-                <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)}>
-                  <option value="all">{t.allMonths}</option>
-                  {monthNames.map((label, index) => (
-                    <option key={label} value={String(index + 1)}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="filter-box">
-                <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)}>
-                  <option value="all">{t.allYears}</option>
+                <select value={dataState.year} onChange={(event) => dataState.refresh(event.target.value)} disabled={dataState.isRefreshing}>
                   {yearOptions.map((year) => (
                     <option key={year} value={year}>
                       {year}

@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, PostgrestBuilder } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from './config.ts'
 import { dateUtil } from './utils/date.ts'
 
@@ -49,15 +49,32 @@ export class SupabaseClient {
     if (error) throw new Error(`upsert failed on ${table}`, { cause: error })
   }
 
-  async getPlant(plantId: Solaroid.Supabase.Plant.Id): Promise<Solaroid.Supabase.Json> {
+  async getPlant(
+    plantId: Solaroid.Supabase.Plant.Id,
+    year?: Solaroid.Supabase.Date.Y,
+  ): Promise<Solaroid.Supabase.Json> {
+    year ??= dateUtil.format.ymd().split('-')[0]
+
+    const range: Solaroid.Supabase.Date.Range = { from: `${year}-01-01`, to: `${year}-12-31` }
     const plant = await this.#getPlantMetadata(plantId)
     const [days, months, tariffs] = await Promise.all(
-      ['days', 'months', 'month_tariffs'].map((table) => this.#getPlantRows(plantId, table)),
+      ['days', 'months', 'month_tariffs'].map((table) => this.#getPlantRows(plantId, table, range)),
     )
+
+    const { data: years, error: yearsError } = await this.client.rpc(
+      'get_plant_years',
+      {
+        p_plant_id: plantId,
+      },
+    )
+
+    if (yearsError) throw new Error('plant years lookup failed', { cause: yearsError })
 
     return {
       plant,
       days,
+      year,
+      years,
       months,
       tariffs,
     }
