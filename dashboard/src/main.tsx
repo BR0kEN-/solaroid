@@ -11,7 +11,7 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { loadDashboardData, loadPlantDateRange } from "./data/supabase";
+import { loadDashboardData, loadPlantGranularity } from "./data/supabase";
 import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
 import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
 import "./styles.css";
@@ -759,13 +759,13 @@ function App() {
     if (!secondPlantId) setSecondPlantId(readablePlantOptions.find((plantId) => plantId !== (dataState.plantId || readablePlantOptions[0])) ?? readablePlantOptions[0]);
   }, [dataState.plantId, firstPlantId, readablePlantOptions, secondPlantId]);
 
-  const ensureComparisonPlant = async (plantId: string, from: string, to = from) => {
+  const ensureComparisonPlant = async (plantId: string, granularity: string) => {
     if (!plantId) return undefined;
     if (plantId === dataState.plantId) return activePlantComparison;
-    const cacheKey = `${plantId}:${from}:${to}`;
+    const cacheKey = `${plantId}:${granularity}`;
     if (comparisonPlantCache[cacheKey]) return comparisonPlantCache[cacheKey];
 
-    const plant = await loadPlantDateRange(plantId, from, to);
+    const plant = await loadPlantGranularity(plantId, granularity);
     setComparisonPlantCache((current) => ({
       ...current,
       [cacheKey]: plant,
@@ -1666,18 +1666,88 @@ function PlantComparisonCharts({
       values: plants.map((plant) => plant.row?.production ?? 0),
       format: (value: number) => formatKwh(value, lang),
       color: colors.amber,
+      tone: () => "muted",
+      barColor: () => colors.amber,
+    },
+    {
+      title: t.export,
+      values: plants.map((plant) => plant.row?.export ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.green,
+      tone: () => "muted",
+      barColor: () => colors.green,
+    },
+    {
+      title: t.import,
+      values: plants.map((plant) => plant.row?.importTotal ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.blue,
+      tone: () => "muted",
+      barColor: () => colors.blue,
+    },
+    {
+      title: t.importDay,
+      values: plants.map((plant) => plant.row?.importDay ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.blue,
+      tone: () => "muted",
+      barColor: () => colors.blue,
+    },
+    {
+      title: t.importNight,
+      values: plants.map((plant) => plant.row?.importNight ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.indigo,
+      tone: () => "muted",
+      barColor: () => colors.indigo,
+    },
+    {
+      title: t.consumed,
+      values: plants.map((plant) => plant.row?.consumedTotal ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.mint,
+      tone: () => "muted",
+      barColor: () => colors.mint,
+    },
+    {
+      title: t.consumedDay,
+      values: plants.map((plant) => plant.row?.consumedDay ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.blue,
+      tone: () => "muted",
+      barColor: () => colors.blue,
+    },
+    {
+      title: t.consumedNight,
+      values: plants.map((plant) => plant.row?.consumedNight ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.indigo,
+      tone: () => "muted",
+      barColor: () => colors.indigo,
+    },
+    {
+      title: t.balance,
+      values: plants.map((plant) => plant.row?.balance ?? 0),
+      format: (value: number) => formatKwh(value, lang),
+      color: colors.ink,
+      tone: (value: number) => (value < 0 ? "positive" : value > 0 ? "negative" : "muted"),
+      barColor: (value: number) => (value < 0 ? colors.green : value > 0 ? colors.rose : colors.ink),
     },
     {
       title: t.roi,
       values: plants.map((plant) => (plant.row ? rowRoiMoney(plant.row, currency) : 0)),
       format: (value: number) => formatDisplayMoney(value, currency, lang),
       color: colors.green,
+      tone: (value: number) => (value > 0 ? "positive" : value < 0 ? "negative" : "muted"),
+      barColor: (value: number) => (value >= 0 ? colors.green : colors.rose),
     },
     {
-      title: t.net,
+      title: t.netPayment,
       values: plants.map((plant) => (plant.row ? moneyFromUah(plant.row.electricityPayment, currency, plant.row.usdRate) : 0)),
       format: (value: number) => formatDisplayMoney(value, currency, lang),
       color: colors.blue,
+      tone: (value: number) => (value > 0 ? "positive" : value < 0 ? "negative" : "muted"),
+      barColor: (value: number) => (value >= 0 ? colors.blue : colors.rose),
     },
   ];
 
@@ -1695,7 +1765,8 @@ function PlantComparisonCharts({
                 value={item.values[index] ?? 0}
                 formattedValue={item.format(item.values[index] ?? 0)}
                 max={Math.max(...item.values.map((value) => Math.abs(value)), 1)}
-                color={item.color}
+                color={item.barColor(item.values[index] ?? 0)}
+                tone={item.tone(item.values[index] ?? 0)}
                 isActive={plant.plantId === activePlantId}
               />
             ))}
@@ -1713,6 +1784,7 @@ function ComparisonBar({
   formattedValue,
   max,
   color,
+  tone,
   isActive,
 }: {
   readonly label: string;
@@ -1721,6 +1793,7 @@ function ComparisonBar({
   readonly formattedValue: string;
   readonly max: number;
   readonly color: string;
+  readonly tone: string;
   readonly isActive: boolean;
 }) {
   const width = `${Math.max(3, (Math.abs(value) / max) * 100)}%`;
@@ -1735,9 +1808,9 @@ function ComparisonBar({
         <small>{detail}</small>
       </div>
       <div className="comparison-bar-track">
-        <i style={{ width, background: value >= 0 ? color : colors.rose }} />
+        <i style={{ width, background: color }} />
       </div>
-      <b className={value >= 0 ? "positive" : "negative"}>{formattedValue}</b>
+      <b className={tone}>{formattedValue}</b>
     </div>
   );
 }

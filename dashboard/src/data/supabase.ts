@@ -45,6 +45,7 @@ interface ApiResponse {
   readonly months?: readonly MonthRecord[]
   readonly tariffs?: readonly TariffRecord[]
   readonly reads?: readonly string[]
+  readonly records?: readonly DayRecord[] | readonly MonthRecord[]
 }
 
 export async function loadDashboardData(): Promise<LoadedData> {
@@ -67,12 +68,18 @@ export async function loadPlantData(plantId: string): Promise<PlantComparison> {
   return toLoadedPlant({ plant, months, days, tariffs })
 }
 
-export async function loadPlantDateRange(plantId: string, from: string, to = from): Promise<PlantComparison> {
+export async function loadPlantGranularity(plantId: string, granularity: string): Promise<PlantComparison> {
   assertConfig()
 
-  const { plant, months, days, tariffs } = await fetchDashboardData(plantId, { from, to })
+  const { plant, records, tariffs } = await fetchDashboardData(plantId, granularity)
+  const isDayGranularity = /^\d{4}-\d{2}-\d{2}$/.test(granularity)
 
-  return toLoadedPlant({ plant, months, days, tariffs })
+  return toLoadedPlant({
+    plant,
+    months: isDayGranularity ? [] : records as readonly MonthRecord[],
+    days: isDayGranularity ? records as readonly DayRecord[] : [],
+    tariffs,
+  })
 }
 
 function toLoadedPlant({
@@ -111,18 +118,12 @@ function assertConfig() {
 
 async function fetchDashboardData(
   plantIdOverride?: string,
-  range?: {
-    readonly from: string
-    readonly to: string
-  },
+  granularity?: string,
 ) {
   const currentPlantId = plantIdOverride ?? plantId()
   const url = new URL(API_URL)
   if (currentPlantId) url.searchParams.set('plant', currentPlantId)
-  if (range) {
-    url.searchParams.set('from', range.from)
-    url.searchParams.set('to', range.to)
-  }
+  if (granularity) url.searchParams.set('granularity', granularity)
 
   const response = await fetch(url, {
     headers: {
@@ -149,6 +150,7 @@ async function fetchDashboardData(
     plant: data.plant,
     days: data.days ?? [],
     months: data.months ?? [],
+    records: data.records ?? [],
     tariffs: data.tariffs ?? [],
     reads: data.reads ?? [],
   }
