@@ -16,7 +16,7 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
   }
 
   return {
-    ...await client.getPlant(plantId),
+    ...await client.getPlant(plantId, params.get('year') ?? undefined),
     reads: token.reads,
   }
 }
