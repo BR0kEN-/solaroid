@@ -27,8 +27,6 @@ export interface DataState {
   readonly plantId: string
   readonly rows: readonly MonthRow[]
   readonly dailyRows: readonly MonthRow[]
-  readonly year: string
-  readonly years: readonly string[]
   readonly readablePlantIds: readonly string[]
   readonly investmentUsd: number
   readonly launchDate?: Date
