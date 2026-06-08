@@ -76,7 +76,7 @@ export class SupabaseClient {
       range = { from: granularity }
       month = { from: dateUtil.getMonthStart(granularity) }
     } else if (dateUtil.granularity.is.month(granularity)) {
-      table = 'months'
+      table = 'days'
       range = { from: `${granularity}-01`, to: `${granularity}-31` }
       month = { from: range.from }
     } else if (dateUtil.granularity.is.year(granularity)) {
