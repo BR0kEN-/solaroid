@@ -13,13 +13,15 @@ import {
 } from "lucide-react";
 import { loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
 import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
+import { moneyFromUah, moneyFromUsd, rowPaybackMoney, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
+import { calculatePayback } from "./domain/payback";
+import { calculateForecast } from "./domain/forecast";
 import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
 import "./styles.css";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
 type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly" | "yearly";
-type Currency = "UAH" | "USD";
 type Lang = "en" | "uk";
 interface PlantComparisonResult {
   readonly mode: PlantComparisonMode;
@@ -117,7 +119,7 @@ const i18n = {
     exportUnpaid: "Export is unpaid before the commercial date",
     netPaymentLogic: "Net payment is the cash result of monthly import/export balancing. Balance is import minus export. If export is larger than import, the balance is negative and the net surplus is paid using the export price after VAT and military tax. Otherwise, export offsets import proportionally between day and night import, then the remaining day/night import is charged at its own rate.",
     netPaymentInfo: "UAH totals are summed directly. In USD mode, each month is converted using that month's USD/UAH rate, then those converted values are summed. It is not the UAH total divided by the latest rate.",
-    usdRateInfo: "Monthly USD/UAH is the average of the daily USD/UAH rates stored for that month. If a month has no daily rates, the dashboard uses the manually stored monthly USD/UAH fallback.",
+    usdRateInfo: "Monthly USD/UAH is the latest daily USD/UAH rate stored for that month. If a month has no daily rates, the dashboard uses the manually stored monthly USD/UAH fallback.",
     importPriceInfo: "Import prices are shown as day / night. Day is the rate from 7 AM to 11 PM; night is the rate from 11 PM to 7 AM.",
     roiInfo: "ROI is not production multiplied by export price. It is the effective investment recovery for the period: the value of electricity consumed from the solar system plus export payout when commercial export is active, minus grid import costs. Before the commercial date, export is unpaid and does not offset import, so ROI is based only on inferred self-consumed solar energy: production minus export, valued by the weighted day/night import rate.",
     savings: "Savings",
@@ -232,7 +234,7 @@ const i18n = {
     exportUnpaid: "До комерційної дати експорт не оплачується",
     netPaymentLogic: "Баланс оплати — це грошовий результат місячного балансу імпорту й експорту. Баланс рахується як імпорт мінус експорт. Якщо експорт більший за імпорт, баланс відʼємний і чистий надлишок оплачується за ціною експорту після ПДВ і військового збору. Інакше експорт пропорційно покриває денний і нічний імпорт, а залишок денного/нічного імпорту оплачується за відповідним тарифом.",
     netPaymentInfo: "Суми в гривнях додаються напряму. У режимі USD кожен місяць конвертується за його курсом, а потім конвертовані значення додаються. Це не сума в гривнях, поділена на останній курс.",
-    usdRateInfo: "Місячний курс USD/UAH — це середнє значення денних курсів USD/UAH, збережених за цей місяць. Якщо в місяці немає денних курсів, дашборд використовує вручну збережений місячний резервний курс USD/UAH.",
+    usdRateInfo: "Місячний курс USD/UAH — це останній денний курс USD/UAH, збережений за цей місяць. Якщо в місяці немає денних курсів, дашборд використовує вручну збережений місячний резервний курс USD/UAH.",
     importPriceInfo: "Ціни імпорту показані як день / ніч. День — тариф з 7:00 до 23:00; ніч — тариф з 23:00 до 7:00.",
     roiInfo: "ПІ — це не генерація, помножена на ціну експорту. Це фактичне повернення інвестицій за період: вартість електроенергії, спожитої з сонячної системи, плюс виплата за експорт після початку комерційного експорту, мінус витрати на імпорт з мережі. До комерційної дати експорт не оплачується і не перекриває імпорт, тому ПІ рахується лише з орієнтовно спожитої власної сонячної енергії: генерація мінус експорт, оцінені за зваженим денним/нічним тарифом імпорту.",
     savings: "Економія",
@@ -340,21 +342,6 @@ function formatMoney(value: number, currency: Currency, lang: Lang, compact = fa
   }).format(value);
 }
 
-function moneyFromUah(value: number, currency: Currency, usdRate: number) {
-  if (currency === "UAH") return value;
-  return usdRate ? value / usdRate : 0;
-}
-
-function moneyFromUsd(value: number, currency: Currency, usdRate: number) {
-  if (currency === "USD") return value;
-  return value * usdRate;
-}
-
-function rowRoiMoney(row: MonthRow, currency: Currency) {
-  if (currency === "UAH") return row.electricitySavings;
-  return row.roiUsd || moneyFromUah(row.electricitySavings, currency, row.usdRate);
-}
-
 function formatDisplayMoney(value: number, currency: Currency, lang: Lang, compact = false) {
   return formatMoney(value, currency, lang, compact);
 }
@@ -416,10 +403,6 @@ function deltaTone(value: number) {
   return "muted";
 }
 
-function sumRowsFromUah(rows: readonly MonthRow[], selector: (row: MonthRow) => number, currency: Currency) {
-  return rows.reduce((sum, row) => sum + moneyFromUah(selector(row), currency, row.usdRate), 0);
-}
-
 function importCostUah(row: MonthRow) {
   return row.importDay * row.importPriceDay + row.importNight * row.importPriceNight;
 }
@@ -438,10 +421,6 @@ function exportPayoutKwh(row: MonthRow) {
 
 function exportPayoutUah(row: MonthRow) {
   return exportPayoutKwh(row) * netExportRate(row);
-}
-
-function sumRowsRoiMoney(rows: readonly MonthRow[], currency: Currency) {
-  return rows.reduce((sum, row) => sum + rowRoiMoney(row, currency), 0);
 }
 
 function withUsdRate(row: MonthRow, usdRate: number) {
@@ -937,45 +916,24 @@ function App() {
   }, [currency, dataState.dailyRows, dataState.launchDate, dataState.rows, rows]);
 
   const payback = useMemo(() => {
-    const investmentUsd = dataState.investmentUsd;
-    if (!investmentUsd) return null;
-    const investment = moneyFromUsd(investmentUsd, currency, totals.launchUsdRate);
-    const recovered = totals.roiDisplay;
-    const progress = Math.min(100, Math.max(0, (recovered / investment) * 100));
-    const remaining = Math.max(0, investment - recovered);
-    const today = startOfDay(new Date());
-    const launchDate = totals.launchDate ?? rows[0]?.date;
-    const elapsedDays = launchDate ? Math.max(1, daysBetween(launchDate, today) + 1) : 0;
-    const dailyAverage = elapsedDays ? recovered / elapsedDays : 0;
-    const daysLeft = remaining <= 0 ? 0 : dailyAverage > 0 ? Math.ceil(remaining / dailyAverage) : null;
-    const payoffDuration = daysLeft === null ? null : fullDurationBetween(today, addDays(today, daysLeft));
-    return { recovered, progress, dailyAverage, remaining, daysLeft, payoffDuration, investment, investmentUsd };
-  }, [currency, dataState.investmentUsd, rows, totals.launchDate, totals.launchUsdRate, totals.roiDisplay]);
+    return calculatePayback({
+      rows,
+      investmentUsd: dataState.investmentUsd,
+      currency,
+      launchUsdRate: totals.launchUsdRate,
+      launchDate: totals.launchDate,
+    });
+  }, [currency, dataState.investmentUsd, rows, totals.launchDate, totals.launchUsdRate]);
 
   const forecast = useMemo(() => {
     const today = new Date();
     const forecastAsOf = dataState.sheetUpdatedAt ?? today;
-    const currentMonthRow = dataState.rows.find((row) => sameMonth(row.date, today)) ?? dataState.rows.at(-1);
-    if (!currentMonthRow) return null;
-    const currentIndex = dataState.rows.findIndex((row) => sameMonth(row.date, currentMonthRow.date));
-    const previousMonthRow = currentIndex > 0 ? dataState.rows[currentIndex - 1] : undefined;
-
-    const production = forecastMonthValue(currentMonthRow.production, currentMonthRow.date, forecastAsOf);
-    const roi = forecastMonthValue(rowRoiMoney(currentMonthRow, currency), currentMonthRow.date, forecastAsOf);
-    const income = forecastMonthValue(moneyFromUah(currentMonthRow.electricityPayment, currency, currentMonthRow.usdRate), currentMonthRow.date, forecastAsOf);
-    const previousRoi = previousMonthRow ? rowRoiMoney(previousMonthRow, currency) : 0;
-    const previousIncome = previousMonthRow ? moneyFromUah(previousMonthRow.electricityPayment, currency, previousMonthRow.usdRate) : 0;
-
-    return {
-      row: currentMonthRow,
-      previousRow: previousMonthRow,
-      production,
-      productionDelta: previousMonthRow ? production - previousMonthRow.production : 0,
-      roi,
-      roiDelta: previousMonthRow ? roi - previousRoi : 0,
-      income,
-      incomeDelta: previousMonthRow ? income - previousIncome : 0,
-    };
+    return calculateForecast({
+      rows: dataState.rows,
+      currency,
+      today,
+      projectMonthValue: (value, date) => forecastMonthValue(value, date, forecastAsOf),
+    });
   }, [currency, dataState.rows, dataState.sheetUpdatedAt]);
 
   const showPlaceholders = dataState.isLoading;
@@ -1353,6 +1311,8 @@ function App() {
                     delta={forecast.roiDelta}
                     formattedDelta={formatSignedMoney(forecast.roiDelta, currency, lang)}
                     base={forecast.previousRow ? rowRoiMoney(forecast.previousRow, currency) : 0}
+                    pctDelta={forecast.roiDeltaUah}
+                    pctBase={forecast.previousRoiUah}
                     label={forecast.previousRow ? `${lang === "uk" ? "до" : "vs"} ${formatMonthOnly(forecast.previousRow.date, lang)}` : ""}
                   />
                 }
@@ -1368,6 +1328,8 @@ function App() {
                     delta={forecast.incomeDelta}
                     formattedDelta={formatSignedMoney(forecast.incomeDelta, currency, lang)}
                     base={forecast.previousRow ? moneyFromUah(forecast.previousRow.electricityPayment, currency, forecast.previousRow.usdRate) : 0}
+                    pctDelta={forecast.incomeDeltaUah}
+                    pctBase={forecast.previousIncomeUah}
                     label={forecast.previousRow ? `${lang === "uk" ? "до" : "vs"} ${formatMonthOnly(forecast.previousRow.date, lang)}` : ""}
                   />
                 }
@@ -1420,6 +1382,7 @@ function App() {
                 rows={rows}
                 currency={currency}
                 investment={payback ? payback.investment : 0}
+                paybackUsdRate={totals.launchUsdRate}
               />
             )}
           </ChartPanel>
@@ -1626,21 +1589,27 @@ function ForecastDetail({
   delta,
   formattedDelta,
   base,
+  pctDelta,
+  pctBase,
   label,
 }: {
   readonly current: string;
   readonly delta: number;
   readonly formattedDelta: string;
   readonly base: number;
+  readonly pctDelta?: number;
+  readonly pctBase?: number;
   readonly label: string;
 }) {
+  const displayDelta = pctDelta ?? delta;
+  const displayBase = pctBase ?? base;
   return (
     <span className="forecast-detail">
       <span>{current}</span>
       {base ? (
         <span className={deltaTone(delta)}>
           {formattedDelta}
-          {formatDeltaPct(delta, base)} {label}
+          {formatDeltaPct(displayDelta, displayBase)} {label}
         </span>
       ) : null}
     </span>
@@ -2490,23 +2459,25 @@ function RoiChart({
   rows,
   currency,
   investment,
+  paybackUsdRate,
 }: {
   readonly rows: readonly MonthRow[];
   readonly currency: Currency;
   readonly investment: number;
+  readonly paybackUsdRate: number;
 }) {
   const t = i18n[APP_LANG];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const chronologicalRows = useMemo(
     () =>
       rows.reduce<Array<{ row: MonthRow; cumulative: number; cumulativePct: number; monthly: number }>>((items, row) => {
-      const monthly = rowRoiMoney(row, currency);
+      const monthly = rowPaybackMoney(row, currency, paybackUsdRate);
       const cumulative = (items.at(-1)?.cumulative ?? 0) + monthly;
       const cumulativePct = investment > 0 ? (cumulative / investment) * 100 : 0;
       items.push({ row, monthly, cumulative, cumulativePct });
       return items;
     }, []),
-    [currency, investment, rows],
+    [currency, investment, paybackUsdRate, rows],
   );
   const displayRows = useMemo(() => (isMobile ? [...chronologicalRows].reverse() : chronologicalRows), [chronologicalRows, isMobile]);
   const inspectors = useMemo(

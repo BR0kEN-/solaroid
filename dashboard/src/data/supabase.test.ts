@@ -1,0 +1,140 @@
+import { describe, expect, it } from 'vitest'
+import { toLoadedPlant } from './supabase'
+
+const plant = {
+  id: 'bondas',
+  investment_usd: 12_366,
+  launch_date: '2025-06-28',
+  commercial_date: '2026-01-15',
+  updated_at: '2026-06-06T20:04:45.872243+00:00',
+}
+
+const tariff = {
+  plant_id: 'bondas',
+  date: '2026-01-01',
+  price_import_day: 4,
+  price_import_night: 2,
+  price_export: 6,
+  export_taxes: [
+    ['vat', 20],
+    ['mil', 5],
+  ] as const,
+  updated_at: '2026-06-07T00:00:00+00:00',
+}
+
+describe('Supabase data mapping', () => {
+  it('uses the latest positive daily USD rate in a month before manual fallback', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [
+        {
+          plant_id: 'bondas',
+          date: '2026-01-01',
+          production: 100,
+          export: 40,
+          import_day: 20,
+          import_night: 10,
+          consumption_day: 80,
+          consumption_night: 20,
+          uah_usd_rate: 99,
+          updated_at: '2026-06-06T20:04:45.872243+00:00',
+        },
+      ],
+      days: [
+        day('2026-01-01', 41),
+        day('2026-01-15', 0),
+        day('2026-01-31', 43),
+      ],
+      tariffs: [tariff],
+    })
+
+    expect(loaded.rows[0].usdRate).toBe(43)
+    expect(loaded.rows[0].isCommercial).toBe(false)
+    expect(loaded.rows[0].consumedTotal).toBe(100)
+    expect(loaded.rows[0].importTotal).toBe(30)
+    expect(loaded.rows[0].balance).toBe(-10)
+    expect(loaded.rows[0].exportVat).toBe(20)
+    expect(loaded.rows[0].exportMilitary).toBe(5)
+    expect(loaded.dailyRows.map((row) => row.usdRate)).toEqual([41, 0, 43])
+  })
+
+  it('uses manual monthly fallback when a month has no daily rates', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [
+        {
+          plant_id: 'bondas',
+          date: '2025-12-01',
+          production: 50,
+          export: 5,
+          import_day: 2,
+          import_night: 3,
+          consumption_day: 30,
+          consumption_night: 10,
+          uah_usd_rate: 42.55,
+        },
+      ],
+      days: [day('2026-01-31', 43)],
+      tariffs: [],
+    })
+
+    expect(loaded.rows[0].usdRate).toBe(42.55)
+  })
+
+  it('falls back to latest positive daily rate when neither month daily nor manual rate exists', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [
+        {
+          plant_id: 'bondas',
+          date: '2025-11-01',
+          production: 50,
+          export: 5,
+          import_day: 2,
+          import_night: 3,
+          consumption_day: 30,
+          consumption_night: 10,
+        },
+      ],
+      days: [day('2026-01-01', 41), day('2026-01-31', 43)],
+      tariffs: [],
+    })
+
+    expect(loaded.rows[0].usdRate).toBe(43)
+  })
+
+  it('marks rows commercial starting on the commercial date', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [
+        month('2026-01-01'),
+        month('2026-02-01'),
+      ],
+      days: [day('2026-02-28', 43)],
+      tariffs: [tariff, { ...tariff, date: '2026-02-01' }],
+    })
+
+    expect(loaded.rows.map((row) => row.isCommercial)).toEqual([false, true])
+  })
+})
+
+function month(date: string) {
+  return {
+    plant_id: 'bondas',
+    date,
+    production: 100,
+    export: 40,
+    import_day: 20,
+    import_night: 10,
+    consumption_day: 80,
+    consumption_night: 20,
+  }
+}
+
+function day(date: string, rate: number) {
+  return {
+    ...month(date),
+    uah_usd_rate: rate,
+    uah_eur_rate: 0,
+  }
+}

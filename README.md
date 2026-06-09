@@ -215,7 +215,7 @@ Currency rules:
 
 - UAH values are native and summed directly.
 - USD monthly totals convert each month using that month's USD/UAH rate.
-- Monthly USD/UAH uses the average of available daily rates first. If a month has no daily rates, `months.uah_usd_rate` can be filled manually as the fallback.
+- Monthly USD/UAH uses the latest available daily rate from that month first. If a month has no daily rates, `months.uah_usd_rate` can be filled manually as the fallback.
 - Investment is stored in USD. In UAH mode it is converted using the launch month USD/UAH rate.
 
 ## UI Conventions

@@ -83,7 +83,7 @@ export async function loadPlantGranularity(plantId: string, granularity: string)
   })
 }
 
-function toLoadedPlant({
+export function toLoadedPlant({
   plant,
   months,
   days,
@@ -94,7 +94,7 @@ function toLoadedPlant({
   readonly days: readonly DayRecord[]
   readonly tariffs: readonly TariffRecord[]
 }): PlantComparison {
-  const monthlyRates = averageUsdRateByMonth(days)
+  const monthlyRates = latestUsdRateByMonth(days)
   const fallbackUsdRate = latestPositiveRate(days)
   const tariffByMonth = new Map(tariffs.map((tariff) => [tariff.date, tariff]))
   const commercialDate = parseDate(plant.commercial_date)
@@ -268,15 +268,13 @@ function toTariff(row: TariffRecord | undefined): Tariff {
   }
 }
 
-function averageUsdRateByMonth(days: readonly DayRecord[]) {
-  const rates = new Map<string, { sum: number; count: number }>()
+function latestUsdRateByMonth(days: readonly DayRecord[]) {
+  const rates = new Map<string, number>()
   days.forEach((day) => {
     if (day.uah_usd_rate <= 0) return
-    const key = monthDate(day.date)
-    const current = rates.get(key) ?? { sum: 0, count: 0 }
-    rates.set(key, { sum: current.sum + day.uah_usd_rate, count: current.count + 1 })
+    rates.set(monthDate(day.date), day.uah_usd_rate)
   })
-  return new Map([...rates].map(([key, value]) => [key, value.sum / value.count]))
+  return rates
 }
 
 function latestPositiveRate(days: readonly DayRecord[]) {

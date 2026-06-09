@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vitest run && vite build",
+    "test": "vitest run",
     "preview": "vite preview --host 0.0.0.0",
     "deploy:ha": "./deploy.sh ha.lan",
     "deploy:lev": "./deploy.sh levchenko@192.168.88.115"
@@ -20,6 +21,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "^6.0.3",
-    "vite": "^8.0.8"
+    "vite": "^8.0.8",
+    "vitest": "^4.1.8"
   }
 }
