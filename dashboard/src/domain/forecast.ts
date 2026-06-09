@@ -8,12 +8,8 @@ export interface ForecastResult {
   readonly productionDelta: number
   readonly roi: number
   readonly roiDelta: number
-  readonly roiDeltaUah: number
-  readonly previousRoiUah: number
   readonly income: number
   readonly incomeDelta: number
-  readonly incomeDeltaUah: number
-  readonly previousIncomeUah: number
 }
 
 export function calculateForecast({
@@ -35,12 +31,8 @@ export function calculateForecast({
   const production = projectMonthValue(currentMonthRow.production, currentMonthRow.date)
   const roi = projectMonthValue(rowRoiMoney(currentMonthRow, currency), currentMonthRow.date)
   const income = projectMonthValue(moneyFromUah(currentMonthRow.electricityPayment, currency, currentMonthRow.usdRate), currentMonthRow.date)
-  const roiUah = projectMonthValue(rowRoiMoney(currentMonthRow, 'UAH'), currentMonthRow.date)
-  const incomeUah = projectMonthValue(currentMonthRow.electricityPayment, currentMonthRow.date)
   const previousRoi = previousMonthRow ? rowRoiMoney(previousMonthRow, currency) : 0
   const previousIncome = previousMonthRow ? moneyFromUah(previousMonthRow.electricityPayment, currency, previousMonthRow.usdRate) : 0
-  const previousRoiUah = previousMonthRow ? rowRoiMoney(previousMonthRow, 'UAH') : 0
-  const previousIncomeUah = previousMonthRow ? previousMonthRow.electricityPayment : 0
 
   return {
     row: currentMonthRow,
@@ -49,12 +41,8 @@ export function calculateForecast({
     productionDelta: previousMonthRow ? production - previousMonthRow.production : 0,
     roi,
     roiDelta: previousMonthRow ? roi - previousRoi : 0,
-    roiDeltaUah: previousMonthRow ? roiUah - previousRoiUah : 0,
-    previousRoiUah,
     income,
     incomeDelta: previousMonthRow ? income - previousIncome : 0,
-    incomeDeltaUah: previousMonthRow ? incomeUah - previousIncomeUah : 0,
-    previousIncomeUah,
   }
 }
 

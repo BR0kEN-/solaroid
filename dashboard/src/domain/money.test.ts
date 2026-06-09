@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   moneyFromUah,
   moneyFromUsd,
-  rowPaybackMoney,
   rowRoiMoney,
   sumRowsFromUah,
   sumRowsRoiMoney,
@@ -55,11 +54,10 @@ describe('row money helpers', () => {
     expect(rowRoiMoney(row, 'USD')).toBe(31)
   })
 
-  it('falls back to row rate for USD ROI and launch rate for payback money', () => {
+  it('falls back to row rate for USD ROI', () => {
     const row = month({ electricitySavings: 1200, usdRate: 40, roiUsd: 0 })
 
     expect(rowRoiMoney(row, 'USD')).toBe(30)
-    expect(rowPaybackMoney(row, 'USD', 48)).toBe(25)
   })
 
   it('sums each UAH row with that row rate for display totals', () => {
