@@ -1152,6 +1152,40 @@ h2 {
   margin-bottom: 0;
 }
 
+.info-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.info-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.info-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.info-list dt,
+.info-list dd {
+  margin: 0;
+}
+
+.info-list dt {
+  color: var(--muted);
+}
+
+.info-list dd {
+  color: var(--text);
+  font-weight: 700;
+  text-align: right;
+}
+
 .modal-heading {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

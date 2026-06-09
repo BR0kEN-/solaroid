@@ -42,6 +42,7 @@ create table public.months (
   import_night numeric not null,
   consumption_day numeric not null,
   consumption_night numeric not null,
+  uah_usd_rate numeric,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (plant_id, date),

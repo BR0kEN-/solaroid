@@ -19,6 +19,7 @@ interface MonthRecord {
   readonly import_night: number
   readonly consumption_day: number
   readonly consumption_night: number
+  readonly uah_usd_rate?: number | null
   readonly updated_at?: string
 }
 
@@ -97,7 +98,7 @@ function toLoadedPlant({
   const fallbackUsdRate = latestPositiveRate(days)
   const tariffByMonth = new Map(tariffs.map((tariff) => [tariff.date, tariff]))
   const commercialDate = parseDate(plant.commercial_date)
-  const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthlyRates.get(month.date) ?? fallbackUsdRate, commercialDate))
+  const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthUsdRate(month, monthlyRates, fallbackUsdRate), commercialDate))
   const dailyRows = days.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialDate))
 
   return {
@@ -280,6 +281,13 @@ function averageUsdRateByMonth(days: readonly DayRecord[]) {
 
 function latestPositiveRate(days: readonly DayRecord[]) {
   return [...days].reverse().find((day) => day.uah_usd_rate > 0)?.uah_usd_rate ?? 1
+}
+
+function monthUsdRate(row: MonthRecord, dailyRates: ReadonlyMap<string, number>, fallbackUsdRate: number) {
+  const dailyRate = dailyRates.get(row.date)
+  if (dailyRate && dailyRate > 0) return dailyRate
+  if (row.uah_usd_rate && row.uah_usd_rate > 0) return row.uah_usd_rate
+  return fallbackUsdRate
 }
 
 function monthDate(date: string) {
