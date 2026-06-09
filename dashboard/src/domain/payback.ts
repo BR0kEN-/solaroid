@@ -1,4 +1,4 @@
-import { moneyFromUah, moneyFromUsd, sumRowsRoiMoney, type Currency } from './money'
+import { moneyFromUsd, sumRowsRoiMoney, type Currency } from './money'
 import type { MonthRow } from './types'
 
 export interface PaybackResult {
@@ -29,18 +29,14 @@ export function calculatePayback({
 }): PaybackResult | null {
   if (!investmentUsd) return null
 
-  const investmentUah = moneyFromUsd(investmentUsd, 'UAH', launchUsdRate)
-  const recoveredUah = sumRowsRoiMoney(rows, 'UAH')
-  const remainingUah = Math.max(0, investmentUah - recoveredUah)
-  const investment = moneyFromUah(investmentUah, currency, launchUsdRate)
-  const recovered = moneyFromUah(recoveredUah, currency, launchUsdRate)
-  const remaining = moneyFromUah(remainingUah, currency, launchUsdRate)
-  const progress = Math.min(100, Math.max(0, (recoveredUah / investmentUah) * 100))
+  const investment = moneyFromUsd(investmentUsd, currency, launchUsdRate)
+  const recovered = sumRowsRoiMoney(rows, currency)
+  const remaining = Math.max(0, investment - recovered)
+  const progress = Math.min(100, Math.max(0, (recovered / investment) * 100))
   const startDate = launchDate ?? rows[0]?.date
   const elapsedDays = startDate ? Math.max(1, daysBetween(startDate, today) + 1) : 0
-  const dailyAverageUah = elapsedDays ? recoveredUah / elapsedDays : 0
-  const dailyAverage = moneyFromUah(dailyAverageUah, currency, launchUsdRate)
-  const daysLeft = remainingUah <= 0 ? 0 : dailyAverageUah > 0 ? Math.ceil(remainingUah / dailyAverageUah) : null
+  const dailyAverage = elapsedDays ? recovered / elapsedDays : 0
+  const daysLeft = remaining <= 0 ? 0 : dailyAverage > 0 ? Math.ceil(remaining / dailyAverage) : null
   const payoffDuration = daysLeft === null ? null : fullDurationBetween(today, addDays(today, daysLeft))
 
   return { recovered, progress, dailyAverage, remaining, daysLeft, payoffDuration, investment, investmentUsd }

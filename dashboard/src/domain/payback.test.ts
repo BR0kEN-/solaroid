@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { calculatePayback, daysBetween, fullDurationBetween } from './payback'
 import type { MonthRow } from './types'
 
-function month(electricitySavings: number, date = '2026-01-01'): MonthRow {
+function month(electricitySavings: number, date = '2026-01-01', usdRate = 50): MonthRow {
   return {
     month: date,
     date: new Date(`${date}T00:00:00`),
@@ -23,8 +23,8 @@ function month(electricitySavings: number, date = '2026-01-01'): MonthRow {
     consumedPayment: 0,
     electricityPayment: 0,
     electricitySavings,
-    usdRate: 50,
-    roiUsd: electricitySavings / 50,
+    usdRate,
+    roiUsd: electricitySavings / usdRate,
     isCommercial: true,
   }
 }
@@ -37,8 +37,8 @@ describe('date durations', () => {
 })
 
 describe('payback', () => {
-  it('uses UAH as the stable cost basis across currencies', () => {
-    const rows = [month(1000, '2026-01-01'), month(3000, '2026-02-01')]
+  it('uses each mode currency basis for recovered value and payback', () => {
+    const rows = [month(1000, '2026-01-01', 40), month(3000, '2026-02-01', 60)]
     const common = {
       rows,
       investmentUsd: 200,
@@ -51,13 +51,13 @@ describe('payback', () => {
     const usd = calculatePayback({ ...common, currency: 'USD' })
 
     expect(uah?.progress).toBe(40)
-    expect(usd?.progress).toBe(40)
+    expect(usd?.progress).toBe(37.5)
     expect(uah?.daysLeft).toBe(15)
-    expect(usd?.daysLeft).toBe(15)
+    expect(usd?.daysLeft).toBe(17)
     expect(uah?.recovered).toBe(4000)
-    expect(usd?.recovered).toBe(80)
+    expect(usd?.recovered).toBe(75)
     expect(uah?.remaining).toBe(6000)
-    expect(usd?.remaining).toBe(120)
+    expect(usd?.remaining).toBe(125)
   })
 
   it('returns null without an investment and clamps completed payback', () => {

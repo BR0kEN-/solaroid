@@ -17,10 +17,6 @@ export function rowRoiMoney(row: MonthRow, currency: Currency) {
   return row.roiUsd || moneyFromUah(row.electricitySavings, currency, row.usdRate)
 }
 
-export function rowPaybackMoney(row: MonthRow, currency: Currency, usdRate: number) {
-  return moneyFromUah(row.electricitySavings, currency, usdRate)
-}
-
 export function sumRowsFromUah(rows: readonly MonthRow[], selector: (row: MonthRow) => number, currency: Currency) {
   return rows.reduce((sum, row) => sum + moneyFromUah(selector(row), currency, row.usdRate), 0)
 }

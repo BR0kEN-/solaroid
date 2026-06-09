@@ -57,13 +57,11 @@ describe('forecast calculations', () => {
     expect(forecast?.productionDelta).toBe(20)
     expect(forecast?.roi).toBe(1320)
     expect(forecast?.roiDelta).toBe(320)
-    expect(forecast?.roiDeltaUah).toBe(320)
     expect(forecast?.income).toBe(2200)
     expect(forecast?.incomeDelta).toBe(200)
-    expect(forecast?.incomeDeltaUah).toBe(200)
   })
 
-  it('keeps USD displayed deltas separate from UAH percent-comparison deltas', () => {
+  it('uses month rates for USD forecast values and deltas', () => {
     const forecast = calculateForecast({
       rows: [
         month({ date: '2026-05-01', production: 100, electricitySavings: 1_000, electricityPayment: 2_000, usdRate: 40 }),
@@ -76,12 +74,8 @@ describe('forecast calculations', () => {
 
     expect(forecast?.roi).toBe(30)
     expect(forecast?.roiDelta).toBe(5)
-    expect(forecast?.roiDeltaUah).toBe(320)
-    expect(forecast?.previousRoiUah).toBe(1_000)
     expect(forecast?.income).toBe(50)
     expect(forecast?.incomeDelta).toBe(0)
-    expect(forecast?.incomeDeltaUah).toBe(200)
-    expect(forecast?.previousIncomeUah).toBe(2_000)
   })
 
   it('returns null without rows', () => {

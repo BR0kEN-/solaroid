@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
 import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
-import { moneyFromUah, moneyFromUsd, rowPaybackMoney, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
+import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
 import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
@@ -421,14 +421,6 @@ function exportPayoutKwh(row: MonthRow) {
 
 function exportPayoutUah(row: MonthRow) {
   return exportPayoutKwh(row) * netExportRate(row);
-}
-
-function withUsdRate(row: MonthRow, usdRate: number) {
-  return {
-    ...row,
-    usdRate,
-    roiUsd: usdRate ? row.electricitySavings / usdRate : 0,
-  };
 }
 
 function sameMonth(first: Date, second: Date) {
@@ -868,11 +860,8 @@ function App() {
     const roiDisplay = sumRowsRoiMoney(rows, currency);
     const latest = rows.at(-1);
     const latestRow = dataState.rows.at(-1);
-    const latestDailyRow = dataState.dailyRows.at(-1);
-    const latestDailyUsdRate = latestDailyRow?.usdRate || [...dataState.dailyRows].reverse().find((row) => row.usdRate > 0)?.usdRate;
-    const latestDisplayUsdRate = latestRow && latestDailyRow && sameMonth(latestRow.date, latestDailyRow.date) && latestDailyUsdRate ? latestDailyUsdRate : latestRow?.usdRate;
-    const latestDisplayRow = latestRow && latestDisplayUsdRate ? withUsdRate(latestRow, latestDisplayUsdRate) : latestRow;
-    const latestPaymentDisplay = latestDisplayRow ? moneyFromUah(latestDisplayRow.electricityPayment, currency, latestDisplayRow.usdRate) : 0;
+    const latestDisplayRow = latestRow;
+    const latestPaymentDisplay = latestRow ? moneyFromUah(latestRow.electricityPayment, currency, latestRow.usdRate) : 0;
     const production = rows.reduce((sum, row) => sum + row.production, 0);
     const exported = rows.reduce((sum, row) => sum + row.export, 0);
     const exportPayoutKwhTotal = rows.reduce((sum, row) => sum + exportPayoutKwh(row), 0);
@@ -887,7 +876,7 @@ function App() {
     const covered = consumed ? ((consumed - imported) / consumed) * 100 : 0;
     const launchDate = dataState.launchDate ?? rows[0]?.date;
     const activeDuration = launchDate ? fullDurationBetween(launchDate, new Date()) : { months: 0, days: 0 };
-    const usdRate = latestDailyUsdRate || latest?.usdRate || [...rows].reverse().find((row) => row.usdRate > 0)?.usdRate || 1;
+    const usdRate = latest?.usdRate || [...rows].reverse().find((row) => row.usdRate > 0)?.usdRate || 1;
     const launchUsdRate = launchDate ? dataState.rows.find((row) => sameMonth(row.date, launchDate))?.usdRate || usdRate : usdRate;
     return {
       roi,
@@ -1311,8 +1300,6 @@ function App() {
                     delta={forecast.roiDelta}
                     formattedDelta={formatSignedMoney(forecast.roiDelta, currency, lang)}
                     base={forecast.previousRow ? rowRoiMoney(forecast.previousRow, currency) : 0}
-                    pctDelta={forecast.roiDeltaUah}
-                    pctBase={forecast.previousRoiUah}
                     label={forecast.previousRow ? `${lang === "uk" ? "до" : "vs"} ${formatMonthOnly(forecast.previousRow.date, lang)}` : ""}
                   />
                 }
@@ -1328,8 +1315,6 @@ function App() {
                     delta={forecast.incomeDelta}
                     formattedDelta={formatSignedMoney(forecast.incomeDelta, currency, lang)}
                     base={forecast.previousRow ? moneyFromUah(forecast.previousRow.electricityPayment, currency, forecast.previousRow.usdRate) : 0}
-                    pctDelta={forecast.incomeDeltaUah}
-                    pctBase={forecast.previousIncomeUah}
                     label={forecast.previousRow ? `${lang === "uk" ? "до" : "vs"} ${formatMonthOnly(forecast.previousRow.date, lang)}` : ""}
                   />
                 }
@@ -1382,7 +1367,6 @@ function App() {
                 rows={rows}
                 currency={currency}
                 investment={payback ? payback.investment : 0}
-                paybackUsdRate={totals.launchUsdRate}
               />
             )}
           </ChartPanel>
@@ -1589,27 +1573,21 @@ function ForecastDetail({
   delta,
   formattedDelta,
   base,
-  pctDelta,
-  pctBase,
   label,
 }: {
   readonly current: string;
   readonly delta: number;
   readonly formattedDelta: string;
   readonly base: number;
-  readonly pctDelta?: number;
-  readonly pctBase?: number;
   readonly label: string;
 }) {
-  const displayDelta = pctDelta ?? delta;
-  const displayBase = pctBase ?? base;
   return (
     <span className="forecast-detail">
       <span>{current}</span>
       {base ? (
         <span className={deltaTone(delta)}>
           {formattedDelta}
-          {formatDeltaPct(displayDelta, displayBase)} {label}
+          {formatDeltaPct(delta, base)} {label}
         </span>
       ) : null}
     </span>
@@ -2459,25 +2437,23 @@ function RoiChart({
   rows,
   currency,
   investment,
-  paybackUsdRate,
 }: {
   readonly rows: readonly MonthRow[];
   readonly currency: Currency;
   readonly investment: number;
-  readonly paybackUsdRate: number;
 }) {
   const t = i18n[APP_LANG];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const chronologicalRows = useMemo(
     () =>
       rows.reduce<Array<{ row: MonthRow; cumulative: number; cumulativePct: number; monthly: number }>>((items, row) => {
-      const monthly = rowPaybackMoney(row, currency, paybackUsdRate);
+      const monthly = rowRoiMoney(row, currency);
       const cumulative = (items.at(-1)?.cumulative ?? 0) + monthly;
       const cumulativePct = investment > 0 ? (cumulative / investment) * 100 : 0;
       items.push({ row, monthly, cumulative, cumulativePct });
       return items;
     }, []),
-    [currency, investment, paybackUsdRate, rows],
+    [currency, investment, rows],
   );
   const displayRows = useMemo(() => (isMobile ? [...chronologicalRows].reverse() : chronologicalRows), [chronologicalRows, isMobile]);
   const inspectors = useMemo(
