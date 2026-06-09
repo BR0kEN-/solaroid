@@ -52,7 +52,7 @@ Canonical tables:
 
 - `plants`: plant metadata, investment, launch date, commercial date.
 - `days`: daily cumulative snapshots and daily currency rates.
-- `months`: monthly cumulative snapshots.
+- `months`: monthly cumulative snapshots and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
 - `access_tokens`: one token owns read/write access to its `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a token.
@@ -215,7 +215,7 @@ Currency rules:
 
 - UAH values are native and summed directly.
 - USD monthly totals convert each month using that month's USD/UAH rate.
-- Daily rows do not always have their own stable monthly average, so check mapping logic in `dashboard/src/data/supabase.ts`.
+- Monthly USD/UAH uses the average of available daily rates first. If a month has no daily rates, `months.uah_usd_rate` can be filled manually as the fallback.
 - Investment is stored in USD. In UAH mode it is converted using the launch month USD/UAH rate.
 
 ## UI Conventions

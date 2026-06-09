@@ -38,6 +38,7 @@ type InfoModal =
   | "roi"
   | "forecast"
   | "investment"
+  | "plantWorks"
   | {
     readonly kind: "importSplit" | "consumedSplit" | "exportPrice" | "netPayment";
     readonly row: MonthRow;
@@ -116,12 +117,15 @@ const i18n = {
     exportUnpaid: "Export is unpaid before the commercial date",
     netPaymentLogic: "Net payment is the cash result of monthly import/export balancing. Balance is import minus export. If export is larger than import, the balance is negative and the net surplus is paid using the export price after VAT and military tax. Otherwise, export offsets import proportionally between day and night import, then the remaining day/night import is charged at its own rate.",
     netPaymentInfo: "UAH totals are summed directly. In USD mode, each month is converted using that month's USD/UAH rate, then those converted values are summed. It is not the UAH total divided by the latest rate.",
-    usdRateInfo: "Monthly USD/UAH is the average of the daily USD/UAH rates stored for that month. The dashboard uses this monthly average when converting monthly UAH values to USD.",
+    usdRateInfo: "Monthly USD/UAH is the average of the daily USD/UAH rates stored for that month. If a month has no daily rates, the dashboard uses the manually stored monthly USD/UAH fallback.",
     importPriceInfo: "Import prices are shown as day / night. Day is the rate from 7 AM to 11 PM; night is the rate from 11 PM to 7 AM.",
     roiInfo: "ROI is not production multiplied by export price. It is the effective investment recovery for the period: the value of electricity consumed from the solar system plus export payout when commercial export is active, minus grid import costs. Before the commercial date, export is unpaid and does not offset import, so ROI is based only on inferred self-consumed solar energy: production minus export, valued by the weighted day/night import rate.",
     savings: "Savings",
     plantWorks: "Plant works",
     sinceLaunch: "since",
+    launchDate: "Launch date",
+    commercialDate: "Commercial date",
+    plantWorksInfo: "Plant works is counted from the launch date. Commercial export rules start from the commercial date.",
     investmentRecovered: "investment recovered",
     investmentInfo: "The USD value is the stored plant investment. In UAH mode, the dashboard converts that USD investment using the USD/UAH rate from the plant launch month, because that represents the original hryvnia cost basis.",
     payback: "Payback",
@@ -228,12 +232,15 @@ const i18n = {
     exportUnpaid: "До комерційної дати експорт не оплачується",
     netPaymentLogic: "Баланс оплати — це грошовий результат місячного балансу імпорту й експорту. Баланс рахується як імпорт мінус експорт. Якщо експорт більший за імпорт, баланс відʼємний і чистий надлишок оплачується за ціною експорту після ПДВ і військового збору. Інакше експорт пропорційно покриває денний і нічний імпорт, а залишок денного/нічного імпорту оплачується за відповідним тарифом.",
     netPaymentInfo: "Суми в гривнях додаються напряму. У режимі USD кожен місяць конвертується за його курсом, а потім конвертовані значення додаються. Це не сума в гривнях, поділена на останній курс.",
-    usdRateInfo: "Місячний курс USD/UAH — це середнє значення денних курсів USD/UAH, збережених за цей місяць. Дашборд використовує це середнє для конвертації місячних значень у гривнях в USD.",
+    usdRateInfo: "Місячний курс USD/UAH — це середнє значення денних курсів USD/UAH, збережених за цей місяць. Якщо в місяці немає денних курсів, дашборд використовує вручну збережений місячний резервний курс USD/UAH.",
     importPriceInfo: "Ціни імпорту показані як день / ніч. День — тариф з 7:00 до 23:00; ніч — тариф з 23:00 до 7:00.",
     roiInfo: "ПІ — це не генерація, помножена на ціну експорту. Це фактичне повернення інвестицій за період: вартість електроенергії, спожитої з сонячної системи, плюс виплата за експорт після початку комерційного експорту, мінус витрати на імпорт з мережі. До комерційної дати експорт не оплачується і не перекриває імпорт, тому ПІ рахується лише з орієнтовно спожитої власної сонячної енергії: генерація мінус експорт, оцінені за зваженим денним/нічним тарифом імпорту.",
     savings: "Економія",
     plantWorks: "Станція працює",
     sinceLaunch: "з",
+    launchDate: "Дата запуску",
+    commercialDate: "Комерційна дата",
+    plantWorksInfo: "Час роботи станції рахується від дати запуску. Правила комерційного експорту починають діяти з комерційної дати.",
     investmentRecovered: "інвестиції повернуто",
     investmentInfo: "Значення в USD — це збережена вартість станції. У режимі UAH дашборд конвертує цю суму за курсом USD/UAH з місяця запуску станції, бо саме він відображає початкову вартість у гривні.",
     payback: "Окупність",
@@ -1042,6 +1049,26 @@ function App() {
     if (infoModal === "roi") return { title: t.roi, body: t.roiInfo };
     if (infoModal === "forecast") return { title: t.forecast, body: t.forecastInfo };
     if (infoModal === "investment") return { title: t.investment, body: t.investmentInfo };
+    if (infoModal === "plantWorks") {
+      return {
+        title: t.plantWorks,
+        body: (
+          <div className="info-stack">
+            <p>{t.plantWorksInfo}</p>
+            <dl className="info-list">
+              <div>
+                <dt>{t.launchDate}</dt>
+                <dd>{totals.launchDate ? formatLaunchDate(totals.launchDate, lang) : "-"}</dd>
+              </div>
+              <div>
+                <dt>{t.commercialDate}</dt>
+                <dd>{dataState.commercialDate ? formatLaunchDate(dataState.commercialDate, lang) : "-"}</dd>
+              </div>
+            </dl>
+          </div>
+        ),
+      };
+    }
     if (infoModal === "totalExport") {
       const exportValue = formatKwh(totals.exported, lang);
       const paidExportValue = formatKwh(totals.exportPayoutKwhTotal, lang);
@@ -1267,6 +1294,8 @@ function App() {
               value={formatActiveDuration(totals.activeDuration, lang)}
               detail={totals.launchDate ? `${t.sinceLaunch} ${formatLaunchDate(totals.launchDate, lang)}` : t.sinceLaunch}
               tone="indigo"
+              infoLabel={t.plantWorks}
+              onInfo={() => setInfoModal("plantWorks")}
             />
           </section>
         )}
