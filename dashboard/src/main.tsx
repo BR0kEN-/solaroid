@@ -33,6 +33,7 @@ interface PlantComparisonResult {
 type InfoModal =
   | "latestRoi"
   | "netPayment"
+  | "totalProduction"
   | "totalExport"
   | "totalImport"
   | "usdRate"
@@ -95,6 +96,7 @@ const i18n = {
     cumulative: "Cumulative",
     production: "Production",
     totalProduction: "Total production",
+    totalProductionCostInfoDetails: "This hypothetical value treats every produced kWh as sold at its own month's export price after VAT and military tax. In USD mode, each month is converted using that month's USD/UAH rate.",
     exported: "exported",
     export: "Export",
     totalExport: "Total export",
@@ -210,6 +212,7 @@ const i18n = {
     cumulative: "Сумарно",
     production: "Генерація",
     totalProduction: "Загальна генерація",
+    totalProductionCostInfoDetails: "Це умовне значення рахує кожну згенеровану кВт·г як продану за ціною експорту свого місяця після ПДВ і військового збору. У режимі USD кожен місяць конвертується за його курсом USD/UAH.",
     exported: "експортовано",
     export: "Експорт",
     totalExport: "Загальний експорт",
@@ -421,6 +424,10 @@ function exportPayoutKwh(row: MonthRow) {
 
 function exportPayoutUah(row: MonthRow) {
   return exportPayoutKwh(row) * netExportRate(row);
+}
+
+function productionSoldUah(row: MonthRow) {
+  return row.production * netExportRate(row);
 }
 
 function sameMonth(first: Date, second: Date) {
@@ -863,6 +870,7 @@ function App() {
     const latestDisplayRow = latestRow;
     const latestPaymentDisplay = latestRow ? moneyFromUah(latestRow.electricityPayment, currency, latestRow.usdRate) : 0;
     const production = rows.reduce((sum, row) => sum + row.production, 0);
+    const productionSoldDisplay = sumRowsFromUah(rows, productionSoldUah, currency);
     const exported = rows.reduce((sum, row) => sum + row.export, 0);
     const exportPayoutKwhTotal = rows.reduce((sum, row) => sum + exportPayoutKwh(row), 0);
     const exportPayoutDisplay = sumRowsFromUah(rows, exportPayoutUah, currency);
@@ -886,6 +894,7 @@ function App() {
       latestDisplayRow,
       latestPaymentDisplay,
       production,
+      productionSoldDisplay,
       exported,
       exportPayoutKwhTotal,
       exportPayoutDisplay,
@@ -1016,6 +1025,15 @@ function App() {
         ),
       };
     }
+    if (infoModal === "totalProduction") {
+      const productionValue = formatKwh(totals.production, lang);
+      const soldValue = formatDisplayMoney(totals.productionSoldDisplay, currency, lang);
+      const body =
+        lang === "uk"
+          ? `Якби вся генерація ${productionValue} була продана, вона коштувала б ${soldValue}. ${t.totalProductionCostInfoDetails}`
+          : `If the full ${productionValue} production had been sold, it would have been worth ${soldValue}. ${t.totalProductionCostInfoDetails}`;
+      return { title: t.totalProduction, body };
+    }
     if (infoModal === "totalExport") {
       const exportValue = formatKwh(totals.exported, lang);
       const paidExportValue = formatKwh(totals.exportPayoutKwhTotal, lang);
@@ -1046,6 +1064,8 @@ function App() {
     totals.exported,
     totals.importCostDisplay,
     totals.imported,
+    totals.production,
+    totals.productionSoldDisplay,
   ]);
 
   return (
@@ -1207,6 +1227,8 @@ function App() {
               value={formatKwh(totals.production, lang)}
               detail={`${pct((totals.exported / totals.production) * 100)} ${t.exported}`}
               tone="amber"
+              infoLabel={t.totalProduction}
+              onInfo={() => setInfoModal("totalProduction")}
             />
             <KpiCard
               icon={<ArrowUpFromLine size={20} />}
