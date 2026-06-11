@@ -1,22 +1,33 @@
 :root {
   --bg: transparent;
-  --panel: #fff;
-  --panel-soft: #f7f8fa;
-  --text: #202326;
-  --muted: #6b716f;
-  --border: #d9dee5;
-  --control: #eef1f5;
-  --shadow: rgba(32, 35, 38, 0.08);
-  --block-shadow: 0 8px 20px var(--shadow);
+  --panel: #fcfdfb;
+  --panel-soft: #f2f6f3;
+  --text: #1d231f;
+  --muted: #5f6a63;
+  --border: #cbd7cd;
+  --control: #e8eee9;
+  --solar: #e39b12;
+  --solar-strong: #b86f00;
+  --cyan: #0c8794;
+  --green: #168462;
+  --rose: #b54949;
+  --indigo: #5960bd;
+  --panel-highlight: rgba(255, 255, 255, 0.86);
+  --shadow: rgba(26, 38, 31, 0.08);
+  --block-shadow: 0 4px 8px var(--shadow);
+  --focus-ring: color-mix(in srgb, var(--cyan), transparent 52%);
+  --shell-wash: color-mix(in srgb, var(--solar), transparent 91%);
+  --shell-tint: color-mix(in srgb, var(--cyan), transparent 96%);
   --warning-bg: #fff3d8;
   --warning-border: #efd28e;
   --warning-text: #6d4422;
-  --table-head: #f7f8fa;
-  --row-hover: #f5f8fb;
-  --skeleton-base: #e7ebf0;
-  --skeleton-highlight: #f4f6f8;
+  --table-head: #eef4ef;
+  --row-hover: #f3f8f4;
+  --skeleton-base: #dce5df;
+  --skeleton-highlight: #f3f7f4;
   --formula-result-bg: #e8f4ff;
   --formula-result-text: #155f93;
+  --modal-shadow: 0 14px 14px rgba(26, 38, 31, 0.18);
   color: var(--text);
   background: transparent;
   font-family:
@@ -28,24 +39,35 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: transparent;
-    --panel: #1c2026;
-    --panel-soft: #252a31;
-    --text: #eef2f6;
-    --muted: #a8b0b8;
-    --border: #333a43;
-    --control: #272d35;
-    --shadow: rgba(0, 0, 0, 0.28);
-    --block-shadow: 0 8px 20px var(--shadow);
+    --bg: #0f1513;
+    --panel: #151b19;
+    --panel-soft: #1c2522;
+    --text: #edf4ef;
+    --muted: #a9b6ad;
+    --border: #314039;
+    --control: #24302c;
+    --solar: #f1ad2f;
+    --solar-strong: #ffc35b;
+    --cyan: #36b7c4;
+    --green: #64c99e;
+    --rose: #e07a75;
+    --indigo: #9094e7;
+    --panel-highlight: rgba(255, 255, 255, 0.06);
+    --shadow: rgba(0, 0, 0, 0.3);
+    --block-shadow: 0 4px 8px var(--shadow);
+    --focus-ring: color-mix(in srgb, var(--cyan), transparent 50%);
+    --shell-wash: color-mix(in srgb, #0f1513, transparent 8%);
+    --shell-tint: color-mix(in srgb, #111d19, transparent 18%);
     --warning-bg: #302513;
     --warning-border: #6b5120;
     --warning-text: #f3d18b;
-    --table-head: #252a31;
-    --row-hover: #222a32;
+    --table-head: #202c28;
+    --row-hover: #1f2d28;
     --skeleton-base: #2d333c;
     --skeleton-highlight: #3a414c;
     --formula-result-bg: #163246;
     --formula-result-text: #9bd5ff;
+    --modal-shadow: 0 14px 14px rgba(0, 0, 0, 0.44);
   }
 }
 
@@ -62,7 +84,7 @@ body {
   margin: 0;
   min-width: 320px;
   color: var(--text);
-  background: transparent;
+  background: var(--bg);
   overscroll-behavior: none;
 }
 
@@ -83,14 +105,41 @@ button {
   width: 38px;
   height: 38px;
   color: var(--text);
-  background: var(--control);
-  border: 0;
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent),
+    var(--control);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 12%);
   border-radius: 8px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
 }
 
 .icon-button:hover,
 .icon-button:focus-visible {
-  background: color-mix(in srgb, var(--control), var(--text) 8%);
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent),
+    color-mix(in srgb, var(--control), var(--cyan) 10%);
+  border-color: color-mix(in srgb, var(--cyan), var(--border) 45%);
+}
+
+.icon-button:focus-visible,
+.investment-info-button:focus-visible,
+.kpi-info-button:focus-visible,
+.table-info-button:focus-visible,
+.section-info-button:focus-visible,
+.segmented button:focus-visible,
+.plant-comparison-controls input:focus-visible,
+.plant-comparison-controls select:focus-visible,
+.plant-comparison-controls button:focus-visible,
+.filter-box:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.icon-button:active {
+  transform: translateY(1px);
 }
 
 .icon-button:disabled {
@@ -116,7 +165,10 @@ button {
 .app-shell {
   min-height: 0;
   overscroll-behavior: none;
-  background: transparent;
+  background:
+    linear-gradient(132deg, var(--shell-wash) 0 12rem, transparent 30rem),
+    linear-gradient(180deg, var(--shell-tint), transparent 16rem),
+    var(--bg);
 }
 
 .kpi-icon {
@@ -187,8 +239,10 @@ h2 {
   min-height: 46px;
   padding: 7px 38px 7px 16px;
   white-space: nowrap;
-  background: var(--control);
-  border: 0;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--solar), transparent 91%), transparent 72%),
+    var(--control);
+  border: 1px solid color-mix(in srgb, var(--solar), var(--border) 72%);
   border-radius: 8px;
   min-width: 144px;
 }
@@ -198,7 +252,7 @@ h2 {
   inset: 8px auto 8px 7px;
   width: 3px;
   content: "";
-  background: color-mix(in srgb, #f4c35b, var(--control) 16%);
+  background: linear-gradient(180deg, var(--solar-strong), var(--cyan));
   border-radius: 999px;
 }
 
@@ -243,7 +297,10 @@ h2 {
   grid-template-columns: repeat(5, 48px);
   gap: 4px;
   padding: 4px;
-  background: var(--control);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-highlight), transparent 20%), transparent),
+    var(--control);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 18%);
   border-radius: 8px;
 }
 
@@ -267,11 +324,20 @@ h2 {
   border: 0;
   border-radius: 6px;
   overflow-wrap: anywhere;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .segmented button.selected {
-  background: var(--panel);
-  box-shadow: var(--block-shadow);
+  color: color-mix(in srgb, var(--text), var(--cyan) 18%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--cyan), transparent 91%), transparent 74%),
+    var(--panel);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--cyan), transparent 48%),
+    0 2px 4px var(--shadow);
 }
 
 .notice {
@@ -308,10 +374,23 @@ h2 {
 .plant-comparison-section,
 .payback-band,
 .daily-compare {
-  background: var(--panel);
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent 64px),
+    var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: var(--block-shadow);
+  box-shadow:
+    inset 0 1px 0 var(--panel-highlight),
+    var(--block-shadow);
+}
+
+.chart-panel,
+.data-section,
+.plant-comparison-section,
+.daily-compare {
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent 52px),
+    var(--panel);
 }
 
 .kpi-card {
@@ -320,6 +399,15 @@ h2 {
   gap: 8px;
   min-width: 0;
   padding: 14px;
+  overflow: hidden;
+}
+
+.kpi-card::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  content: "";
+  background: linear-gradient(90deg, var(--tone), color-mix(in srgb, var(--tone), transparent 84%));
 }
 
 .kpi-info-button {
@@ -396,35 +484,46 @@ h2 {
   color: var(--muted);
 }
 
+.kpi-card span {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .kpi-card strong {
   overflow-wrap: anywhere;
   font-size: 1.25rem;
+  line-height: 1.08;
 }
 
 .kpi-icon {
   color: var(--tone);
-  background: color-mix(in srgb, var(--tone), var(--panel) 86%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tone), transparent 78%), transparent),
+    color-mix(in srgb, var(--tone), var(--panel) 88%);
+  border: 1px solid color-mix(in srgb, var(--tone), transparent 62%);
 }
 
 .kpi-card.green,
 .kpi-card.mint {
-  --tone: #18956f;
+  --tone: var(--green);
 }
 
 .kpi-card.amber {
-  --tone: #c48212;
+  --tone: var(--solar);
 }
 
 .kpi-card.blue {
-  --tone: #3175c7;
+  --tone: var(--cyan);
 }
 
 .kpi-card.rose {
-  --tone: #bd5454;
+  --tone: var(--rose);
 }
 
 .kpi-card.indigo {
-  --tone: #6266c9;
+  --tone: var(--indigo);
 }
 
 .forecast-section {
@@ -442,6 +541,9 @@ h2 {
 
 .forecast-grid .kpi-card {
   box-shadow: none;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tone), transparent 96%), transparent 72px),
+    var(--panel-soft);
 }
 
 .forecast-detail {
@@ -619,7 +721,8 @@ h2 {
   font-size: 0.68rem;
   font-style: normal;
   font-weight: 700;
-  background: var(--control);
+  background: color-mix(in srgb, var(--control), var(--cyan) 6%);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 20%);
   border-radius: 999px;
 }
 
@@ -681,7 +784,8 @@ h2 {
   font-size: 0.68rem;
   font-style: normal;
   font-weight: 700;
-  background: var(--control);
+  background: color-mix(in srgb, var(--control), var(--cyan) 6%);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 20%);
   border-radius: 999px;
 }
 
@@ -693,6 +797,7 @@ h2 {
   height: 18px;
   overflow: hidden;
   background: var(--control);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 20%);
   border-radius: 999px;
 }
 
@@ -735,7 +840,9 @@ h2 {
   height: 42px;
   padding: 0 32px 0 14px;
   color: var(--muted);
-  background: var(--panel);
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent),
+    var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -770,13 +877,14 @@ h2 {
   height: 10px;
   overflow: hidden;
   background: var(--control);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 18%);
   border-radius: 999px;
 }
 
 .progress-track span {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #e4a11b, #18956f);
+  background: linear-gradient(90deg, var(--solar), var(--cyan), var(--green));
 }
 
 .chart-grid {
@@ -841,9 +949,9 @@ h2 {
 
 .chart-hit:hover,
 .chart-hit:focus {
-  filter: brightness(0.92);
+  filter: saturate(1.1) brightness(0.96);
   stroke: var(--text);
-  stroke-width: 2;
+  stroke-width: 1.5;
 }
 
 .chart-month-target,
@@ -856,14 +964,14 @@ h2 {
 
 .chart-month-target:hover,
 .chart-month-target:focus {
-  opacity: 0.06;
+  opacity: 0.045;
   filter: none;
   stroke: var(--text);
   stroke-width: 1;
 }
 
 .chart-month-target.active {
-  opacity: 0.09;
+  opacity: 0.075;
   filter: none;
   stroke: var(--text);
   stroke-width: 1.5;
@@ -886,7 +994,7 @@ h2 {
   }
 
   .chart-month-target.active {
-    opacity: 0.09;
+    opacity: 0.075;
     stroke: var(--text);
     stroke-width: 1.5;
   }
@@ -910,6 +1018,7 @@ h2 {
   background: var(--panel-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
+  box-shadow: inset 0 1px 0 var(--panel-highlight);
 }
 
 .chart-inspector strong {
@@ -959,7 +1068,7 @@ h2 {
   overscroll-behavior-y: auto;
   overscroll-behavior-inline: none;
   -webkit-overflow-scrolling: touch;
-  background: var(--panel);
+  background: color-mix(in srgb, var(--panel), var(--panel-soft) 34%);
   border-radius: 6px;
   contain: paint;
 }
@@ -978,7 +1087,7 @@ h2 {
 }
 
 .grid line {
-  stroke: var(--border);
+  stroke: transparent;
   stroke-width: 1;
 }
 
@@ -1022,7 +1131,9 @@ h2 {
   min-width: 0;
   overflow: hidden;
   padding: 12px;
-  background: var(--panel-soft);
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent 64px),
+    var(--panel-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -1122,7 +1233,10 @@ h2 {
   padding: 18px;
   overflow: hidden;
   overscroll-behavior: none;
-  background: color-mix(in srgb, var(--text), transparent 72%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg), transparent 22%), transparent),
+    color-mix(in srgb, var(--text), transparent 56%);
+  backdrop-filter: blur(3px);
 }
 
 .modal-card {
@@ -1134,12 +1248,36 @@ h2 {
 }
 
 .info-modal {
+  position: relative;
   width: min(520px, 100%);
-  padding: 18px;
-  background: var(--panel);
+  padding: 20px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--cyan), transparent 92%) 1px, transparent 1px),
+    linear-gradient(180deg, color-mix(in srgb, var(--solar), transparent 93%) 1px, transparent 1px),
+    linear-gradient(180deg, var(--panel-highlight), transparent 70px),
+    var(--panel);
+  background-size:
+    24px 24px,
+    24px 24px,
+    auto,
+    auto;
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: var(--block-shadow);
+  box-shadow: var(--modal-shadow);
+}
+
+.info-modal::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  content: "";
+  background: linear-gradient(90deg, var(--solar), var(--cyan), var(--green));
+  border-radius: 8px 8px 0 0;
+}
+
+.info-modal > * {
+  position: relative;
+  z-index: 1;
 }
 
 .info-modal-body {
@@ -1167,8 +1305,8 @@ h2 {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  padding: 10px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
 }
 
 .info-list dt,
@@ -1191,7 +1329,9 @@ h2 {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
+  padding-bottom: 12px;
   margin-bottom: 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 18%);
 }
 
 .modal-heading h2 {
@@ -1234,8 +1374,8 @@ h2 {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: baseline;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
 }
 
 .split-info div:last-child {
@@ -1263,8 +1403,8 @@ h2 {
 .math-info div {
   display: grid;
   gap: 5px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 11px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
 }
 
 .math-info div:last-child {
@@ -1332,13 +1472,17 @@ thead th {
   z-index: 1;
   color: var(--muted);
   font-size: 0.78rem;
-  background: var(--table-head);
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent),
+    var(--table-head);
 }
 
 tfoot th,
 tfoot td {
   font-weight: 700;
-  background: var(--table-head);
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent),
+    var(--table-head);
   border-bottom: 0;
 }
 
@@ -1364,12 +1508,12 @@ tbody tr:hover {
 }
 
 .positive {
-  color: #137a5b;
+  color: var(--green);
   font-weight: 700;
 }
 
 .negative {
-  color: #b14d4d;
+  color: var(--rose);
   font-weight: 700;
 }
 
@@ -1454,6 +1598,17 @@ tbody tr:hover {
 @keyframes shimmer {
   100% {
     transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }
 
