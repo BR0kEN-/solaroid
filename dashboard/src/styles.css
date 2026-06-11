@@ -1602,7 +1602,7 @@ tbody tr:hover {
     flex: 0 0 46px;
   }
 
-  .segmented:not(.currency):not(.view):not(.daily-tools) {
+  .segmented:not(.currency):not(.view):not(.daily-tools):not(.plant-comparison-mode) {
     order: 5;
     flex: 1 1 100%;
     grid-template-columns: repeat(5, minmax(0, 1fr));
