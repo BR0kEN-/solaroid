@@ -1,4 +1,5 @@
 import type { SupabaseClient } from './client.ts'
+import { ForbiddenError } from './errors.ts'
 import { Input } from './schema.ts'
 import { dateUtil } from './utils/date.ts'
 
@@ -41,6 +42,10 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
 }
 
 async function write(request: Request, token: Solaroid.Supabase.Access.Token, client: SupabaseClient) {
+  if (token.kind !== 'ingest') {
+    throw new ForbiddenError()
+  }
+
   const rows = getRows(Input.parse(await request.json()), token)
 
   await client.upsertPlantRow('days', rows.day)

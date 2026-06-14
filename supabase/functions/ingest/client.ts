@@ -2,6 +2,14 @@ import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from './config.ts'
 import { dateUtil } from './utils/date.ts'
 
+async function tokenHash(token: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 export class SupabaseClient {
   protected readonly client
 
@@ -18,23 +26,67 @@ export class SupabaseClient {
     )
   }
 
-  async getAccessToken(tokenHash: string): Promise<Solaroid.Supabase.Access.Token | undefined> {
+  async getAccessToken(bearer: string): Promise<Solaroid.Supabase.Access.Token | undefined> {
     const { data, error } = await this.client
       .from('access_tokens')
       .select(`id,plant_id,reads:access_token_read_scopes(plant_id)`)
-      .eq('token_hash', tokenHash)
+      .eq('token_hash', await tokenHash(bearer))
       .limit(1)
 
     if (error) throw new Error('access token lookup failed', { cause: error })
 
     const token = data?.[0]
 
-    if (!token) return undefined
+    if (token) {
+      return {
+        ...token,
+        kind: 'ingest',
+        reads: token.reads.map((scope) => scope.plant_id),
+      }
+    }
+
+    const { data: { user }, error: authError } = await this.client.auth.getUser(bearer)
+
+    if (authError || !user?.confirmed_at) return undefined
+
+    const plantIds = await this.#getUserPlantIds(user.id)
+
+    if (plantIds.length === 0) return undefined
 
     return {
-      ...token,
-      reads: token.reads.map((scope) => scope.plant_id),
+      id: user.id,
+      kind: 'auth',
+      plant_id: plantIds[0],
+      reads: plantIds.slice(1),
     }
+  }
+
+  async #getUserPlantIds(userId: string): Promise<readonly Solaroid.Supabase.Plant.Id[]> {
+    const { data: access, error: accessError } = await this.client
+      .from('user_plant_access')
+      .select('plant_id')
+      .eq('user_id', userId)
+      .order('plant_id', { ascending: true })
+
+    if (accessError) throw new Error('user plant access lookup failed', { cause: accessError })
+
+    return access.map((row) => row.plant_id)
+  }
+
+  async getPlantsMetadata(
+    plantIds: readonly Solaroid.Supabase.Plant.Id[],
+  ): Promise<readonly Solaroid.Supabase.Json[]> {
+    if (!plantIds.length) return []
+
+    const { data, error } = await this.client
+      .from('plants')
+      .select('id,domain')
+      .in('id', plantIds)
+      .order('id', { ascending: true })
+
+    if (error) throw new Error('plants lookup failed', { cause: error })
+
+    return data
   }
 
   async upsertPlantRow(
