@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Solaroid">
+  <rect width="512" height="512" rx="96" fill="#151b19"/>
+  <circle cx="164" cy="164" r="58" fill="#f1ad2f"/>
+  <path fill="#64c99e" d="M104 290h304v118H104z"/>
+  <path fill="#36b7c4" d="M104 290h304l-50-94H154z"/>
+  <path fill="#151b19" fill-opacity=".28" d="M154 196h204l50 94H104z"/>
+  <path fill="none" stroke="#edf4ef" stroke-linecap="round" stroke-width="22" d="M154 334h204M178 376h156"/>
+</svg>
