@@ -12,8 +12,8 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
-import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
+import { configureDashboardAccess, loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
+import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
@@ -54,6 +54,69 @@ interface DashboardDataState extends DataState {
 }
 
 type DashboardDataHookState = Omit<DashboardDataState, "refresh">;
+type AuthMode = "sign-in" | "sign-up";
+
+interface PortalSession {
+  readonly access_token: string;
+  readonly refresh_token: string;
+  readonly expires_at?: number;
+  readonly user?: PortalUser;
+}
+
+interface PortalUser {
+  readonly id: string;
+  readonly email?: string;
+  readonly confirmed_at?: string | null;
+}
+
+interface PortalPlant {
+  readonly id: string;
+  readonly domain?: string | null;
+}
+
+interface PortalAuthResponse {
+  readonly access_token?: string;
+  readonly refresh_token?: string;
+  readonly expires_in?: number;
+  readonly user?: PortalUser;
+  readonly error?: string;
+  readonly error_description?: string;
+  readonly msg?: string;
+}
+
+interface PortalAccessResponse {
+  readonly ok: boolean;
+  readonly plants?: readonly PortalPlant[];
+  readonly message?: string;
+}
+
+interface PortalCopy {
+  readonly brand: string;
+  readonly signIn: string;
+  readonly signUp: string;
+  readonly email: string;
+  readonly password: string;
+  readonly enter: string;
+  readonly create: string;
+  readonly needAccount: string;
+  readonly haveAccount: string;
+  readonly waitingTitle: string;
+  readonly waitingCopy: string;
+  readonly noPlantsTitle: string;
+  readonly noPlantsCopy: string;
+  readonly portalTagline: string;
+  readonly choosePlant: string;
+  readonly chooseCopy: string;
+  readonly mainPlant: string;
+  readonly open: string;
+  readonly signOut: string;
+  readonly loading: string;
+  readonly switchPlant: string;
+  readonly missingDomain: string;
+  readonly configMissing: string;
+  readonly sessionExpired: string;
+  readonly retry: string;
+}
 
 const i18n = {
   en: {
@@ -295,8 +358,67 @@ const i18n = {
 } satisfies Record<Lang, Record<string, string>>;
 
 const LANGUAGE_STORAGE_KEY = "solaroid.lang";
+const PORTAL_SESSION_KEY = "solaroid.portal.session";
+const PORTAL_MAIN_PLANT_PREFIX = "solaroid.portal.mainPlant.";
+const TOKEN_REFRESH_WINDOW_SECONDS = 90;
 const DEFAULT_LANG: Lang = langFromQuery() ?? storedLang() ?? langFromNavigator() ?? "en";
 const LanguageContext = React.createContext<Lang>(DEFAULT_LANG);
+const portalCopy: Record<Lang, PortalCopy> = {
+  en: {
+    brand: "Solaroid",
+    signIn: "Sign in",
+    signUp: "Sign up",
+    email: "Email",
+    password: "Password",
+    enter: "Open dashboard",
+    create: "Create account",
+    needAccount: "Need access?",
+    haveAccount: "Already approved?",
+    waitingTitle: "Waiting for approval",
+    waitingCopy: "Your account exists, but access opens after manual confirmation and plant assignment.",
+    noPlantsTitle: "No plants assigned",
+    noPlantsCopy: "Account is approved. Ask admin to assign at least one plant.",
+    portalTagline: "Private solar ROI cockpit for production, tariffs, payback, and plant access.",
+    choosePlant: "Choose main plant",
+    chooseCopy: "Choose the station to open.",
+    mainPlant: "Main plant",
+    open: "Open",
+    signOut: "Sign out",
+    loading: "Loading",
+    switchPlant: "Switch plant",
+    missingDomain: "Plant domain is missing. Add plants.domain in Supabase.",
+    configMissing: "Portal config is missing.",
+    sessionExpired: "Session expired. Sign in again.",
+    retry: "Retry",
+  },
+  uk: {
+    brand: "Solaroid",
+    signIn: "Увійти",
+    signUp: "Створити доступ",
+    email: "Email",
+    password: "Пароль",
+    enter: "Відкрити дашборд",
+    create: "Створити акаунт",
+    needAccount: "Потрібен доступ?",
+    haveAccount: "Доступ уже є?",
+    waitingTitle: "Очікує підтвердження",
+    waitingCopy: "Акаунт створено, але доступ відкриється після ручного підтвердження та привязки станції.",
+    noPlantsTitle: "Станції не привязані",
+    noPlantsCopy: "Акаунт підтверджено. Попросіть адміна привязати хоча б одну станцію.",
+    portalTagline: "Приватний дашборд для генерації, тарифів, окупності та доступу до станцій.",
+    choosePlant: "Оберіть головну станцію",
+    chooseCopy: "Оберіть станцію для відкриття.",
+    mainPlant: "Головна станція",
+    open: "Відкрити",
+    signOut: "Вийти",
+    loading: "Завантаження",
+    switchPlant: "Змінити станцію",
+    missingDomain: "У станції немає домену. Додайте plants.domain у Supabase.",
+    configMissing: "Немає конфігурації порталу.",
+    sessionExpired: "Сесію завершено. Увійдіть ще раз.",
+    retry: "Повторити",
+  },
+};
 
 const colors = {
   amber: "#e4a11b",
@@ -696,14 +818,17 @@ function firstDateKey(rows: readonly MonthRow[]) {
   return rows.length ? dateKey(rows[rows.length - 1].date) : "";
 }
 
-function useDashboardData(): DashboardDataState {
+function useDashboardData(initialData?: LoadedData): DashboardDataState {
   const [state, setState] = useState<DashboardDataHookState>(() => ({
-    rows: [],
-    dailyRows: [],
-    readablePlantIds: [],
-    plantId: "",
-    investmentUsd: 0,
-    isLoading: true,
+    rows: initialData?.rows ?? [],
+    dailyRows: initialData?.dailyRows ?? [],
+    readablePlantIds: initialData?.readablePlantIds ?? [],
+    plantId: initialData?.plantId ?? "",
+    investmentUsd: initialData?.investmentUsd ?? 0,
+    launchDate: initialData?.launchDate,
+    commercialDate: initialData?.commercialDate,
+    sheetUpdatedAt: initialData?.sheetUpdatedAt,
+    isLoading: !initialData,
     isRefreshing: false,
     updatedAt: new Date(),
   }));
@@ -726,8 +851,10 @@ function useDashboardData(): DashboardDataState {
   };
 
   useEffect(() => {
+    if (initialData) return;
+
     void refresh();
-  }, []);
+  }, [initialData]);
 
   return {
     ...state,
@@ -751,8 +878,8 @@ function useMediaQuery(query: string) {
   return matches;
 }
 
-function App() {
-  const dataState = useDashboardData();
+function App({ initialLang = DEFAULT_LANG, initialData }: { readonly initialLang?: Lang; readonly initialData?: LoadedData }) {
+  const dataState = useDashboardData(initialData);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [range, setRange] = useState<RangeKey>("all");
   const [monthFilter, setMonthFilter] = useState("all");
@@ -771,7 +898,7 @@ function App() {
   const [comparisonError, setComparisonError] = useState("");
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
-  const [lang, setLang] = useState<Lang>(DEFAULT_LANG);
+  const [lang, setLang] = useState<Lang>(initialLang);
   const t = i18n[lang];
   const monthNames = useMemo(
     () =>
@@ -808,6 +935,13 @@ function App() {
     () => [dataState.plantId, ...dataState.readablePlantIds].filter((plantId, index, plantIds) => plantId && plantIds.indexOf(plantId) === index),
     [dataState.plantId, dataState.readablePlantIds],
   );
+  const hasOtherReadablePlants = dataState.readablePlantIds.length > 0;
+  const viewOptions = useMemo(
+    () => hasOtherReadablePlants
+      ? ["monthly", "daily", "comparison"] as const
+      : ["monthly", "daily"] as const,
+    [hasOtherReadablePlants],
+  );
 
   const activePlantComparison = useMemo<PlantComparison>(() => ({
     plantId: dataState.plantId,
@@ -832,6 +966,10 @@ function App() {
     if (!firstPlantId) setFirstPlantId(dataState.plantId || readablePlantOptions[0]);
     if (!secondPlantId) setSecondPlantId(readablePlantOptions.find((plantId) => plantId !== (dataState.plantId || readablePlantOptions[0])) ?? readablePlantOptions[0]);
   }, [dataState.plantId, firstPlantId, readablePlantOptions, secondPlantId]);
+
+  useEffect(() => {
+    if (viewMode === "comparison" && !hasOtherReadablePlants) setViewMode("monthly");
+  }, [hasOtherReadablePlants, viewMode]);
 
   const ensureComparisonPlant = async (plantId: string, granularity: string) => {
     if (!plantId) return undefined;
@@ -860,6 +998,10 @@ function App() {
     document.documentElement.lang = lang;
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
   }, [lang]);
+
+  useEffect(() => {
+    setLang(initialLang);
+  }, [initialLang]);
 
   const rows = useMemo(() => {
     return filteredMonthlyRows(dataState.rows, range, monthFilter, yearFilter);
@@ -1148,8 +1290,8 @@ function App() {
                 </button>
               ))}
             </div>
-            <div className="segmented view" aria-label="View">
-              {(["monthly", "daily", "comparison"] as ViewMode[]).map((item) => (
+            <div className={`segmented view view-${viewOptions.length}`} aria-label="View">
+              {viewOptions.map((item) => (
                 <button key={item} className={viewMode === item ? "selected" : ""} onClick={() => setViewMode(item)}>
                   {item === "monthly" ? t.monthly : item === "daily" ? t.daily : t.comparison}
                 </button>
@@ -1324,7 +1466,10 @@ function App() {
             <>
               <div className="payback-copy">
                 <SkeletonText width="230px" height="24px" />
-                <SkeletonText width="min(620px, 100%)" height="16px" />
+                <span className="payback-lines">
+                  <SkeletonText width="min(620px, 100%)" height="16px" />
+                  <SkeletonText width="min(430px, 78%)" height="16px" />
+                </span>
               </div>
               <SkeletonBlock className="progress-track skeleton-track" />
             </>
@@ -1333,11 +1478,18 @@ function App() {
               <div className="payback-copy">
                 <h2>{payback ? `${formatNumber(payback.progress)}% ${t.investmentRecovered}` : t.addInvestment}</h2>
                 <p>
-                  {payback
-                    ? `${formatDisplayMoney(payback.recovered, currency, lang)} ${t.recovered}, ${formatDisplayMoney(payback.remaining, currency, lang)} ${t.remaining}${
-                        payback.payoffDuration ? `, ${formatActiveDuration(payback.payoffDuration, lang)} ${t.currentAverage}` : ""
-                      }.`
-                    : t.investmentHelp}
+                  {payback ? (
+                    <span className="payback-lines">
+                      <span>
+                        {formatDisplayMoney(payback.recovered, currency, lang)} {t.recovered},{" "}
+                        {formatDisplayMoney(payback.remaining, currency, lang)} {t.remaining}
+                        {payback.payoffDuration ? "," : "."}
+                      </span>
+                      {payback.payoffDuration ? (
+                        <span>{formatActiveDuration(payback.payoffDuration, lang)} {t.currentAverage}.</span>
+                      ) : null}
+                    </span>
+                  ) : t.investmentHelp}
                 </p>
               </div>
               <div className="progress-track" aria-label="Payback progress">
@@ -1576,6 +1728,542 @@ function App() {
     </main>
     </LanguageContext.Provider>
   );
+}
+
+function PortalRoot() {
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [lang, setLang] = useState<Lang>(DEFAULT_LANG);
+  const [plants, setPlants] = useState<readonly PortalPlant[]>([]);
+  const [selectedPlantId, setSelectedPlantId] = useState("");
+  const [dashboardData, setDashboardData] = useState<LoadedData | undefined>();
+  const [session, setSession] = useState<PortalSession | undefined>(() => storedPortalSession());
+  const [user, setUser] = useState<PortalUser | undefined>();
+  const t = portalCopy[lang];
+  const apiUrl = API_URL;
+  const selectedPlant = plants.find((plant) => plant.id === selectedPlantId);
+
+  const savePortalSession = (next: PortalSession) => {
+    localStorage.setItem(PORTAL_SESSION_KEY, JSON.stringify(next));
+    setSession(next);
+  };
+
+  const clearPortalSession = () => {
+    localStorage.removeItem(PORTAL_SESSION_KEY);
+  };
+
+  const loadAuthedState = async (knownUser?: PortalUser, sessionOverride?: PortalSession) => {
+    setBusy(true);
+    setError("");
+    setInfo("");
+
+    try {
+      const activeSession = await validPortalSession(sessionOverride ?? session, t, savePortalSession);
+      const activeUser = knownUser ?? confirmedPortalSessionUser(activeSession) ?? await getPortalUser(activeSession.access_token);
+
+      if (!isPortalUserConfirmed(activeUser)) {
+        setBusy(false);
+        setSession(activeSession);
+        setUser(activeUser);
+        setPlants([]);
+        setSelectedPlantId("");
+        return;
+      }
+
+      const nextPlants = await getPortalPlants(apiUrl, activeSession.access_token, t);
+      const nextSelectedPlantId = selectedPortalPlant(nextPlants, activeUser.id);
+      const nextDashboardData = nextSelectedPlantId
+        ? await preloadPortalDashboard(apiUrl, nextSelectedPlantId, activeSession.access_token)
+        : undefined;
+
+      setBusy(false);
+      setSession(activeSession);
+      setUser(activeUser);
+      setPlants(nextPlants);
+      setSelectedPlantId(nextSelectedPlantId);
+      setDashboardData(nextDashboardData);
+    } catch (loadError) {
+      clearPortalSession();
+      setBusy(false);
+      setError(portalErrorMessage(loadError) || t.sessionExpired);
+      setSession(undefined);
+      setUser(undefined);
+      setPlants([]);
+      setSelectedPlantId("");
+      setDashboardData(undefined);
+    }
+  };
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+  }, [lang]);
+
+  useEffect(() => {
+    if (!session) {
+      setBusy(false);
+      return;
+    }
+
+    void loadAuthedState();
+  }, []);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+
+    const registerServiceWorker = () => {
+      void navigator.serviceWorker.register("./sw.js").catch(() => undefined);
+    };
+
+    if (document.readyState === "complete") {
+      registerServiceWorker();
+      return;
+    }
+
+    window.addEventListener("load", registerServiceWorker, { once: true });
+    return () => window.removeEventListener("load", registerServiceWorker);
+  }, []);
+
+  const submitAuth = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setInfo("");
+
+    try {
+      const data = new FormData(event.currentTarget);
+      const email = String(data.get("email") ?? "");
+      const password = String(data.get("password") ?? "");
+      const response = authMode === "sign-up"
+        ? await portalSignUp(email, password)
+        : await portalSignIn(email, password);
+
+      if (response.access_token && response.refresh_token) {
+        const nextSession = portalSessionFromResponse(response, t);
+        savePortalSession(nextSession);
+        setSession(nextSession);
+        await loadAuthedState(response.user, nextSession);
+        return;
+      }
+
+      setBusy(false);
+      setInfo(t.waitingCopy);
+      setUser(response.user);
+    } catch (authError) {
+      const message = portalErrorMessage(authError);
+      if (authMode === "sign-in" && message.toLowerCase().includes("email not confirmed")) {
+        setBusy(false);
+        setError("");
+      setInfo(t.waitingCopy);
+      setSession(undefined);
+      setUser(undefined);
+      setDashboardData(undefined);
+      return;
+      }
+
+      setBusy(false);
+      setError(message);
+      setSession(undefined);
+      setUser(undefined);
+      setDashboardData(undefined);
+    }
+  };
+
+  const signOut = async () => {
+    const activeSession = session;
+    clearPortalSession();
+
+    if (activeSession) {
+      await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${activeSession.access_token}`,
+        },
+      }).catch(() => undefined);
+    }
+
+    setAuthMode("sign-in");
+    setError("");
+    setInfo("");
+    setPlants([]);
+    setSelectedPlantId("");
+    setDashboardData(undefined);
+    setSession(undefined);
+    setUser(undefined);
+  };
+
+  const chooseMainPlant = async (plantId: string) => {
+    if (!user) return;
+    if (!session) return;
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const nextDashboardData = await preloadPortalDashboard(apiUrl, plantId, session.access_token);
+      localStorage.setItem(portalMainPlantKey(user.id), plantId);
+      setDashboardData(nextDashboardData);
+      setSelectedPlantId(plantId);
+    } catch (plantError) {
+      setError(portalErrorMessage(plantError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shell = (content: React.ReactNode) => (
+    <div className="portal-shell">
+      <header className="portal-top">
+        <strong>{t.brand}</strong>
+        <div className="portal-actions">
+          {session && !busy && selectedPlant && plants.length > 1 ? (
+            <select className="portal-main-select" value={selectedPlant.id} onChange={(event) => void chooseMainPlant(event.currentTarget.value)} aria-label={t.mainPlant}>
+              {plants.map((plant) => (
+                <option key={plant.id} value={plant.id}>
+                  {plant.id}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {session && busy ? <SkeletonText width="122px" height="18px" /> : session ? <span>{user?.email ?? ""}</span> : null}
+          <LanguageSwitcher lang={lang} setLang={setLang} />
+          {session ? <button className="ghost-button" type="button" onClick={signOut}>{t.signOut}</button> : null}
+        </div>
+      </header>
+      {content}
+    </div>
+  );
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !apiUrl) {
+    return shell(<PortalStatusPanel title={t.configMissing} body="VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_API_PATH" />);
+  }
+
+  if (busy) {
+    return shell(
+      <PortalLoading label={t.loading} />,
+    );
+  }
+
+  if (!session || !user) {
+    const isSignUp = authMode === "sign-up";
+    return shell(
+      <main className="portal-auth-layout">
+        <section className="portal-auth-copy">
+          <h1>{t.brand}</h1>
+          <p>{isSignUp ? t.waitingCopy : t.portalTagline}</p>
+        </section>
+        <form className="portal-auth-card" onSubmit={submitAuth}>
+          <h2>{isSignUp ? t.signUp : t.signIn}</h2>
+          <PortalMessage error={error} info={info} />
+          <label>
+            <span>{t.email}</span>
+            <input name="email" type="email" autoComplete="email" required />
+          </label>
+          <label>
+            <span>{t.password}</span>
+            <input name="password" type="password" autoComplete={isSignUp ? "new-password" : "current-password"} minLength={6} required />
+          </label>
+          <button className="primary-button" type="submit">{isSignUp ? t.create : t.enter}</button>
+          <button
+            className="link-button"
+            type="button"
+            onClick={() => {
+              setAuthMode(isSignUp ? "sign-in" : "sign-up");
+              setError("");
+              setInfo("");
+            }}
+          >
+            {isSignUp ? t.haveAccount : t.needAccount}
+          </button>
+        </form>
+      </main>,
+    );
+  }
+
+  if (!isPortalUserConfirmed(user)) {
+    return shell(
+      <PortalStatusPanel title={t.waitingTitle} body={t.waitingCopy} actionLabel={t.retry} message={<PortalMessage error={error} info={info} />} onAction={() => void loadAuthedState()} />,
+    );
+  }
+
+  if (!plants.length) {
+    return shell(
+      <PortalStatusPanel title={t.noPlantsTitle} body={t.noPlantsCopy} actionLabel={t.retry} message={<PortalMessage error={error} info={info} />} onAction={() => void loadAuthedState()} />,
+    );
+  }
+
+  if (!selectedPlant) {
+    return shell(
+      <main className="portal-picker-layout">
+        <section>
+          <h1>{t.choosePlant}</h1>
+          <p>{t.chooseCopy}</p>
+        </section>
+        <div className="portal-plant-list">
+          {plants.map((plant) => (
+            <button className="portal-plant-option" key={plant.id} type="button" onClick={() => void chooseMainPlant(plant.id)}>
+              <span>
+                <strong>{plant.id}</strong>
+                <small>{plant.domain ?? t.missingDomain}</small>
+              </span>
+              <b>{t.open}</b>
+            </button>
+          ))}
+        </div>
+      </main>,
+    );
+  }
+
+  return shell(
+    <div className="portal-dashboard">
+      <App key={`${selectedPlant.id}:${session.access_token}`} initialLang={lang} initialData={dashboardData} />
+    </div>,
+  );
+}
+
+function PortalLoading({ label }: { readonly label: string }) {
+  return (
+    <main className="app-shell portal-loading-app" aria-label={label} aria-busy="true">
+      <section className="content">
+        <header className="topbar">
+          <div className="toolbar">
+            <div className="investment-pill">
+              <SkeletonText width="72px" height="11px" />
+              <SkeletonText width="92px" height="16px" />
+            </div>
+            <div className="segmented currency">
+              <SkeletonText width="54px" height="32px" />
+              <SkeletonText width="54px" height="32px" />
+            </div>
+            <div className="segmented view view-2">
+              <SkeletonText width="104px" height="32px" />
+              <SkeletonText width="104px" height="32px" />
+            </div>
+            <div className="segmented" aria-hidden="true">
+              {Array.from({ length: 5 }, (_, index) => <SkeletonText key={index} width="48px" height="32px" />)}
+            </div>
+            <SkeletonBlock className="icon-button refresh-button" />
+          </div>
+        </header>
+        <KpiSkeletonGrid />
+        <section className="payback-band">
+          <div className="payback-copy">
+            <SkeletonText width="230px" height="24px" />
+            <span className="payback-lines">
+              <SkeletonText width="min(620px, 100%)" height="16px" />
+              <SkeletonText width="min(430px, 78%)" height="16px" />
+            </span>
+          </div>
+          <SkeletonBlock className="progress-track skeleton-track" />
+        </section>
+        <section className="forecast-section">
+          <div className="section-heading">
+            <div>
+              <SkeletonText width="124px" height="18px" />
+              <SkeletonText width="180px" height="13px" />
+            </div>
+          </div>
+          <div className="forecast-grid">
+            {Array.from({ length: 3 }, (_, index) => (
+              <article className="kpi-card" key={index}>
+                <SkeletonText width="88px" height="13px" />
+                <SkeletonText width="118px" height="22px" />
+                <SkeletonText width="130px" height="14px" />
+              </article>
+            ))}
+          </div>
+        </section>
+        <ChartSkeleton />
+      </section>
+    </main>
+  );
+}
+
+function PortalStatusPanel({
+  title,
+  body,
+  actionLabel,
+  message,
+  onAction,
+}: {
+  readonly title: string;
+  readonly body: string;
+  readonly actionLabel?: string;
+  readonly message?: React.ReactNode;
+  readonly onAction?: () => void;
+}) {
+  return (
+    <main className="portal-center-panel">
+      <h1>{title}</h1>
+      <p>{body}</p>
+      {message}
+      {actionLabel && onAction ? <button className="primary-button" type="button" onClick={onAction}>{actionLabel}</button> : null}
+    </main>
+  );
+}
+
+function PortalMessage({ error, info }: { readonly error: string; readonly info: string }) {
+  if (!error && !info) return null;
+
+  return <p className={error ? "portal-message error" : "portal-message"}>{error || info}</p>;
+}
+
+async function portalSignUp(email: string, password: string) {
+  return portalAuthRequest<PortalAuthResponse>("/auth/v1/signup", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+async function portalSignIn(email: string, password: string) {
+  return portalAuthRequest<PortalAuthResponse>("/auth/v1/token?grant_type=password", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+async function refreshPortalSession(refreshToken: string) {
+  return portalAuthRequest<PortalAuthResponse>("/auth/v1/token?grant_type=refresh_token", {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
+async function getPortalUser(accessToken: string) {
+  const response = await portalAuthRequest<PortalUser | { readonly user: PortalUser }>("/auth/v1/user", {
+    method: "GET",
+    token: accessToken,
+  });
+
+  return "user" in response ? response.user : response;
+}
+
+async function getPortalPlants(apiUrl: string, accessToken: string, t: PortalCopy) {
+  if (!accessToken) throw new Error(t.sessionExpired);
+
+  const url = new URL(apiUrl);
+  url.searchParams.set("metadata", "1");
+
+  const response = await fetch(url, {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) throw new Error(await response.text());
+
+  const data = await response.json() as PortalAccessResponse;
+  return data.plants ?? [];
+}
+
+async function preloadPortalDashboard(apiUrl: string, plantId: string, token: string) {
+  configureDashboardAccess({
+    apiUrl,
+    plantId,
+    token,
+  });
+
+  return loadDashboardData();
+}
+
+async function portalAuthRequest<T>(
+  path: string,
+  options: { readonly method: string; readonly body?: string; readonly token?: string },
+): Promise<T> {
+  const response = await fetch(`${SUPABASE_URL}${path}`, {
+    method: options.method,
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${options.token ?? SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: options.body,
+  });
+
+  const data = await response.json() as PortalAuthResponse;
+  if (!response.ok) throw new Error(data.error_description ?? data.msg ?? data.error ?? "Request failed");
+
+  return data as T;
+}
+
+async function validPortalSession(
+  session: PortalSession | undefined,
+  t: PortalCopy,
+  saveSession: (session: PortalSession) => void,
+) {
+  const activeSession = session ?? storedPortalSession();
+
+  if (!activeSession) throw new Error(t.sessionExpired);
+
+  const now = Math.floor(Date.now() / 1000);
+  if (activeSession.expires_at && activeSession.expires_at - now > TOKEN_REFRESH_WINDOW_SECONDS) {
+    return activeSession;
+  }
+
+  const refreshed = await refreshPortalSession(activeSession.refresh_token);
+  const next = portalSessionFromResponse(refreshed, t);
+  saveSession(next);
+  return next;
+}
+
+function portalSessionFromResponse(response: PortalAuthResponse, t: PortalCopy): PortalSession {
+  if (!response.access_token || !response.refresh_token) {
+    throw new Error(t.sessionExpired);
+  }
+
+  return {
+    access_token: response.access_token,
+    refresh_token: response.refresh_token,
+    expires_at: response.expires_in
+      ? Math.floor(Date.now() / 1000) + response.expires_in
+      : undefined,
+    user: response.user,
+  };
+}
+
+function confirmedPortalSessionUser(session: PortalSession) {
+  return session.user && isPortalUserConfirmed(session.user) ? session.user : undefined;
+}
+
+function storedPortalSession(): PortalSession | undefined {
+  const raw = localStorage.getItem(PORTAL_SESSION_KEY);
+  if (!raw) return undefined;
+
+  try {
+    const session = JSON.parse(raw) as PortalSession;
+    return session.access_token && session.refresh_token ? session : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function selectedPortalPlant(plants: readonly PortalPlant[], userId: string) {
+  if (plants.length === 1) return plants[0].id;
+
+  const saved = localStorage.getItem(portalMainPlantKey(userId)) ?? "";
+  return plants.some((plant) => plant.id === saved) ? saved : "";
+}
+
+function portalMainPlantKey(userId: string) {
+  return `${PORTAL_MAIN_PLANT_PREFIX}${userId}`;
+}
+
+function portalErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) return "Unknown error";
+
+  try {
+    const parsed = JSON.parse(error.message) as { readonly message?: string };
+    return parsed.message ?? error.message;
+  } catch {
+    return error.message;
+  }
+}
+
+function isPortalUserConfirmed(user: PortalUser | undefined) {
+  return Boolean(user?.confirmed_at);
 }
 
 function LanguageSwitcher({ lang, setLang }: { readonly lang: Lang; readonly setLang: (lang: Lang) => void }) {
@@ -3813,6 +4501,6 @@ function Th({
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    {APP_MODE === "portal" ? <PortalRoot /> : <App />}
   </React.StrictMode>,
 );

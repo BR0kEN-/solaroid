@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "dev:portal": "VITE_APP_MODE=portal vite --host 0.0.0.0",
     "build": "tsc -b && vitest run && vite build",
+    "build:ha": "VITE_APP_MODE=ha npm run build",
+    "build:portal": "VITE_APP_MODE=portal npm run build",
     "test": "vitest run",
     "preview": "vite preview --host 0.0.0.0",
     "deploy:ha": "./deploy.sh ha.lan",

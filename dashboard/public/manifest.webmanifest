@@ -1,0 +1,25 @@
+{
+  "name": "Solaroid",
+  "short_name": "Solaroid",
+  "description": "Private solar ROI, tariff, production, and payback dashboard.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#151b19",
+  "theme_color": "#151b19",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

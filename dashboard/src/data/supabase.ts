@@ -50,6 +50,18 @@ interface ApiResponse {
   readonly records?: readonly DayRecord[] | readonly MonthRecord[]
 }
 
+interface DashboardAccess {
+  readonly apiUrl?: string
+  readonly plantId?: string
+  readonly token?: string
+}
+
+let dashboardAccess: DashboardAccess = {}
+
+export function configureDashboardAccess(next: DashboardAccess) {
+  dashboardAccess = next
+}
+
 export async function loadDashboardData(): Promise<LoadedData> {
   assertConfig()
 
@@ -115,7 +127,7 @@ export function toLoadedPlant({
 }
 
 function assertConfig() {
-  if (!API_URL) throw new Error('VITE_API_URL is not configured')
+  if (!apiUrl()) throw new Error('VITE_SUPABASE_URL is not configured')
   if (!accessToken()) throw new Error('No token was provided in the URL hash')
 }
 
@@ -124,7 +136,7 @@ async function fetchDashboardData(
   granularity?: string,
 ) {
   const currentPlantId = plantIdOverride ?? plantId()
-  const url = new URL(API_URL)
+  const url = new URL(apiUrl())
   if (currentPlantId) url.searchParams.set('plant', currentPlantId)
   if (granularity) url.searchParams.set('granularity', granularity)
 
@@ -160,11 +172,19 @@ async function fetchDashboardData(
 }
 
 function plantId() {
+  if (dashboardAccess.plantId) return dashboardAccess.plantId
+
   return queryParam('plant')
 }
 
 function accessToken() {
+  if (dashboardAccess.token) return dashboardAccess.token
+
   return tokenFromHash()
+}
+
+function apiUrl() {
+  return dashboardAccess.apiUrl ?? API_URL
 }
 
 function tokenFromHash() {
