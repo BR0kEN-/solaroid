@@ -5,6 +5,7 @@ import {
   consumedPrice,
   consumedTotal,
   exportTaxRate,
+  importCostBreakdown,
   importTotal,
   netExportPrice,
   payment,
@@ -34,6 +35,13 @@ const row: EnergySnapshot = {
   consumedNight: 20,
 }
 
+const electricHeatingTariff: Tariff = {
+  ...tariff,
+  importDay: 2.64,
+  importNight: 1.32,
+  electricHeatingThresholdKwh: 2000,
+}
+
 describe('energy totals', () => {
   it('calculates consumption, import, and grid balance', () => {
     expect(consumedTotal(row)).toBe(100)
@@ -55,6 +63,32 @@ describe('prices and taxes', () => {
     expect(weightedImportPrice(row, tariff)).toBe(3.6)
     expect(weightedImportPrice({ ...row, importDay: 0, importNight: 0 }, tariff)).toBe(tariff.importDay)
     expect(weightedImportPrice({ ...row, importDay: 0, importNight: 0 }, { ...tariff, importDay: 0 })).toBe(tariff.importNight)
+  })
+
+  it('charges all net import at electric heating rates below threshold', () => {
+    const breakdown = importCostBreakdown(1144.83, 847.17, electricHeatingTariff)
+
+    expect(breakdown.discountedDay).toBeCloseTo(1144.83)
+    expect(breakdown.discountedNight).toBeCloseTo(847.17)
+    expect(breakdown.regularDay).toBe(0)
+    expect(breakdown.regularNight).toBe(0)
+    expect(breakdown.total).toBeCloseTo(1144.83 * 2.64 + 847.17 * 1.32)
+  })
+
+  it('splits electric heating excess proportionally by balanced day/night import', () => {
+    const breakdown = importCostBreakdown(1164.35, 895.65, electricHeatingTariff)
+
+    expect(breakdown.regularDay).toBeCloseTo(33.91, 1)
+    expect(breakdown.regularNight).toBeCloseTo(26.09, 1)
+    expect(breakdown.discountedDay).toBeCloseTo(1130.44, 1)
+    expect(breakdown.discountedNight).toBeCloseTo(869.56, 1)
+    expect(breakdown.total).toBeCloseTo(
+      1130.44 * 2.64 +
+      869.56 * 1.32 +
+      33.91 * 4.32 +
+      26.09 * 2.16,
+      0,
+    )
   })
 })
 
@@ -81,6 +115,43 @@ describe('self consumption', () => {
 describe('payment and savings', () => {
   it('charges remaining import after commercial export offset', () => {
     expect(payment(row, tariff, true)).toBeCloseTo(0)
+    expect(payment({ ...row, export: 15 }, tariff, true)).toBe(-54)
+  })
+
+  it('applies electric heating threshold after proportional export offset', () => {
+    const nearThreshold: EnergySnapshot = {
+      production: 0,
+      export: 9,
+      importDay: 1150,
+      importNight: 851,
+      consumedDay: 1150,
+      consumedNight: 851,
+    }
+    const aboveThreshold: EnergySnapshot = {
+      production: 0,
+      export: 10,
+      importDay: 1170,
+      importNight: 900,
+      consumedDay: 1170,
+      consumedNight: 900,
+    }
+
+    expect(payment(nearThreshold, electricHeatingTariff, true)).toBeCloseTo(
+      -(1144.83 * 2.64 + 847.17 * 1.32),
+      0,
+    )
+    expect(payment(aboveThreshold, electricHeatingTariff, true)).toBeCloseTo(
+      -(
+        1130.44 * 2.64 +
+        869.56 * 1.32 +
+        33.91 * 4.32 +
+        26.09 * 2.16
+      ),
+      0,
+    )
+  })
+
+  it('falls back to regular import rates without electric heating eligibility', () => {
     expect(payment({ ...row, export: 15 }, tariff, true)).toBe(-54)
   })
 

@@ -7,6 +7,7 @@ interface PlantRecord {
   readonly investment_usd: number
   readonly launch_date: string
   readonly commercial_date: string
+  readonly electric_heating_import_threshold_kwh?: number | null
   readonly updated_at?: string
 }
 
@@ -98,7 +99,8 @@ export function toLoadedPlant({
   const fallbackUsdRate = latestPositiveRate(days)
   const tariffByMonth = new Map(tariffs.map((tariff) => [tariff.date, tariff]))
   const commercialDate = parseDate(plant.commercial_date)
-  const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthUsdRate(month, monthlyRates, fallbackUsdRate), commercialDate))
+  const electricHeatingThresholdKwh = plant.electric_heating_import_threshold_kwh ?? undefined
+  const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthUsdRate(month, monthlyRates, fallbackUsdRate), commercialDate, electricHeatingThresholdKwh))
   const dailyRows = days.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialDate))
 
   return {
@@ -177,8 +179,8 @@ function queryParam(name: string) {
   return new URLSearchParams(window.location.search).get(name) ?? ''
 }
 
-function toMonthRow(row: MonthRecord, tariffRecord: TariffRecord | undefined, usdRate: number, commercialDate: Date): MonthRow {
-  const tariff = toTariff(tariffRecord)
+function toMonthRow(row: MonthRecord, tariffRecord: TariffRecord | undefined, usdRate: number, commercialDate: Date, electricHeatingThresholdKwh?: number): MonthRow {
+  const tariff = toTariff(tariffRecord, electricHeatingSeasonThreshold(row.date, electricHeatingThresholdKwh))
   return toDashboardRow({
     row,
     tariff,
@@ -239,6 +241,7 @@ function toDashboardRow({
     exportMilitary: taxValue(tariff.exportTaxes, 'mil'),
     importPriceDay: tariff.importDay,
     importPriceNight: tariff.importNight,
+    electricHeatingThresholdKwh: tariff.electricHeatingThresholdKwh,
     consumedPayment: rowConsumedPrice,
     electricityPayment: rowPayment,
     electricitySavings: rowSavings,
@@ -259,13 +262,21 @@ function toSnapshot(row: MonthRecord): EnergySnapshot {
   }
 }
 
-function toTariff(row: TariffRecord | undefined): Tariff {
+function toTariff(row: TariffRecord | undefined, electricHeatingThresholdKwh?: number): Tariff {
   return {
     importDay: row?.price_import_day ?? 0,
     importNight: row?.price_import_night ?? 0,
+    electricHeatingThresholdKwh,
     export: row?.price_export ?? 0,
     exportTaxes: row?.export_taxes ?? [],
   }
+}
+
+function electricHeatingSeasonThreshold(date: string, threshold?: number) {
+  if (!threshold || threshold <= 0) return undefined
+
+  const month = Number(date.slice(5, 7))
+  return month >= 10 || month <= 4 ? threshold : undefined
 }
 
 function latestUsdRateByMonth(days: readonly DayRecord[]) {

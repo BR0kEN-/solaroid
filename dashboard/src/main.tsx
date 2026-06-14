@@ -5,6 +5,7 @@ import {
   ArrowUpFromLine,
   CalendarClock,
   CircleDollarSign,
+  GitCompareArrows,
   Info,
   RefreshCw,
   SunMedium,
@@ -16,16 +17,16 @@ import { FORECAST_LATITUDE, FORECAST_LONGITUDE } from "./config";
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
-import type { DataState, LoadedData, MonthRow, PlantComparison } from "./domain/types";
+import { importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
+import type { DataState, LoadedData, MonthRow, PlantComparison, Tariff } from "./domain/types";
 import "./styles.css";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
 type ViewMode = "monthly" | "daily" | "comparison";
-type PlantComparisonMode = "daily" | "monthly" | "yearly";
+type PlantComparisonMode = "daily" | "monthly";
 type Lang = "en" | "uk";
 interface PlantComparisonResult {
   readonly mode: PlantComparisonMode;
-  readonly date: string;
   readonly month: string;
   readonly year: string;
   readonly plants: readonly PlantComparison[];
@@ -81,7 +82,6 @@ const i18n = {
     plantComparison: "Plant comparison",
     compareDaily: "Daily",
     compareMonthly: "Monthly",
-    compareYearly: "Yearly",
     activePlant: "current",
     compare: "Compare",
     compareFirstPlant: "First plant",
@@ -115,6 +115,9 @@ const i18n = {
     usdRate: "USD/UAH rate",
     dayCost: "Day cost",
     nightCost: "Night cost",
+    electricHeatingTier: "Electric heating tier",
+    regularTier: "Regular tier",
+    electricHeatingThreshold: "Electric heating threshold",
     exportedOffset: "Export offset",
     remainingImport: "Remaining import",
     netSurplus: "Net surplus",
@@ -195,9 +198,8 @@ const i18n = {
     soFar: "зараз",
     forecastInfo: "Прогноз рахується за поточним темпом світлового часу місяця: значення зараз ділиться на кількість світлового часу, що вже минув у цьому місяці, і множиться на очікуваний світловий час усього місяця. Кольорове порівняння показує прогнозоване значення відносно фактичного значення попереднього місяця.",
     plantComparison: "Порівняння станцій",
-    compareDaily: "День",
-    compareMonthly: "Місяць",
-    compareYearly: "Рік",
+    compareDaily: "Дні",
+    compareMonthly: "Місяці",
     activePlant: "поточна",
     compare: "Порівняти",
     compareFirstPlant: "Перша станція",
@@ -231,6 +233,9 @@ const i18n = {
     usdRate: "Курс USD/UAH",
     dayCost: "Вартість дня",
     nightCost: "Вартість ночі",
+    electricHeatingTier: "Тариф електроопалення",
+    regularTier: "Звичайний тариф",
+    electricHeatingThreshold: "Ліміт електроопалення",
     exportedOffset: "Покриття експортом",
     remainingImport: "Залишок імпорту",
     netSurplus: "Чистий надлишок",
@@ -289,7 +294,9 @@ const i18n = {
   },
 } satisfies Record<Lang, Record<string, string>>;
 
-const APP_LANG: Lang = langFromQuery() ?? "en"
+const LANGUAGE_STORAGE_KEY = "solaroid.lang";
+const DEFAULT_LANG: Lang = langFromQuery() ?? storedLang() ?? langFromNavigator() ?? "en";
+const LanguageContext = React.createContext<Lang>(DEFAULT_LANG);
 
 const colors = {
   amber: "#e4a11b",
@@ -304,9 +311,29 @@ const colors = {
 };
 
 function langFromQuery(): Lang | undefined {
-  if (typeof window === "undefined") return 'en';
+  if (typeof window === "undefined") return undefined;
   const lang = new URLSearchParams(window.location.search).get("lang");
   return lang === "uk" || lang === "en" ? lang : undefined;
+}
+
+function langFromNavigator(): Lang | undefined {
+  if (typeof navigator === "undefined") return undefined;
+  const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
+  const lang = languages
+    .map((lang) => lang.toLowerCase())
+    .find((lang) => lang.startsWith("uk") || lang.startsWith("en"));
+  if (!lang) return undefined;
+  return lang.startsWith("uk") ? "uk" : "en";
+}
+
+function storedLang(): Lang | undefined {
+  if (typeof window === "undefined") return undefined;
+  const lang = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  return lang === "uk" || lang === "en" ? lang : undefined;
+}
+
+function useLanguage() {
+  return React.useContext(LanguageContext);
 }
 
 function dateKey(date: Date) {
@@ -323,8 +350,13 @@ function formatNumber(value: number, maximumFractionDigits = 2, minimumFractionD
   }).format(value);
 }
 
-function formatKwh(value: number, lang: Lang = APP_LANG) {
+function formatKwh(value: number, lang: Lang = DEFAULT_LANG) {
   return `${formatNumber(value, 2, 2)} ${lang === "uk" ? "кВт·г" : "kWh"}`;
+}
+
+function formatMonthlyKpiKwh(value: number, lang: Lang = DEFAULT_LANG) {
+  if (Math.abs(value) <= 10_000) return formatKwh(value, lang);
+  return `${formatNumber(value / 1000, 2, 2)} ${lang === "uk" ? "МВт·г" : "MWh"}`;
 }
 
 function energyUnit(lang: Lang) {
@@ -407,7 +439,20 @@ function deltaTone(value: number) {
 }
 
 function importCostUah(row: MonthRow) {
-  return row.importDay * row.importPriceDay + row.importNight * row.importPriceNight;
+  return importEnergyCost(row.importDay, row.importNight, tariffFromRow(row));
+}
+
+function tariffFromRow(row: MonthRow): Tariff {
+  return {
+    importDay: row.importPriceDay,
+    importNight: row.importPriceNight,
+    electricHeatingThresholdKwh: row.electricHeatingThresholdKwh,
+    export: row.exportPrice,
+    exportTaxes: [
+      ["vat", row.exportVat],
+      ["mil", row.exportMilitary],
+    ],
+  };
 }
 
 function taxFraction(value: number) {
@@ -493,7 +538,7 @@ function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function formatPeriodLabel(row: MonthRow, lang: Lang = APP_LANG) {
+function formatPeriodLabel(row: MonthRow, lang: Lang = DEFAULT_LANG) {
   return row.month.includes("-") ? formatDayLabel(row.date, lang) : row.month;
 }
 
@@ -609,6 +654,20 @@ function formatActiveDuration(duration: { months: number; days: number }, lang: 
   return parts.join(" ");
 }
 
+function formatCompactActiveDuration(duration: { months: number; days: number }, lang: Lang) {
+  const years = Math.floor(duration.months / 12);
+  const months = duration.months % 12;
+  const yearUnit = lang === "uk" ? "р" : "y";
+  const monthUnit = lang === "uk" ? "м" : "m";
+  const dayUnit = lang === "uk" ? "д" : "d";
+  const parts = [
+    years ? `${years}${yearUnit}` : "",
+    months ? `${months}${monthUnit}` : "",
+    duration.days || (!years && !months) ? `${duration.days}${dayUnit}` : "",
+  ];
+  return parts.filter(Boolean).join(" ");
+}
+
 function netExportPrice(row: MonthRow) {
   return netExportRate(row);
 }
@@ -704,8 +763,7 @@ function App() {
   const [isDailyCompareOpen, setDailyCompareOpen] = useState(false);
   const [firstPlantId, setFirstPlantId] = useState("");
   const [secondPlantId, setSecondPlantId] = useState("");
-  const [plantComparisonMode, setPlantComparisonMode] = useState<PlantComparisonMode>("monthly");
-  const [plantComparisonDate, setPlantComparisonDate] = useState("");
+  const [plantComparisonMode, setPlantComparisonMode] = useState<PlantComparisonMode>("daily");
   const [plantComparisonMonth, setPlantComparisonMonth] = useState("");
   const [plantComparisonYear, setPlantComparisonYear] = useState("");
   const [comparisonResult, setComparisonResult] = useState<PlantComparisonResult | null>(null);
@@ -713,7 +771,7 @@ function App() {
   const [comparisonError, setComparisonError] = useState("");
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
-  const lang = APP_LANG;
+  const [lang, setLang] = useState<Lang>(DEFAULT_LANG);
   const t = i18n[lang];
   const monthNames = useMemo(
     () =>
@@ -734,9 +792,8 @@ function App() {
     const previous = dataState.dailyRows.at(-2);
     if (!firstDay && previous) setFirstDay(previous.month);
     if (!secondDay && latest) setSecondDay(latest.month);
-    if (!plantComparisonDate) setPlantComparisonDate(dateKey(new Date()));
     if (!plantComparisonMonth && latest) setPlantComparisonMonth(monthKey(latest.date));
-  }, [dataState.dailyRows, firstDay, plantComparisonDate, plantComparisonMonth, secondDay]);
+  }, [dataState.dailyRows, firstDay, plantComparisonMonth, secondDay]);
 
   useEffect(() => {
     const latest = dataState.rows.at(-1);
@@ -799,14 +856,14 @@ function App() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [infoModal]);
 
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+  }, [lang]);
+
   const rows = useMemo(() => {
     return filteredMonthlyRows(dataState.rows, range, monthFilter, yearFilter);
   }, [dataState.rows, monthFilter, range, yearFilter]);
-
-  const plantComparisonDateOptions = useMemo(
-    () => [...dataState.dailyRows].reverse(),
-    [dataState.dailyRows],
-  );
 
   const plantComparisonMonthOptions = useMemo(
     () => [...new Map(dataState.dailyRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
@@ -820,37 +877,32 @@ function App() {
 
   const runPlantComparison = async () => {
     const selectedPlantIds = [firstPlantId, secondPlantId].filter(Boolean);
-    const selectedPeriod = plantComparisonMode === "yearly" ? plantComparisonYear : plantComparisonMode === "monthly" ? plantComparisonMonth : plantComparisonDate;
+    const selectedPeriod = plantComparisonMode === "monthly" ? plantComparisonYear : plantComparisonMonth;
     if (selectedPlantIds.length < 2 || !selectedPeriod) return;
 
     setPlantComparisonLoading(true);
     setComparisonError("");
 
     try {
-      const granularity = plantComparisonMode === "yearly" ? plantComparisonYear : plantComparisonMode === "monthly" ? "all" : plantComparisonDate;
+      const granularity = plantComparisonMode === "monthly" ? plantComparisonYear : "all";
       const loadedPlants = await Promise.all(
         selectedPlantIds.map((plantId) => ensureComparisonPlant(plantId, granularity)),
       );
       const plants = loadedPlants.filter((plant): plant is PlantComparison => Boolean(plant));
       const hasSelectedPeriod = plants.every((plant) =>
-        plantComparisonMode === "yearly"
+        plantComparisonMode === "monthly"
           ? plant.rows.some((row) => String(row.date.getFullYear()) === plantComparisonYear)
-          : plantComparisonMode === "monthly"
-          ? plant.dailyRows.some((row) => monthKey(row.date) === plantComparisonMonth)
-          : plant.dailyRows.some((row) => dateKey(row.date) === plantComparisonDate),
+          : plant.dailyRows.some((row) => monthKey(row.date) === plantComparisonMonth),
       );
       if (!hasSelectedPeriod) {
         throw new Error(
-          plantComparisonMode === "yearly"
+          plantComparisonMode === "monthly"
             ? "Selected year is not available for one of the plants"
-            : plantComparisonMode === "monthly"
-              ? "Selected month is not available for one of the plants"
-              : "Selected date is not available for one of the plants",
+            : "Selected month is not available for one of the plants",
         );
       }
       setComparisonResult({
         mode: plantComparisonMode,
-        date: plantComparisonDate,
         month: plantComparisonMonth,
         year: plantComparisonYear,
         plants,
@@ -1069,6 +1121,7 @@ function App() {
   ]);
 
   return (
+    <LanguageContext.Provider value={lang}>
     <main className="app-shell">
       <section className="content">
         <header className="topbar">
@@ -1077,7 +1130,7 @@ function App() {
               <span>{t.investment}</span>
               <strong>
                 {showPlaceholders ? (
-                  <SkeletonText width="92px" />
+                  <SkeletonText width="92px" height="1rem" />
                 ) : payback ? (
                   formatDisplayMoney(moneyFromUsd(payback.investmentUsd, currency, totals.launchUsdRate), currency, lang)
                 ) : (
@@ -1180,8 +1233,6 @@ function App() {
               firstPlantId={firstPlantId}
               secondPlantId={secondPlantId}
               plantComparisonMode={plantComparisonMode}
-              plantComparisonDate={plantComparisonDate}
-              plantComparisonDateOptions={plantComparisonDateOptions}
               plantComparisonMonth={plantComparisonMonth}
               plantComparisonMonthOptions={plantComparisonMonthOptions}
               plantComparisonYear={plantComparisonYear}
@@ -1189,7 +1240,6 @@ function App() {
               setFirstPlantId={setFirstPlantId}
               setSecondPlantId={setSecondPlantId}
               setPlantComparisonMode={setPlantComparisonMode}
-              setPlantComparisonDate={setPlantComparisonDate}
               setPlantComparisonMonth={setPlantComparisonMonth}
               setPlantComparisonYear={setPlantComparisonYear}
               onCompare={runPlantComparison}
@@ -1224,7 +1274,7 @@ function App() {
             <KpiCard
               icon={<SunMedium size={20} />}
               label={t.totalProduction}
-              value={formatKwh(totals.production, lang)}
+              value={formatMonthlyKpiKwh(totals.production, lang)}
               detail={`${pct((totals.exported / totals.production) * 100)} ${t.exported}`}
               tone="amber"
               infoLabel={t.totalProduction}
@@ -1233,7 +1283,7 @@ function App() {
             <KpiCard
               icon={<ArrowUpFromLine size={20} />}
               label={t.totalExport}
-              value={formatKwh(totals.exported, lang)}
+              value={formatMonthlyKpiKwh(totals.exported, lang)}
               detail={`${t.latest} ${formatKwh(totals.latest?.export ?? 0, lang)}`}
               tone="mint"
               infoLabel={t.totalExport}
@@ -1242,7 +1292,7 @@ function App() {
             <KpiCard
               icon={<ArrowDownToLine size={20} />}
               label={t.totalImport}
-              value={formatKwh(totals.imported, lang)}
+              value={formatMonthlyKpiKwh(totals.imported, lang)}
               detail={`${pct(totals.covered)} ${t.solarCoverage}`}
               tone="blue"
               infoLabel={t.totalImport}
@@ -1260,7 +1310,7 @@ function App() {
             <KpiCard
               icon={<CalendarClock size={20} />}
               label={t.plantWorks}
-              value={formatActiveDuration(totals.activeDuration, lang)}
+              value={formatCompactActiveDuration(totals.activeDuration, lang)}
               detail={totals.launchDate ? `${t.sinceLaunch} ${formatLaunchDate(totals.launchDate, lang)}` : t.sinceLaunch}
               tone="indigo"
               infoLabel={t.plantWorks}
@@ -1268,6 +1318,34 @@ function App() {
             />
           </section>
         )}
+
+        <section className="payback-band">
+          {showPlaceholders ? (
+            <>
+              <div className="payback-copy">
+                <SkeletonText width="230px" height="24px" />
+                <SkeletonText width="min(620px, 100%)" height="16px" />
+              </div>
+              <SkeletonBlock className="progress-track skeleton-track" />
+            </>
+          ) : (
+            <>
+              <div className="payback-copy">
+                <h2>{payback ? `${formatNumber(payback.progress)}% ${t.investmentRecovered}` : t.addInvestment}</h2>
+                <p>
+                  {payback
+                    ? `${formatDisplayMoney(payback.recovered, currency, lang)} ${t.recovered}, ${formatDisplayMoney(payback.remaining, currency, lang)} ${t.remaining}${
+                        payback.payoffDuration ? `, ${formatActiveDuration(payback.payoffDuration, lang)} ${t.currentAverage}` : ""
+                      }.`
+                    : t.investmentHelp}
+                </p>
+              </div>
+              <div className="progress-track" aria-label="Payback progress">
+                <span style={{ width: `${payback?.progress ?? 0}%` }} />
+              </div>
+            </>
+          )}
+        </section>
 
         <section className="forecast-section">
           <div className="section-heading">
@@ -1288,10 +1366,10 @@ function App() {
             <div className="forecast-grid">
               {Array.from({ length: 3 }, (_, index) => (
                 <article className="kpi-card" key={index}>
-                  <SkeletonBlock className="kpi-icon" />
                   <SkeletonText width="90px" height="12px" />
                   <SkeletonText width="120px" height="22px" />
                   <SkeletonText width="110px" height="12px" />
+                  <SkeletonText width="130px" height="12px" />
                 </article>
               ))}
             </div>
@@ -1344,34 +1422,6 @@ function App() {
               />
             </div>
           ) : null}
-        </section>
-
-        <section className="payback-band">
-          {showPlaceholders ? (
-            <>
-              <div>
-                <SkeletonText width="230px" height="24px" />
-                <SkeletonText width="min(620px, 100%)" height="16px" />
-              </div>
-              <SkeletonBlock className="progress-track skeleton-track" />
-            </>
-          ) : (
-            <>
-              <div>
-                <h2>{payback ? `${formatNumber(payback.progress)}% ${t.investmentRecovered}` : t.addInvestment}</h2>
-                <p>
-                  {payback
-                    ? `${formatDisplayMoney(payback.recovered, currency, lang)} ${t.recovered}, ${formatDisplayMoney(payback.remaining, currency, lang)} ${t.remaining}${
-                        payback.payoffDuration ? `, ${formatActiveDuration(payback.payoffDuration, lang)} ${t.currentAverage}` : ""
-                      }.`
-                    : t.investmentHelp}
-                </p>
-              </div>
-              <div className="progress-track" aria-label="Payback progress">
-                <span style={{ width: `${payback?.progress ?? 0}%` }} />
-              </div>
-            </>
-          )}
         </section>
 
         <section id="finance" className="chart-grid">
@@ -1499,23 +1549,50 @@ function App() {
                 <div>
                   <h2 id="kpi-info-title">{infoModalContent.title}</h2>
                 </div>
-                <button type="button" className="icon-button" onClick={() => setInfoModal(null)} aria-label={t.close}>
+                <button type="button" className="icon-button info-modal-close-top" onClick={() => setInfoModal(null)} aria-label={t.close}>
                   <X size={18} />
                 </button>
               </div>
               <div className="info-modal-body">{infoModalContent.body}</div>
+              <div className="info-modal-actions">
+                <button type="button" className="icon-button" onClick={() => setInfoModal(null)} aria-label={t.close}>
+                  <X size={18} />
+                </button>
+              </div>
             </section>
           </div>
         )}
         <footer className="dash-footer">
-          {showPlaceholders ? (
-            <SkeletonText width="130px" />
-          ) : (
-            `${t.updated}: ${dataState.sheetUpdatedAt ? formatDateTimeLabel(dataState.sheetUpdatedAt, lang) : "-"}`
-          )}
+          <span>
+            {showPlaceholders ? (
+              <SkeletonText width="130px" />
+            ) : (
+              `${t.updated}: ${dataState.sheetUpdatedAt ? formatDateTimeLabel(dataState.sheetUpdatedAt, lang) : "-"}`
+            )}
+          </span>
+          <LanguageSwitcher lang={lang} setLang={setLang} />
         </footer>
       </section>
     </main>
+    </LanguageContext.Provider>
+  );
+}
+
+function LanguageSwitcher({ lang, setLang }: { readonly lang: Lang; readonly setLang: (lang: Lang) => void }) {
+  return (
+    <div className="language-switcher" aria-label="Language">
+      {(["en", "uk"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={option === lang ? "active" : ""}
+          onClick={() => setLang(option)}
+          aria-pressed={option === lang}
+        >
+          {option.toUpperCase()}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1532,9 +1609,8 @@ function KpiSkeletonGrid() {
     <section id="overview" className="kpi-grid" aria-busy="true">
       {Array.from({ length: 6 }).map((_, index) => (
         <article className="kpi-card" key={index}>
-          <SkeletonBlock className="skeleton-icon" />
           <SkeletonText width="74px" height="13px" />
-          <SkeletonText width="112px" height="26px" />
+          <SkeletonText width="112px" height="22px" />
           <SkeletonText width="138px" height="14px" />
         </article>
       ))}
@@ -1622,8 +1698,6 @@ function PlantComparisonSection({
   firstPlantId,
   secondPlantId,
   plantComparisonMode,
-  plantComparisonDate,
-  plantComparisonDateOptions,
   plantComparisonMonth,
   plantComparisonMonthOptions,
   plantComparisonYear,
@@ -1631,7 +1705,6 @@ function PlantComparisonSection({
   setFirstPlantId,
   setSecondPlantId,
   setPlantComparisonMode,
-  setPlantComparisonDate,
   setPlantComparisonMonth,
   setPlantComparisonYear,
   onCompare,
@@ -1647,8 +1720,6 @@ function PlantComparisonSection({
   readonly firstPlantId: string;
   readonly secondPlantId: string;
   readonly plantComparisonMode: PlantComparisonMode;
-  readonly plantComparisonDate: string;
-  readonly plantComparisonDateOptions: readonly MonthRow[];
   readonly plantComparisonMonth: string;
   readonly plantComparisonMonthOptions: readonly [string, string][];
   readonly plantComparisonYear: string;
@@ -1656,7 +1727,6 @@ function PlantComparisonSection({
   readonly setFirstPlantId: (plantId: string) => void;
   readonly setSecondPlantId: (plantId: string) => void;
   readonly setPlantComparisonMode: (mode: PlantComparisonMode) => void;
-  readonly setPlantComparisonDate: (date: string) => void;
   readonly setPlantComparisonMonth: (month: string) => void;
   readonly setPlantComparisonYear: (year: string) => void;
   readonly onCompare: () => void;
@@ -1668,16 +1738,11 @@ function PlantComparisonSection({
   readonly lang: Lang;
 }) {
   const displayedResult = result?.mode === plantComparisonMode ? result : null;
-  const comparedPlants = (displayedResult?.plants ?? []).map((plant) => ({
-    ...plant,
-    selectedDate: displayedResult?.date ?? plantComparisonDate,
-    row: plant.dailyRows.find((item) => dateKey(item.date) === (displayedResult?.date ?? plantComparisonDate)),
-  }));
   const compareDisabled =
     isLoading ||
     !firstPlantId ||
     !secondPlantId ||
-    (plantComparisonMode === "yearly" ? !plantComparisonYear : plantComparisonMode === "monthly" ? !plantComparisonMonth : !plantComparisonDate);
+    (plantComparisonMode === "monthly" ? !plantComparisonYear : !plantComparisonMonth);
 
   return (
     <section className="plant-comparison-section">
@@ -1687,15 +1752,15 @@ function PlantComparisonSection({
           <p>{t.comparisonHint}</p>
         </div>
         <div className="segmented plant-comparison-mode" aria-label={t.plantComparison}>
-          {(["yearly", "monthly", "daily"] as PlantComparisonMode[]).map((mode) => (
+          {(["monthly", "daily"] as PlantComparisonMode[]).map((mode) => (
             <button key={mode} type="button" className={plantComparisonMode === mode ? "selected" : ""} onClick={() => setPlantComparisonMode(mode)}>
-              {mode === "daily" ? t.compareDaily : mode === "yearly" ? t.compareYearly : t.compareMonthly}
+              {mode === "daily" ? t.compareDaily : t.compareMonthly}
             </button>
           ))}
         </div>
       </div>
       <div className="plant-comparison-controls">
-        {plantComparisonMode === "yearly" ? (
+        {plantComparisonMode === "monthly" ? (
           <label>
             <span>{t.compareYear}</span>
             <select value={plantComparisonYear} onChange={(event) => setPlantComparisonYear(event.target.value)}>
@@ -1706,7 +1771,7 @@ function PlantComparisonSection({
               ))}
             </select>
           </label>
-        ) : plantComparisonMode === "monthly" ? (
+        ) : (
           <label>
             <span>{t.compareMonth}</span>
             <select value={plantComparisonMonth} onChange={(event) => setPlantComparisonMonth(event.target.value)}>
@@ -1716,17 +1781,6 @@ function PlantComparisonSection({
                 </option>
               ))}
             </select>
-          </label>
-        ) : (
-          <label>
-            <span>{t.compareDate}</span>
-            <input
-              type="date"
-              value={plantComparisonDate}
-              min={firstDateKey(plantComparisonDateOptions)}
-              max={dateKey(new Date())}
-              onChange={(event) => setPlantComparisonDate(event.target.value)}
-            />
           </label>
         )}
         <label>
@@ -1751,26 +1805,24 @@ function PlantComparisonSection({
         </label>
         <button
           type="button"
+          className="compare-action-button"
           onClick={onCompare}
           disabled={compareDisabled}
         >
-          {isLoading ? "..." : t.compare}
+          <GitCompareArrows size={16} />
+          <span>{isLoading ? "..." : t.compare}</span>
         </button>
       </div>
       {error ? <small className="negative">{error}</small> : null}
-      {plantComparisonMode === "yearly" || plantComparisonMode === "monthly" ? (
-        <PlantPeriodComparisonCharts
-          plants={displayedResult?.plants ?? []}
-          activePlantId={activePlantId}
-          mode={plantComparisonMode}
-          period={plantComparisonMode === "yearly" ? displayedResult?.year ?? "" : displayedResult?.month ?? ""}
-          t={t}
-          currency={currency}
-          lang={lang}
-        />
-      ) : (
-        <PlantComparisonCharts plants={comparedPlants} activePlantId={activePlantId} t={t} currency={currency} lang={lang} />
-      )}
+      <PlantPeriodComparisonCharts
+        plants={displayedResult?.plants ?? []}
+        activePlantId={activePlantId}
+        mode={plantComparisonMode}
+        period={plantComparisonMode === "monthly" ? displayedResult?.year ?? "" : displayedResult?.month ?? ""}
+        t={t}
+        currency={currency}
+        lang={lang}
+      />
     </section>
   );
 }
@@ -1786,7 +1838,7 @@ function PlantPeriodComparisonCharts({
 }: {
   readonly plants: readonly PlantComparison[];
   readonly activePlantId: string;
-  readonly mode: "monthly" | "yearly";
+  readonly mode: PlantComparisonMode;
   readonly period: string;
   readonly t: Record<string, string>;
   readonly currency: Currency;
@@ -1797,7 +1849,7 @@ function PlantPeriodComparisonCharts({
   const periodPlants = plants.map((plant) => ({
     plantId: plant.plantId,
     rows:
-      mode === "yearly"
+      mode === "monthly"
         ? plant.rows.filter((row) => String(row.date.getFullYear()) === period)
         : plant.dailyRows.filter((row) => monthKey(row.date) === period),
   }));
@@ -1889,7 +1941,7 @@ function PlantPeriodLineChart({
   lang,
 }: {
   readonly plants: readonly { readonly plantId: string; readonly rows: readonly MonthRow[] }[];
-  readonly mode: "monthly" | "yearly";
+  readonly mode: PlantComparisonMode;
   readonly value: (row: MonthRow) => number;
   readonly format: (value: number) => string;
   readonly unit: string;
@@ -1935,7 +1987,7 @@ function PlantPeriodLineChart({
           return [
             periodKey,
             {
-              month: mode === "yearly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang),
+              month: mode === "monthly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang),
               items: plants.map((plant, index) => {
                 const row = rowByPlantAndDay.get(plant.plantId)?.get(periodKey);
                 return {
@@ -2018,7 +2070,7 @@ function PlantPeriodLineChart({
                   />
                 )}
                 <text className="plant-line-day-label" x={xPosition} y={height - 14} textAnchor="middle">
-                  {mode === "yearly" ? formatMonthOnly(date, lang) : formatDayMonthLabel(date, lang)}
+                  {mode === "monthly" ? formatMonthOnly(date, lang) : formatDayMonthLabel(date, lang)}
                 </text>
               </g>
             );
@@ -2028,7 +2080,7 @@ function PlantPeriodLineChart({
           </text>
         </svg>
       </div>
-      <ChartInspector selection={selection} hint={i18n[APP_LANG].tapBarOrDot} />
+      <ChartInspector selection={selection} hint={i18n[lang].tapBarOrDot} />
     </>
   );
 }
@@ -2188,6 +2240,7 @@ function ComparisonBar({
   readonly tone: string;
   readonly isActive: boolean;
 }) {
+  const lang = useLanguage();
   const width = `${chartLevel(value, max)}%`;
 
   return (
@@ -2195,7 +2248,7 @@ function ComparisonBar({
       <div className="comparison-bar-label">
         <span className="comparison-bar-name">
           <strong>{label}</strong>
-          {isActive ? <i>{i18n[APP_LANG].activePlant}</i> : null}
+          {isActive ? <i>{i18n[lang].activePlant}</i> : null}
         </span>
         <small>{detail}</small>
       </div>
@@ -2374,7 +2427,8 @@ function newestFirst(rows: readonly MonthRow[]) {
 }
 
 function ProductionExportChart({ rows }: { readonly rows: readonly MonthRow[] }) {
-  const t = i18n[APP_LANG];
+  const lang = useLanguage();
+  const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
   const inspectors = useMemo(
@@ -2383,15 +2437,15 @@ function ProductionExportChart({ rows }: { readonly rows: readonly MonthRow[] })
         displayRows.map((row) => [
           row.month,
           {
-            month: formatPeriodLabel(row),
+            month: formatPeriodLabel(row, lang),
             items: [
-              { label: t.production, value: formatKwh(row.production), color: colors.amber },
-              { label: t.export, value: formatKwh(row.export), color: colors.green },
+              { label: t.production, value: formatKwh(row.production, lang), color: colors.amber },
+              { label: t.export, value: formatKwh(row.export, lang), color: colors.green },
             ],
           },
         ]),
       ),
-    [displayRows, t.export, t.production],
+    [displayRows, lang, t.export, t.production],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -2464,7 +2518,8 @@ function RoiChart({
   readonly currency: Currency;
   readonly investment: number;
 }) {
-  const t = i18n[APP_LANG];
+  const lang = useLanguage();
+  const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const chronologicalRows = useMemo(
     () =>
@@ -2484,12 +2539,12 @@ function RoiChart({
         displayRows.map((item) => [
           item.row.month,
           {
-            month: formatPeriodLabel(item.row),
+            month: formatPeriodLabel(item.row, lang),
             items: [
-              { label: t.roi, value: formatDisplayMoney(item.monthly, currency, APP_LANG), color: colors.green },
+              { label: t.roi, value: formatDisplayMoney(item.monthly, currency, lang), color: colors.green },
               {
                 label: `${t.cumulative} ${t.roi}`,
-                value: `${formatDisplayMoney(item.cumulative, currency, APP_LANG)} (${formatNumber(item.cumulativePct)}%)`,
+                value: `${formatDisplayMoney(item.cumulative, currency, lang)} (${formatNumber(item.cumulativePct)}%)`,
                 color: colors.ink,
                 wide: true,
               },
@@ -2497,7 +2552,7 @@ function RoiChart({
           },
         ]),
       ),
-    [currency, displayRows, t.cumulative, t.roi],
+    [currency, displayRows, lang, t.cumulative, t.roi],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -2582,7 +2637,8 @@ function RoiChart({
 }
 
 function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; readonly currency: Currency }) {
-  const t = i18n[APP_LANG];
+  const lang = useLanguage();
+  const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
   const inspectors = useMemo(
@@ -2594,16 +2650,16 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
           return [
             row.month,
             {
-              month: formatPeriodLabel(row),
+              month: formatPeriodLabel(row, lang),
               items: [
-                { label: t.savings, value: formatDisplayMoney(savings, currency, APP_LANG), color: colors.mint },
-                { label: t.payment, value: formatDisplayMoney(electricityPayment, currency, APP_LANG), color: electricityPayment >= 0 ? colors.green : colors.rose },
+                { label: t.savings, value: formatDisplayMoney(savings, currency, lang), color: colors.mint },
+                { label: t.payment, value: formatDisplayMoney(electricityPayment, currency, lang), color: electricityPayment >= 0 ? colors.green : colors.rose },
               ],
             },
           ];
         }),
       ),
-    [currency, displayRows, t.payment, t.savings],
+    [currency, displayRows, lang, t.payment, t.savings],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -2691,7 +2747,8 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
 }
 
 function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
-  const t = i18n[APP_LANG];
+  const lang = useLanguage();
+  const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
   const inspectors = useMemo(
@@ -2700,15 +2757,15 @@ function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
         displayRows.map((row) => [
           row.month,
           {
-            month: `${formatPeriodLabel(row)} · ${formatKwh(row.importDay + row.importNight)}`,
+            month: `${formatPeriodLabel(row, lang)} · ${formatKwh(row.importDay + row.importNight, lang)}`,
             items: [
-              { label: t.day, value: formatKwh(row.importDay), color: colors.blue },
-              { label: t.night, value: formatKwh(row.importNight), color: colors.indigo },
+              { label: t.day, value: formatKwh(row.importDay, lang), color: colors.blue },
+              { label: t.night, value: formatKwh(row.importNight, lang), color: colors.indigo },
             ],
           },
         ]),
       ),
-    [displayRows, t.day, t.night],
+    [displayRows, lang, t.day, t.night],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -2774,7 +2831,8 @@ function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
 }
 
 function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
-  const t = i18n[APP_LANG];
+  const lang = useLanguage();
+  const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
   const inspectors = useMemo(
@@ -2783,15 +2841,15 @@ function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
         displayRows.map((row) => [
           row.month,
           {
-            month: `${formatPeriodLabel(row)} · ${formatKwh(row.consumedDay + row.consumedNight)}`,
+            month: `${formatPeriodLabel(row, lang)} · ${formatKwh(row.consumedDay + row.consumedNight, lang)}`,
             items: [
-              { label: t.day, value: formatKwh(row.consumedDay), color: colors.blue },
-              { label: t.night, value: formatKwh(row.consumedNight), color: colors.indigo },
+              { label: t.day, value: formatKwh(row.consumedDay, lang), color: colors.blue },
+              { label: t.night, value: formatKwh(row.consumedNight, lang), color: colors.indigo },
             ],
           },
         ]),
       ),
-    [displayRows, t.day, t.night],
+    [displayRows, lang, t.day, t.night],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -3465,9 +3523,37 @@ function NetPaymentInfo({
       </>
     );
   };
+  const tariff = tariffFromRow(row);
+  const importCostRows = (
+    breakdown: ImportCostBreakdown,
+    { totalLabel = t.total, totalMultiplier = 1 }: { readonly totalLabel?: string; readonly totalMultiplier?: number } = {},
+  ) => {
+    const rows: Array<{ label: string; value: React.ReactNode }> = [];
+    if (breakdown.discountedDay + breakdown.discountedNight > 0) {
+      rows.push({
+        label: t.electricHeatingTier,
+        value: (
+          <>
+            {displayMoneyMath(breakdown.discountedCost)} = {formatKwh(breakdown.discountedDay, lang)} × {displayMoney(row.importPriceDay)} + {formatKwh(breakdown.discountedNight, lang)} × {displayMoney(row.importPriceNight)}
+          </>
+        ),
+      });
+    }
+    if (breakdown.regularDay + breakdown.regularNight > 0) {
+      rows.push({
+        label: t.regularTier,
+        value: (
+          <>
+            {displayMoneyMath(breakdown.regularCost)} = {formatKwh(breakdown.regularDay, lang)} × {displayMoney(regularImportDayPrice(tariff))} + {formatKwh(breakdown.regularNight, lang)} × {displayMoney(regularImportNightPrice(tariff))}
+          </>
+        ),
+      });
+    }
+    rows.push({ label: totalLabel, value: displayMoneyMath(breakdown.total * totalMultiplier) });
+    return rows;
+  };
   const importTotalValue = Math.max(row.importTotal, 0);
-  const dayCost = row.consumedDay * row.importPriceDay;
-  const nightCost = row.consumedNight * row.importPriceNight;
+  const consumedBreakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
   const inputRows: MathInfoRow[] = [
     {
       label: t.formulaInputs,
@@ -3489,6 +3575,13 @@ function NetPaymentInfo({
           rows={[
             { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
             { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
+            ...(row.electricHeatingThresholdKwh ? [
+              { label: t.electricHeatingThreshold, value: formatKwh(row.electricHeatingThresholdKwh, lang) },
+              { label: `${t.electricHeatingTier} ${t.day}`, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
+              { label: `${t.electricHeatingTier} ${t.night}`, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
+              { label: `${t.regularTier} ${t.day}`, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}` },
+              { label: `${t.regularTier} ${t.night}`, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}` },
+            ] : []),
           ]}
         />
       ),
@@ -3513,32 +3606,7 @@ function NetPaymentInfo({
       label: t.electricityCostWithoutSolar,
       value: (
         <StackedValues
-          rows={[
-            {
-              label: t.day,
-              value: (
-                <>
-                  {displayMoneyMath(dayCost)} = {formatKwh(row.consumedDay, lang)} × {displayMoney(row.importPriceDay)}
-                </>
-              ),
-            },
-            {
-              label: t.night,
-              value: (
-                <>
-                  {displayMoneyMath(nightCost)} = {formatKwh(row.consumedNight, lang)} × {displayMoney(row.importPriceNight)}
-                </>
-              ),
-            },
-            {
-              label: t.total,
-              value: (
-                <>
-                  {displayMoneyMath(row.consumedPayment)} = {displayMoney(dayCost)} + {displayMoney(nightCost)}
-                </>
-              ),
-            },
-          ]}
+          rows={importCostRows(consumedBreakdown)}
         />
       ),
     },
@@ -3553,9 +3621,7 @@ function NetPaymentInfo({
       {
         label: t.netPayment,
         value: (
-          <>
-            {displayMoneyMath(row.electricityPayment)} = -({formatKwh(row.importDay, lang)} × {displayMoney(row.importPriceDay)} + {formatKwh(row.importNight, lang)} × {displayMoney(row.importPriceNight)})
-          </>
+          <StackedValues rows={importCostRows(importCostBreakdown(row.importDay, row.importNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
         ),
       },
     );
@@ -3663,9 +3729,7 @@ function NetPaymentInfo({
       {
         label: t.netPayment,
         value: (
-          <>
-            {displayMoneyMath(row.electricityPayment)} = -({formatKwh(remainingDay, lang)} × {displayMoney(row.importPriceDay)} + {formatKwh(remainingNight, lang)} × {displayMoney(row.importPriceNight)})
-          </>
+          <StackedValues rows={importCostRows(importCostBreakdown(remainingDay, remainingNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
         ),
       },
     );

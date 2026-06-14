@@ -15,6 +15,7 @@ export interface MonthRow {
   readonly exportMilitary: number
   readonly importPriceDay: number
   readonly importPriceNight: number
+  readonly electricHeatingThresholdKwh?: number
   readonly consumedPayment: number
   readonly electricityPayment: number
   readonly electricitySavings: number
@@ -54,6 +55,7 @@ export type ExportTax = readonly [type: string, value: number]
 export interface Tariff {
   readonly importDay: number
   readonly importNight: number
+  readonly electricHeatingThresholdKwh?: number
   readonly export: number
   readonly exportTaxes: readonly ExportTax[]
 }
