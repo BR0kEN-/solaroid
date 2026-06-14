@@ -116,6 +116,77 @@ describe('Supabase data mapping', () => {
 
     expect(loaded.rows.map((row) => row.isCommercial)).toEqual([false, true])
   })
+
+  it('maps electric heating threshold and discounted import rates into payments', () => {
+    const loaded = toLoadedPlant({
+      plant: {
+        ...plant,
+        commercial_date: '2025-01-01',
+        electric_heating_import_threshold_kwh: 2000,
+      },
+      months: [
+        {
+          plant_id: 'bondas',
+          date: '2026-01-01',
+          production: 0,
+          export: 10,
+          import_day: 1170,
+          import_night: 900,
+          consumption_day: 1170,
+          consumption_night: 900,
+          uah_usd_rate: 40,
+        },
+      ],
+      days: [day('2026-01-31', 40)],
+      tariffs: [
+        {
+          ...tariff,
+          price_import_day: 2.64,
+          price_import_night: 1.32,
+        },
+      ],
+    })
+
+    expect(loaded.rows[0].electricHeatingThresholdKwh).toBe(2000)
+    expect(loaded.rows[0].importPriceDay).toBe(2.64)
+    expect(loaded.rows[0].electricityPayment).toBeCloseTo(-4335.03, 1)
+    expect(loaded.dailyRows[0].electricHeatingThresholdKwh).toBeUndefined()
+  })
+
+  it('does not apply electric heating threshold outside the heating season', () => {
+    const loaded = toLoadedPlant({
+      plant: {
+        ...plant,
+        commercial_date: '2025-01-01',
+        electric_heating_import_threshold_kwh: 2000,
+      },
+      months: [
+        {
+          plant_id: 'bondas',
+          date: '2026-06-01',
+          production: 0,
+          export: 10,
+          import_day: 1170,
+          import_night: 900,
+          consumption_day: 1170,
+          consumption_night: 900,
+          uah_usd_rate: 40,
+        },
+      ],
+      days: [day('2026-06-30', 40)],
+      tariffs: [
+        {
+          ...tariff,
+          date: '2026-06-01',
+          price_import_day: 4.32,
+          price_import_night: 2.16,
+        },
+      ],
+    })
+
+    expect(loaded.rows[0].electricHeatingThresholdKwh).toBeUndefined()
+    expect(loaded.rows[0].electricityPayment).toBeCloseTo(-6964.59, 1)
+  })
 })
 
 function month(date: string) {

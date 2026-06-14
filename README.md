@@ -50,7 +50,7 @@ Migrations live in `supabase/migrations/`.
 
 Canonical tables:
 
-- `plants`: plant metadata, investment, launch date, commercial date.
+- `plants`: plant metadata, investment, launch date, commercial date, and optional electric-heating import threshold.
 - `days`: daily cumulative snapshots and daily currency rates.
 - `months`: monthly cumulative snapshots and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
@@ -197,6 +197,7 @@ Payment logic:
 - Before `commercial_date`, export is unpaid and does not offset import.
 - If commercial export is active and export exceeds import, the net surplus earns export payout after taxes.
 - Otherwise export offsets day/night import proportionally, and remaining import is charged by day/night tariff.
+- For plants with an electric-heating threshold, October-April monthly rows treat the tariff day/night prices from Home Assistant as the discounted electric-heating rates. The first monthly threshold kWh are charged at those rates. Any import above the threshold is split proportionally by balanced day/night import and charged at regular day/night rates. When this rule is active, `consumed_price` uses the same threshold split for `consumed_day + consumed_night`.
 
 ROI/savings logic:
 

@@ -13,6 +13,7 @@ create table public.plants (
   investment_usd numeric not null,
   launch_date date not null,
   commercial_date date not null,
+  electric_heating_import_threshold_kwh numeric,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
