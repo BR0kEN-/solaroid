@@ -7,6 +7,7 @@ import {
   CircleDollarSign,
   GitCompareArrows,
   Info,
+  LogOut,
   RefreshCw,
   SunMedium,
   WalletCards,
@@ -105,9 +106,6 @@ interface PortalCopy {
   readonly noPlantsTitle: string;
   readonly noPlantsCopy: string;
   readonly portalTagline: string;
-  readonly choosePlant: string;
-  readonly chooseCopy: string;
-  readonly mainPlant: string;
   readonly open: string;
   readonly signOut: string;
   readonly loading: string;
@@ -359,7 +357,6 @@ const i18n = {
 
 const LANGUAGE_STORAGE_KEY = "solaroid.lang";
 const PORTAL_SESSION_KEY = "solaroid.portal.session";
-const PORTAL_MAIN_PLANT_PREFIX = "solaroid.portal.mainPlant.";
 const TOKEN_REFRESH_WINDOW_SECONDS = 90;
 const DEFAULT_LANG: Lang = langFromQuery() ?? storedLang() ?? langFromNavigator() ?? "en";
 const LanguageContext = React.createContext<Lang>(DEFAULT_LANG);
@@ -379,9 +376,6 @@ const portalCopy: Record<Lang, PortalCopy> = {
     noPlantsTitle: "No plants assigned",
     noPlantsCopy: "Account is approved. Ask admin to assign at least one plant.",
     portalTagline: "Private solar ROI cockpit for production, tariffs, payback, and plant access.",
-    choosePlant: "Choose main plant",
-    chooseCopy: "Choose the station to open.",
-    mainPlant: "Main plant",
     open: "Open",
     signOut: "Sign out",
     loading: "Loading",
@@ -394,7 +388,7 @@ const portalCopy: Record<Lang, PortalCopy> = {
   uk: {
     brand: "Solaroid",
     signIn: "Увійти",
-    signUp: "Створити доступ",
+    signUp: "Створити аккаунт",
     email: "Email",
     password: "Пароль",
     enter: "Відкрити дашборд",
@@ -406,9 +400,6 @@ const portalCopy: Record<Lang, PortalCopy> = {
     noPlantsTitle: "Станції не привязані",
     noPlantsCopy: "Акаунт підтверджено. Попросіть адміна привязати хоча б одну станцію.",
     portalTagline: "Приватний дашборд для генерації, тарифів, окупності та доступу до станцій.",
-    choosePlant: "Оберіть головну станцію",
-    chooseCopy: "Оберіть станцію для відкриття.",
-    mainPlant: "Головна станція",
     open: "Відкрити",
     signOut: "Вийти",
     loading: "Завантаження",
@@ -878,7 +869,17 @@ function useMediaQuery(query: string) {
   return matches;
 }
 
-function App({ initialLang = DEFAULT_LANG, initialData }: { readonly initialLang?: Lang; readonly initialData?: LoadedData }) {
+function App({
+  initialLang = DEFAULT_LANG,
+  initialData,
+  footerExtra,
+  onLangChange,
+}: {
+  readonly initialLang?: Lang;
+  readonly initialData?: LoadedData;
+  readonly footerExtra?: React.ReactNode;
+  readonly onLangChange?: (lang: Lang) => void;
+}) {
   const dataState = useDashboardData(initialData);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [range, setRange] = useState<RangeKey>("all");
@@ -899,6 +900,10 @@ function App({ initialLang = DEFAULT_LANG, initialData }: { readonly initialLang
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
   const [lang, setLang] = useState<Lang>(initialLang);
+  const setAppLang = (nextLang: Lang) => {
+    setLang(nextLang);
+    onLangChange?.(nextLang);
+  };
   const t = i18n[lang];
   const monthNames = useMemo(
     () =>
@@ -1722,7 +1727,8 @@ function App({ initialLang = DEFAULT_LANG, initialData }: { readonly initialLang
               `${t.updated}: ${dataState.sheetUpdatedAt ? formatDateTimeLabel(dataState.sheetUpdatedAt, lang) : "-"}`
             )}
           </span>
-          <LanguageSwitcher lang={lang} setLang={setLang} />
+          {footerExtra}
+          <LanguageSwitcher lang={lang} setLang={setAppLang} />
         </footer>
       </section>
     </main>
@@ -1731,15 +1737,16 @@ function App({ initialLang = DEFAULT_LANG, initialData }: { readonly initialLang
 }
 
 function PortalRoot() {
+  const initialSession = useMemo(() => storedPortalSession(), []);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(Boolean(initialSession));
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [lang, setLang] = useState<Lang>(DEFAULT_LANG);
   const [plants, setPlants] = useState<readonly PortalPlant[]>([]);
   const [selectedPlantId, setSelectedPlantId] = useState("");
   const [dashboardData, setDashboardData] = useState<LoadedData | undefined>();
-  const [session, setSession] = useState<PortalSession | undefined>(() => storedPortalSession());
+  const [session, setSession] = useState<PortalSession | undefined>(initialSession);
   const [user, setUser] = useState<PortalUser | undefined>();
   const t = portalCopy[lang];
   const apiUrl = API_URL;
@@ -1773,7 +1780,7 @@ function PortalRoot() {
       }
 
       const nextPlants = await getPortalPlants(apiUrl, activeSession.access_token, t);
-      const nextSelectedPlantId = selectedPortalPlant(nextPlants, activeUser.id);
+      const nextSelectedPlantId = nextPlants[0]?.id ?? "";
       const nextDashboardData = nextSelectedPlantId
         ? await preloadPortalDashboard(apiUrl, nextSelectedPlantId, activeSession.access_token)
         : undefined;
@@ -1895,42 +1902,21 @@ function PortalRoot() {
     setUser(undefined);
   };
 
-  const chooseMainPlant = async (plantId: string) => {
-    if (!user) return;
-    if (!session) return;
-
-    setBusy(true);
-    setError("");
-
-    try {
-      const nextDashboardData = await preloadPortalDashboard(apiUrl, plantId, session.access_token);
-      localStorage.setItem(portalMainPlantKey(user.id), plantId);
-      setDashboardData(nextDashboardData);
-      setSelectedPlantId(plantId);
-    } catch (plantError) {
-      setError(portalErrorMessage(plantError));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const shell = (content: React.ReactNode) => (
     <div className="portal-shell">
       <header className="portal-top">
-        <strong>{t.brand}</strong>
-        <div className="portal-actions">
-          {session && !busy && selectedPlant && plants.length > 1 ? (
-            <select className="portal-main-select" value={selectedPlant.id} onChange={(event) => void chooseMainPlant(event.currentTarget.value)} aria-label={t.mainPlant}>
-              {plants.map((plant) => (
-                <option key={plant.id} value={plant.id}>
-                  {plant.id}
-                </option>
-              ))}
-            </select>
+        <div className="portal-identity">
+          <strong>{t.brand}</strong>
+          {session ? (
+            busy ? <SkeletonText width="138px" height="13px" /> : <span>{user?.email ?? ""}</span>
           ) : null}
-          {session && busy ? <SkeletonText width="122px" height="18px" /> : session ? <span>{user?.email ?? ""}</span> : null}
-          <LanguageSwitcher lang={lang} setLang={setLang} />
-          {session ? <button className="ghost-button" type="button" onClick={signOut}>{t.signOut}</button> : null}
+        </div>
+        <div className="portal-actions">
+          {session ? (
+            <button className="portal-sign-out-button" type="button" onClick={signOut} aria-label={t.signOut} title={t.signOut}>
+              <LogOut size={17} />
+            </button>
+          ) : null}
         </div>
       </header>
       {content}
@@ -1951,12 +1937,11 @@ function PortalRoot() {
     const isSignUp = authMode === "sign-up";
     return shell(
       <main className="portal-auth-layout">
-        <section className="portal-auth-copy">
-          <h1>{t.brand}</h1>
-          <p>{isSignUp ? t.waitingCopy : t.portalTagline}</p>
-        </section>
         <form className="portal-auth-card" onSubmit={submitAuth}>
-          <h2>{isSignUp ? t.signUp : t.signIn}</h2>
+          <div className="portal-auth-card-head">
+            <h2>{isSignUp ? t.signUp : t.signIn}</h2>
+            <LanguageSwitcher lang={lang} setLang={setLang} />
+          </div>
           <PortalMessage error={error} info={info} />
           <label>
             <span>{t.email}</span>
@@ -1995,31 +1980,16 @@ function PortalRoot() {
     );
   }
 
-  if (!selectedPlant) {
-    return shell(
-      <main className="portal-picker-layout">
-        <section>
-          <h1>{t.choosePlant}</h1>
-          <p>{t.chooseCopy}</p>
-        </section>
-        <div className="portal-plant-list">
-          {plants.map((plant) => (
-            <button className="portal-plant-option" key={plant.id} type="button" onClick={() => void chooseMainPlant(plant.id)}>
-              <span>
-                <strong>{plant.id}</strong>
-                <small>{plant.domain ?? t.missingDomain}</small>
-              </span>
-              <b>{t.open}</b>
-            </button>
-          ))}
-        </div>
-      </main>,
-    );
-  }
+  if (!selectedPlant) return shell(<PortalLoading label={t.loading} />);
 
   return shell(
     <div className="portal-dashboard">
-      <App key={`${selectedPlant.id}:${session.access_token}`} initialLang={lang} initialData={dashboardData} />
+      <App
+        key={`${selectedPlant.id}:${session.access_token}`}
+        initialLang={lang}
+        initialData={dashboardData}
+        onLangChange={setLang}
+      />
     </div>,
   );
 }
@@ -2238,17 +2208,6 @@ function storedPortalSession(): PortalSession | undefined {
   } catch {
     return undefined;
   }
-}
-
-function selectedPortalPlant(plants: readonly PortalPlant[], userId: string) {
-  if (plants.length === 1) return plants[0].id;
-
-  const saved = localStorage.getItem(portalMainPlantKey(userId)) ?? "";
-  return plants.some((plant) => plant.id === saved) ? saved : "";
-}
-
-function portalMainPlantKey(userId: string) {
-  return `${PORTAL_MAIN_PLANT_PREFIX}${userId}`;
 }
 
 function portalErrorMessage(error: unknown) {
