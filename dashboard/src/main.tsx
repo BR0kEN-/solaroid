@@ -55,7 +55,7 @@ interface DashboardDataState extends DataState {
 }
 
 type DashboardDataHookState = Omit<DashboardDataState, "refresh">;
-type AuthMode = "sign-in" | "sign-up";
+type AuthMode = "sign-in" | "sign-up" | "recover" | "reset";
 
 interface PortalSession {
   readonly access_token: string;
@@ -97,10 +97,17 @@ interface PortalCopy {
   readonly signUp: string;
   readonly email: string;
   readonly password: string;
+  readonly newPassword: string;
   readonly enter: string;
   readonly create: string;
+  readonly savePassword: string;
   readonly needAccount: string;
   readonly haveAccount: string;
+  readonly forgotPassword: string;
+  readonly rememberPassword: string;
+  readonly resetPassword: string;
+  readonly resetSent: string;
+  readonly passwordUpdated: string;
   readonly waitingTitle: string;
   readonly waitingCopy: string;
   readonly noPlantsTitle: string;
@@ -367,10 +374,17 @@ const portalCopy: Record<Lang, PortalCopy> = {
     signUp: "Sign up",
     email: "Email",
     password: "Password",
+    newPassword: "New password",
     enter: "Open dashboard",
     create: "Create account",
+    savePassword: "Save password",
     needAccount: "Need access?",
     haveAccount: "Already approved?",
+    forgotPassword: "Forgot password?",
+    rememberPassword: "Remember password?",
+    resetPassword: "Reset password",
+    resetSent: "Password reset link sent. Check your email.",
+    passwordUpdated: "Password updated. Opening dashboard.",
     waitingTitle: "Waiting for approval",
     waitingCopy: "Your account exists, but access opens after manual confirmation and plant assignment.",
     noPlantsTitle: "No plants assigned",
@@ -391,10 +405,17 @@ const portalCopy: Record<Lang, PortalCopy> = {
     signUp: "Створити аккаунт",
     email: "Email",
     password: "Пароль",
+    newPassword: "Новий пароль",
     enter: "Відкрити дашборд",
     create: "Створити акаунт",
+    savePassword: "Зберегти пароль",
     needAccount: "Потрібен доступ?",
     haveAccount: "Доступ уже є?",
+    forgotPassword: "Забули пароль?",
+    rememberPassword: "Згадали пароль?",
+    resetPassword: "Скинути пароль",
+    resetSent: "Посилання для скидання пароля надіслано. Перевірте email.",
+    passwordUpdated: "Пароль оновлено. Відкриваємо дашборд.",
     waitingTitle: "Очікує підтвердження",
     waitingCopy: "Акаунт створено, але доступ відкриється після ручного підтвердження та привязки станції.",
     noPlantsTitle: "Станції не привязані",
@@ -1738,15 +1759,16 @@ function App({
 
 function PortalRoot() {
   const initialSession = useMemo(() => storedPortalSession(), []);
-  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
-  const [busy, setBusy] = useState(Boolean(initialSession));
+  const recoverySession = useMemo(() => recoverySessionFromHash(), []);
+  const [authMode, setAuthMode] = useState<AuthMode>(recoverySession ? "reset" : "sign-in");
+  const [busy, setBusy] = useState(Boolean(initialSession) && !recoverySession);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [lang, setLang] = useState<Lang>(DEFAULT_LANG);
   const [plants, setPlants] = useState<readonly PortalPlant[]>([]);
   const [selectedPlantId, setSelectedPlantId] = useState("");
   const [dashboardData, setDashboardData] = useState<LoadedData | undefined>();
-  const [session, setSession] = useState<PortalSession | undefined>(initialSession);
+  const [session, setSession] = useState<PortalSession | undefined>(recoverySession ?? initialSession);
   const [user, setUser] = useState<PortalUser | undefined>();
   const t = portalCopy[lang];
   const apiUrl = API_URL;
@@ -1809,6 +1831,8 @@ function PortalRoot() {
   }, [lang]);
 
   useEffect(() => {
+    if (authMode === "reset") return;
+
     if (!session) {
       setBusy(false);
       return;
@@ -1843,6 +1867,22 @@ function PortalRoot() {
       const data = new FormData(event.currentTarget);
       const email = String(data.get("email") ?? "");
       const password = String(data.get("password") ?? "");
+      if (authMode === "recover") {
+        await requestPortalPasswordReset(email);
+        setBusy(false);
+        setInfo(t.resetSent);
+        return;
+      }
+
+      if (authMode === "reset") {
+        if (!session) throw new Error(t.sessionExpired);
+        await updatePortalPassword(password, session.access_token);
+        setInfo(t.passwordUpdated);
+        savePortalSession(session);
+        await loadAuthedState(undefined, session);
+        return;
+      }
+
       const response = authMode === "sign-up"
         ? await portalSignUp(email, password)
         : await portalSignIn(email, password);
@@ -1851,6 +1891,14 @@ function PortalRoot() {
         const nextSession = portalSessionFromResponse(response, t);
         savePortalSession(nextSession);
         setSession(nextSession);
+        if (authMode === "sign-up" && !isPortalUserConfirmed(response.user)) {
+          setBusy(false);
+          setUser(response.user);
+          setPlants([]);
+          setSelectedPlantId("");
+          setDashboardData(undefined);
+          return;
+        }
         await loadAuthedState(response.user, nextSession);
         return;
       }
@@ -1935,34 +1983,57 @@ function PortalRoot() {
 
   if (!session || !user) {
     const isSignUp = authMode === "sign-up";
+    const isRecover = authMode === "recover";
+    const isReset = authMode === "reset";
     return shell(
       <main className="portal-auth-layout">
         <form className="portal-auth-card" onSubmit={submitAuth}>
           <div className="portal-auth-card-head">
-            <h2>{isSignUp ? t.signUp : t.signIn}</h2>
+            <h2>{isReset || isRecover ? t.resetPassword : isSignUp ? t.signUp : t.signIn}</h2>
             <LanguageSwitcher lang={lang} setLang={setLang} />
           </div>
           <PortalMessage error={error} info={info} />
-          <label>
-            <span>{t.email}</span>
-            <input name="email" type="email" autoComplete="email" required />
-          </label>
-          <label>
-            <span>{t.password}</span>
-            <input name="password" type="password" autoComplete={isSignUp ? "new-password" : "current-password"} minLength={6} required />
-          </label>
-          <button className="primary-button" type="submit">{isSignUp ? t.create : t.enter}</button>
-          <button
-            className="link-button"
-            type="button"
-            onClick={() => {
-              setAuthMode(isSignUp ? "sign-in" : "sign-up");
-              setError("");
-              setInfo("");
-            }}
-          >
-            {isSignUp ? t.haveAccount : t.needAccount}
-          </button>
+          {!isReset ? (
+            <input name="email" type="email" autoComplete="email" placeholder={t.email} aria-label={t.email} required />
+          ) : null}
+          {!isRecover ? (
+            <input
+              name="password"
+              type="password"
+              autoComplete={isSignUp || isReset ? "new-password" : "current-password"}
+              placeholder={isReset ? t.newPassword : t.password}
+              aria-label={isReset ? t.newPassword : t.password}
+              minLength={6}
+              required
+            />
+          ) : null}
+          <button className="primary-button" type="submit">{isRecover ? t.resetPassword : isReset ? t.savePassword : isSignUp ? t.create : t.enter}</button>
+          <div className="portal-auth-links">
+            <button
+              className="link-button"
+              type="button"
+              onClick={() => {
+                setAuthMode(isSignUp || isRecover || isReset ? "sign-in" : "sign-up");
+                setError("");
+                setInfo("");
+              }}
+            >
+              {isSignUp || isRecover || isReset ? t.haveAccount : t.needAccount}
+            </button>
+            {!isSignUp && !isRecover && !isReset ? (
+              <button
+                className="link-button"
+                type="button"
+                onClick={() => {
+                  setAuthMode("recover");
+                  setError("");
+                  setInfo("");
+                }}
+              >
+                {t.forgotPassword}
+              </button>
+            ) : null}
+          </div>
         </form>
       </main>,
     );
@@ -2095,6 +2166,24 @@ async function portalSignIn(email: string, password: string) {
   });
 }
 
+async function requestPortalPasswordReset(email: string) {
+  const redirectTo = typeof window === "undefined" ? "" : `${window.location.origin}${window.location.pathname}`;
+  const path = redirectTo ? `/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}` : "/auth/v1/recover";
+
+  return portalAuthRequest<PortalAuthResponse>(path, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+async function updatePortalPassword(password: string, accessToken: string) {
+  return portalAuthRequest<PortalAuthResponse>("/auth/v1/user", {
+    method: "PUT",
+    token: accessToken,
+    body: JSON.stringify({ password }),
+  });
+}
+
 async function refreshPortalSession(refreshToken: string) {
   return portalAuthRequest<PortalAuthResponse>("/auth/v1/token?grant_type=refresh_token", {
     method: "POST",
@@ -2208,6 +2297,28 @@ function storedPortalSession(): PortalSession | undefined {
   } catch {
     return undefined;
   }
+}
+
+function recoverySessionFromHash(): PortalSession | undefined {
+  if (typeof window === "undefined") return undefined;
+
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  if (params.get("type") !== "recovery") return undefined;
+
+  const accessToken = params.get("access_token") ?? "";
+  const refreshToken = params.get("refresh_token") ?? "";
+  const expiresIn = Number(params.get("expires_in") ?? 0);
+  if (!accessToken || !refreshToken) return undefined;
+
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+
+  return {
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    expires_at: Number.isFinite(expiresIn) && expiresIn > 0
+      ? Math.floor(Date.now() / 1000) + expiresIn
+      : undefined,
+  };
 }
 
 function portalErrorMessage(error: unknown) {
@@ -4176,27 +4287,52 @@ function NetPaymentInfo({
     { totalLabel = t.total, totalMultiplier = 1 }: { readonly totalLabel?: string; readonly totalMultiplier?: number } = {},
   ) => {
     const rows: Array<{ label: string; value: React.ReactNode }> = [];
-    if (breakdown.discountedDay + breakdown.discountedNight > 0) {
+    const costParts: number[] = [];
+    const pushCostRow = (label: string, kwh: number, price: number) => {
+      if (kwh <= 0) return;
+      const cost = kwh * price;
+      costParts.push(cost);
       rows.push({
-        label: t.electricHeatingTier,
+        label,
         value: (
           <>
-            {displayMoneyMath(breakdown.discountedCost)} = {formatKwh(breakdown.discountedDay, lang)} × {displayMoney(row.importPriceDay)} + {formatKwh(breakdown.discountedNight, lang)} × {displayMoney(row.importPriceNight)}
+            {displayMoneyMath(cost)} = {formatKwh(kwh, lang)} × {displayMoney(price)}
           </>
         ),
       });
-    }
-    if (breakdown.regularDay + breakdown.regularNight > 0) {
-      rows.push({
-        label: t.regularTier,
+    };
+
+    pushCostRow(row.electricHeatingThresholdKwh ? `${t.electricHeatingTier} ${t.day}` : t.day, breakdown.discountedDay, row.importPriceDay);
+    pushCostRow(row.electricHeatingThresholdKwh ? `${t.electricHeatingTier} ${t.night}` : t.night, breakdown.discountedNight, row.importPriceNight);
+    pushCostRow(row.electricHeatingThresholdKwh ? `${t.regularTier} ${t.day}` : t.day, breakdown.regularDay, regularImportDayPrice(tariff));
+    pushCostRow(row.electricHeatingThresholdKwh ? `${t.regularTier} ${t.night}` : t.night, breakdown.regularNight, regularImportNightPrice(tariff));
+
+    rows.push({
+      label: totalLabel,
+      value: costParts.length > 1 ? (
+        <>
+          {displayMoneyMath(breakdown.total * totalMultiplier)} = {costParts.map((part, index) => (
+            <React.Fragment key={index}>
+              {index > 0 ? " + " : ""}
+              {displayMoney(part)}
+            </React.Fragment>
+          ))}
+        </>
+      ) : (
+        displayMoneyMath(breakdown.total * totalMultiplier)
+      ),
+    });
+
+    if (totalMultiplier < 0) {
+      rows[rows.length - 1] = {
+        label: totalLabel,
         value: (
           <>
-            {displayMoneyMath(breakdown.regularCost)} = {formatKwh(breakdown.regularDay, lang)} × {displayMoney(regularImportDayPrice(tariff))} + {formatKwh(breakdown.regularNight, lang)} × {displayMoney(regularImportNightPrice(tariff))}
+            {displayMoneyMath(breakdown.total * totalMultiplier)} = -({displayMoney(breakdown.total)})
           </>
         ),
-      });
+      };
     }
-    rows.push({ label: totalLabel, value: displayMoneyMath(breakdown.total * totalMultiplier) });
     return rows;
   };
   const importTotalValue = Math.max(row.importTotal, 0);

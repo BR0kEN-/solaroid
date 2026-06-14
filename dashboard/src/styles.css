@@ -310,15 +310,16 @@ button {
   gap: 12px;
 }
 
-.portal-auth-card label {
-  display: grid;
-  gap: 6px;
+.portal-auth-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.portal-auth-card label span {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
+.portal-auth-links .link-button {
+  min-width: 0;
+  padding-inline: 8px;
 }
 
 .portal-auth-card input {
@@ -329,6 +330,11 @@ button {
   background: var(--control);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.portal-auth-card input::placeholder {
+  color: color-mix(in srgb, var(--muted), var(--text) 20%);
+  opacity: 1;
 }
 
 .portal-auth-card input:focus,
