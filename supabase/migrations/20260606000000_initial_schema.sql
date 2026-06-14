@@ -10,6 +10,7 @@ $$;
 
 create table public.plants (
   id text primary key,
+  domain text unique not null,
   investment_usd numeric not null,
   launch_date date not null,
   commercial_date date not null,
