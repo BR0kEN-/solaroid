@@ -116,7 +116,7 @@ export function toLoadedPlant({
 
 function assertConfig() {
   if (!API_URL) throw new Error('VITE_API_URL is not configured')
-  if (!accessToken()) throw new Error('VITE_ACCESS_TOKEN is not configured and no token was provided in the URL hash')
+  if (!accessToken()) throw new Error('No token was provided in the URL hash')
 }
 
 async function fetchDashboardData(
@@ -170,7 +170,8 @@ function accessToken() {
 function tokenFromHash() {
   if (typeof window === 'undefined') return ''
 
-  return new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') ?? ''
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  return params.get('access_token') ?? params.get('token') ?? ''
 }
 
 function queryParam(name: string) {

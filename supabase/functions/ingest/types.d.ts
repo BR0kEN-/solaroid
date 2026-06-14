@@ -29,8 +29,11 @@ declare global {
     }
 
     namespace Access {
+      type Kind = 'ingest' | 'auth'
+
       interface Token {
         readonly id: string
+        readonly kind: Kind
         readonly plant_id: Plant.Id
         readonly reads: readonly Plant.Id[]
       }

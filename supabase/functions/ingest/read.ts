@@ -9,6 +9,12 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
     throw new ForbiddenError()
   }
 
+  if (token.kind === 'auth' && params.has('metadata')) {
+    return {
+      plants: await client.getPlantsMetadata([token.plant_id, ...token.reads]),
+    }
+  }
+
   const granularity = params.get('granularity')
 
   if (granularity) {

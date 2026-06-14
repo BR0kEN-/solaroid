@@ -68,15 +68,6 @@ function bearerToken(request: Request): string {
   return authorization.slice(BEARER_PREFIX.length)
 }
 
-async function tokenHash(request: Request) {
-  const token = bearerToken(request)
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
-
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
-
 function serve(
   handlers: Record<Solaroid.Supabase.Http.Method, Solaroid.Supabase.Http.Handler>,
 ) {
@@ -95,7 +86,7 @@ function serve(
       }
 
       const client = new SupabaseClient()
-      const accessToken = await client.getAccessToken(await tokenHash(request))
+      const accessToken = await client.getAccessToken(bearerToken(request))
 
       if (!accessToken) {
         throw new UnauthorizedError()
