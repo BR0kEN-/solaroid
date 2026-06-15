@@ -21,7 +21,7 @@ import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMone
 import { calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
 import { importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
-import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, Tariff } from "./domain/types";
+import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
 import "./styles.css";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
@@ -46,6 +46,7 @@ type InfoModal =
   | "forecast"
   | "investment"
   | "plantWorks"
+  | "pvgis"
   | {
     readonly kind: "importSplit" | "consumedSplit" | "exportPrice" | "netPayment";
     readonly row: MonthRow;
@@ -144,11 +145,21 @@ const i18n = {
     finance: "Finance",
     data: "Data",
     forecast: "Forecast",
+    expected: "Expected",
     expectedProduction: "Expected production",
     expectedRoi: "Expected ROI",
     expectedIncome: "Expected income",
     soFar: "so far",
     forecastInfo: "Forecast values are projected from the current month daylight pace: value so far divided by elapsed daylight this month, then multiplied by total expected daylight for the month. The colored comparison shows the projected value against the previous month's actual value.",
+    pvgisInfo: "PVGIS estimates expected solar production from long-term satellite radiation data, not from this year's weather. It models the sun path for the plant location, panel tilt and azimuth, horizon shading, system power, module technology, mounting type, and configured losses. The result is a typical monthly average. Real production can differ because of clouds, fog, snow cover, dust or dirt, temporary shadows, nearby trees or buildings, inverter limits, outages, maintenance, panel degradation, and unusually sunny or gloomy months.",
+    pvgisFields: "PV fields",
+    power: "Power",
+    azimuth: "Azimuth",
+    slope: "Slope",
+    loss: "Loss",
+    mounting: "Mounting",
+    location: "Location",
+    elevation: "Elevation",
     plantComparison: "Plant comparison",
     compareDaily: "Daily",
     compareMonthly: "Monthly",
@@ -263,11 +274,21 @@ const i18n = {
     finance: "Фінанси",
     data: "Дані",
     forecast: "Прогноз",
+    expected: "Очікувано",
     expectedProduction: "Очікувана генерація",
     expectedRoi: "Очікуване ПІ",
     expectedIncome: "Очікуваний дохід",
     soFar: "зараз",
     forecastInfo: "Прогноз рахується за поточним темпом світлового часу місяця: значення зараз ділиться на кількість світлового часу, що вже минув у цьому місяці, і множиться на очікуваний світловий час усього місяця. Кольорове порівняння показує прогнозоване значення відносно фактичного значення попереднього місяця.",
+    pvgisInfo: "PVGIS рахує очікувану генерацію за довгостроковими супутниковими даними сонячної радіації, а не за погодою саме цього року. Він моделює шлях сонця для локації станції, нахил і азимут панелей, горизонт, потужність системи, тип модуля, монтаж і задані втрати. Результат — типовий середній місяць. Фактична генерація може відрізнятись через хмари, туман, сніг на панелях, пил чи бруд, тимчасові тіні, дерева або будівлі поруч, обмеження інвертора, відключення, обслуговування, деградацію панелей і нетипово сонячні чи похмурі місяці.",
+    pvgisFields: "Фотоелектричні поля",
+    power: "Потужність",
+    azimuth: "Азимут",
+    slope: "Нахил",
+    loss: "Втрати",
+    mounting: "Монтаж",
+    location: "Локація",
+    elevation: "Висота",
     plantComparison: "Порівняння станцій",
     compareDaily: "Дні",
     compareMonthly: "Місяці",
@@ -619,6 +640,26 @@ function chartBand(innerWidth: number, count: number, maxBand = 72) {
   return Math.min(innerWidth / Math.max(count, 1), maxBand);
 }
 
+function projectedProduction(row: MonthRow, projection?: ProductionProjection | null) {
+  if (!projection) return undefined;
+
+  const monthIndex = row.date.getMonth();
+  const value = row.month.includes("-")
+    ? projection.dailyKwh[monthIndex]
+    : projection.monthlyKwh[monthIndex];
+
+  return value && Number.isFinite(value) ? value : undefined;
+}
+
+function formatMounting(value: string, lang: Lang) {
+  if (lang !== "uk") return value;
+  const mounting: Record<string, string> = {
+    building: "на будівлі",
+    free: "на землі",
+  };
+  return mounting[value] ?? value;
+}
+
 function pct(value: number) {
   if (!Number.isFinite(value)) return "0%";
   return `${formatNumber(value)}%`;
@@ -841,6 +882,8 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
     investmentUsd: initialData?.investmentUsd ?? 0,
     launchDate: initialData?.launchDate,
     commercialDate: initialData?.commercialDate,
+    metadata: initialData?.metadata,
+    projection: initialData?.projection,
     sheetUpdatedAt: initialData?.sheetUpdatedAt,
     isLoading: !initialData,
     isRefreshing: false,
@@ -972,13 +1015,17 @@ function App({
     investmentUsd: dataState.investmentUsd,
     launchDate: dataState.launchDate,
     commercialDate: dataState.commercialDate,
+    metadata: dataState.metadata,
+    projection: dataState.projection,
     sheetUpdatedAt: dataState.sheetUpdatedAt,
   }), [
     dataState.commercialDate,
     dataState.dailyRows,
     dataState.investmentUsd,
     dataState.launchDate,
+    dataState.metadata,
     dataState.plantId,
+    dataState.projection,
     dataState.rows,
     dataState.sheetUpdatedAt,
   ]);
@@ -1024,6 +1071,7 @@ function App({
   const rows = useMemo(() => {
     return filteredMonthlyRows(dataState.rows, range, monthFilter, yearFilter);
   }, [dataState.rows, monthFilter, range, yearFilter]);
+  const productionProjection = dataState.projection ?? null;
 
   const plantComparisonMonthOptions = useMemo(
     () => [...new Map(dataState.dailyRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
@@ -1216,6 +1264,31 @@ function App({
     if (infoModal === "importPrice") return { title: `${t.import} ${t.exportPrice}`, body: t.importPriceInfo };
     if (infoModal === "roi") return { title: t.roi, body: t.roiInfo };
     if (infoModal === "forecast") return { title: t.forecast, body: t.forecastInfo };
+    if (infoModal === "pvgis") {
+      const fields = dataState.metadata?.pvs ?? [];
+      return {
+        title: `${t.production} · PVGIS`,
+        body: (
+          <div className="info-stack">
+            <p>{t.pvgisInfo}</p>
+            {fields.length > 0 && (
+              <div className="pv-fields">
+                <div className="pv-fields-head">
+                  <span>{t.pvgisFields}</span>
+                  <strong>{fields.length}</strong>
+                </div>
+                {fields.map((field, index) => (
+                  <section className="pv-field" key={`${field.azimuth}-${field.power}-${index}`}>
+                    <h3>{lang === "uk" ? `Поле ${index + 1}` : `Field ${index + 1}`}</h3>
+                    <PvSpecList field={field} t={t} lang={lang} />
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        ),
+      };
+    }
     if (infoModal === "investment") return { title: t.investment, body: t.investmentInfo };
     if (infoModal === "plantWorks") {
       return {
@@ -1268,6 +1341,7 @@ function App({
     return null;
   }, [
     currency,
+    dataState.metadata,
     infoModal,
     lang,
     t,
@@ -1608,12 +1682,15 @@ function App({
         <section className="chart-grid chart-grid-single">
           <ChartPanel
             title={t.production}
+            infoLabel={`${t.production} PVGIS`}
+            onInfo={() => setInfoModal("pvgis")}
             legend={[
               [t.production, colors.amber],
               [t.export, colors.green],
+              ...(productionProjection ? [[t.expected, colors.blue] as [string, string]] : []),
             ]}
           >
-            {showPlaceholders ? <ChartSkeleton /> : <ProductionExportChart rows={rows} />}
+            {showPlaceholders ? <ChartSkeleton /> : <ProductionExportChart rows={rows} projection={productionProjection} />}
           </ChartPanel>
         </section>
 
@@ -3152,16 +3229,27 @@ function ChartPanel({
   title,
   legend,
   children,
+  infoLabel,
+  onInfo,
 }: {
   title: string;
   legend: [string, string][];
   children: React.ReactNode;
+  infoLabel?: string;
+  onInfo?: () => void;
 }) {
   return (
     <article className="chart-panel">
       <div className="chart-head">
         <div>
-          <h2>{title}</h2>
+          <h2 className={onInfo ? "heading-with-info" : undefined}>
+            <span>{title}</span>
+            {onInfo && (
+              <button type="button" className="section-info-button" aria-label={infoLabel ?? title} onClick={onInfo}>
+                <Info size={16} />
+              </button>
+            )}
+          </h2>
         </div>
         <div className="legend">
           {legend.map(([label, color]) => (
@@ -3173,6 +3261,37 @@ function ChartPanel({
       </div>
       {children}
     </article>
+  );
+}
+
+function PvSpecList({
+  field,
+  t,
+  lang,
+}: {
+  readonly field: PvMetadata;
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+}) {
+  const rows = [
+    [t.power, `${formatNumber(field.power / 1000, 2, 2)} kWp`],
+    [t.azimuth, `${formatNumber(field.azimuth, 0, 0)}°`],
+    [t.slope, `${formatNumber(field.slope, 0, 0)}°`],
+    [t.loss, `${formatNumber(field.loss, 2, 0)}%`],
+    [t.mounting, formatMounting(field.mounting, lang)],
+    [t.location, `${formatNumber(field.lat, 6, 4)}, ${formatNumber(field.lng, 6, 4)}`],
+    [t.elevation, `${formatNumber(field.elevation, 0, 0)} m`],
+  ] as const;
+
+  return (
+    <dl className="info-list pv-spec-list">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -3282,26 +3401,40 @@ function newestFirst(rows: readonly MonthRow[]) {
   return [...rows].reverse();
 }
 
-function ProductionExportChart({ rows }: { readonly rows: readonly MonthRow[] }) {
+function ProductionExportChart({
+  rows,
+  projection,
+}: {
+  readonly rows: readonly MonthRow[];
+  readonly projection?: ProductionProjection | null;
+}) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
+  const expectedByMonth = useMemo(
+    () => new Map(displayRows.map((row) => [row.month, projectedProduction(row, projection)])),
+    [displayRows, projection],
+  );
   const inspectors = useMemo(
     () =>
       new Map(
-        displayRows.map((row) => [
-          row.month,
-          {
-            month: formatPeriodLabel(row, lang),
-            items: [
+        displayRows.map((row) => {
+          const expected = expectedByMonth.get(row.month);
+          return [
+            row.month,
+            {
+              month: formatPeriodLabel(row, lang),
+              items: [
               { label: t.production, value: formatKwh(row.production, lang), color: colors.amber },
               { label: t.export, value: formatKwh(row.export, lang), color: colors.green },
-            ],
-          },
-        ]),
+              ...(expected ? [{ label: t.expected, value: formatKwh(expected, lang), color: colors.blue }] : []),
+              ],
+            },
+          ];
+        }),
       ),
-    [displayRows, lang, t.export, t.production],
+    [displayRows, expectedByMonth, lang, t.export, t.expected, t.production],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -3310,10 +3443,20 @@ function ProductionExportChart({ rows }: { readonly rows: readonly MonthRow[] })
   const pad = { left: 48, right: 18, top: 18, bottom: 42 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
-  const max = axisMax(displayRows.flatMap((row) => [row.production, row.export]));
+  const expectedValues = displayRows
+    .map((row) => expectedByMonth.get(row.month))
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+  const max = axisMax(displayRows.flatMap((row) => [row.production, row.export, expectedByMonth.get(row.month) ?? 0]));
   const band = chartBand(innerW, displayRows.length);
   const bar = Math.max(14, band * 0.24);
   const y = (value: number) => pad.top + innerH - (value / max) * innerH;
+  const expectedPoints = displayRows
+    .map((row, index) => {
+      const expected = expectedByMonth.get(row.month);
+      return expected ? `${pad.left + band * index + band / 2},${y(expected)}` : "";
+    })
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <>
@@ -3358,6 +3501,35 @@ function ProductionExportChart({ rows }: { readonly rows: readonly MonthRow[] })
               </g>
             );
           })}
+          {expectedValues.length > 0 && (
+            <>
+              <polyline
+                points={expectedPoints}
+                fill="none"
+                stroke={colors.blue}
+                strokeWidth="3"
+                strokeDasharray="8 7"
+                strokeLinejoin="round"
+                pointerEvents="none"
+              />
+              {displayRows.map((row, index) => {
+                const expected = expectedByMonth.get(row.month);
+                if (!expected) return null;
+                return (
+                  <circle
+                    key={`${row.month}-expected`}
+                    cx={pad.left + band * index + band / 2}
+                    cy={y(expected)}
+                    r="4"
+                    fill="var(--panel)"
+                    stroke={colors.blue}
+                    strokeWidth="2"
+                    pointerEvents="none"
+                  />
+                );
+              })}
+            </>
+          )}
         </svg>
       </div>
       <ChartInspector selection={selection} hint={t.tapBar} />

@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from './config.ts'
-import { fetchPvgisProductionProjection } from './pvgis.ts'
+import { Pvgis } from './pvgis.ts'
 import { hash } from './utils/crypto.ts'
 import { dateUtil } from './utils/date.ts'
 
@@ -180,7 +180,7 @@ export class SupabaseClient {
   }
 
   async #getPvgisProjection(plant: Solaroid.Supabase.Plant.Record): Promise<Solaroid.Supabase.Pvgis.Projection | null> {
-    const currentHash = await hash(JSON.stringify(plant.metadata))
+    const currentHash = await hash(JSON.stringify({ m: plant.metadata, q: Pvgis.BaseQuery }))
     const { data: cache, error: cacheError } = await this.client
       .from('plant_pvgis_projections')
       .select('metadata_hash,projection')
@@ -190,7 +190,7 @@ export class SupabaseClient {
     if (cacheError) throw new Error('PVGIS projection cache lookup failed', { cause: cacheError })
     if (cache?.metadata_hash === currentHash) return cache.projection
 
-    const projection = await fetchPvgisProductionProjection(plant.metadata)
+    const projection = await Pvgis.getProjection(plant.metadata)
 
     if (!projection) return null
 

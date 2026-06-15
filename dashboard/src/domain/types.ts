@@ -32,6 +32,8 @@ export interface DataState {
   readonly investmentUsd: number
   readonly launchDate?: Date
   readonly commercialDate?: Date
+  readonly metadata?: PlantMetadata | null
+  readonly projection?: ProductionProjection | null
   readonly sheetUpdatedAt?: Date
   readonly isLoading: boolean
   readonly updatedAt: Date
@@ -47,6 +49,8 @@ export interface PlantComparison {
   readonly investmentUsd: number
   readonly launchDate?: Date
   readonly commercialDate?: Date
+  readonly metadata?: PlantMetadata | null
+  readonly projection?: ProductionProjection | null
   readonly sheetUpdatedAt?: Date
 }
 
@@ -82,4 +86,9 @@ export interface PvMetadata {
 
 export interface PlantMetadata {
   readonly pvs?: readonly PvMetadata[]
+}
+
+export interface ProductionProjection {
+  readonly monthlyKwh: readonly number[]
+  readonly dailyKwh: readonly number[]
 }
