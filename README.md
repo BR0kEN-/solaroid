@@ -8,7 +8,7 @@ The name is `Solar` + `ROI` + `d`.
 
 ```text
 solaroid/
-  dashboard/                  React/Vite dashboard
+  dashboard/                  React/Vite dashboard, built in HA or portal mode
   supabase/
     migrations/               Supabase schema migrations
     functions/ingest/         Edge Function used for both reads and writes
@@ -16,7 +16,7 @@ solaroid/
 
 Main dashboard files:
 
-- `dashboard/src/main.tsx`: UI, charts, tables, popups, view state.
+- `dashboard/src/main.tsx`: UI, charts, tables, popups, view state, portal auth shell.
 - `dashboard/src/data/supabase.ts`: API client and Supabase response mapping.
 - `dashboard/src/domain/formulas.ts`: canonical electricity, payment, and ROI formulas.
 - `dashboard/src/domain/types.ts`: shared dashboard domain interfaces.
@@ -39,10 +39,11 @@ Home Assistant posts sensor snapshots to the Supabase Edge Function:
 
 ```text
 Home Assistant -> POST /functions/v1/ingest -> Supabase tables
-Dashboard iframe -> GET /functions/v1/ingest -> Supabase tables
+Portal mode -> Supabase Auth -> GET /functions/v1/ingest -> Supabase tables
+HA mode -> GET /functions/v1/ingest -> Supabase tables
 ```
 
-The dashboard is static and is intended to be served from Home Assistant, Cloudflare, or any static host. It does not store Supabase service credentials. It reads through the Edge Function using a bearer access token.
+Portal mode is intended for `https://solaroid.app`. HA mode remains static and can still be served from Home Assistant, Cloudflare, or any static host. Neither mode stores Supabase service credentials.
 
 ## Supabase Schema
 
@@ -50,17 +51,20 @@ Migrations live in `supabase/migrations/`.
 
 Canonical tables:
 
-- `plants`: plant metadata, investment, launch date, commercial date, and optional electric-heating import threshold.
+- `plants`: plant metadata, investment, launch date, commercial date, optional electric-heating import threshold, and optional public `domain`.
 - `days`: daily cumulative snapshots and daily currency rates.
 - `months`: monthly cumulative snapshots and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
 - `access_tokens`: one token owns read/write access to its `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a token.
+- `user_plant_access`: Supabase Auth users mapped to readable plants.
 
 Important auth model:
 
-- There is no admin token in the app flow.
-- Each access token belongs to one plant and can read/write that plant.
+- Supabase Auth users can read assigned plants only.
+- Supabase Auth users can never write ingestion data.
+- Raw access tokens are still used for Home Assistant ingestion.
+- Each raw access token belongs to one plant and can write that plant.
 - Extra readable plants are attached through `access_token_read_scopes`.
 - Writes must only affect the token's own plant.
 - Reads can target the token plant or plants listed in read scopes.
@@ -82,14 +86,35 @@ from public.access_tokens
 where plant_id = 'levched';
 ```
 
+Example plant assignment for a confirmed Supabase Auth user:
+
+```sql
+insert into public.user_plant_access (user_id, plant_id)
+values ('AUTH_USER_ID', 'PLANT_ID');
+```
+
+Example plant domain:
+
+```sql
+update public.plants
+set domain = 'ha.example.com'
+where id = 'PLANT_ID';
+```
+
 ## Edge Function API
 
 Function name is currently `ingest`, but it serves both reads and writes.
 
-All requests use:
+Raw Home Assistant ingestion uses:
 
 ```http
 Authorization: Bearer RAW_TOKEN_VALUE
+```
+
+Dashboard reads can also use a Supabase Auth JWT:
+
+```http
+Authorization: Bearer SUPABASE_AUTH_ACCESS_TOKEN
 ```
 
 ### Write
@@ -145,6 +170,8 @@ Current read behavior:
 
 - No `plant`: defaults to token's own plant.
 - `plant`: allowed only for token's own plant or a read-scoped plant.
+- Supabase Auth JWT reads require a confirmed user and a `user_plant_access` row.
+- Supabase Auth JWT writes are forbidden.
 - No `granularity`: returns full plant data plus `reads`.
 - `granularity=YYYY-MM-DD`: returns daily row for that date.
 - `granularity=YYYY-MM`: intended for range-oriented reads. Check `client.ts` before relying on this, because this behavior has changed during comparison work.
@@ -161,7 +188,9 @@ Dashboard modes:
 Dashboard config:
 
 ```sh
-VITE_API_URL=https://PROJECT_ID.supabase.co/functions/v1/ingest
+VITE_APP_MODE=ha
+VITE_SUPABASE_URL=https://PROJECT_ID.supabase.co
+VITE_API_PATH=/functions/v1/ingest
 VITE_FORECAST_LATITUDE=58.33
 VITE_FORECAST_LONGITUDE=34.04
 ```
@@ -170,6 +199,7 @@ Access token is read from the URL hash:
 
 ```text
 https://host/solaroid/index.html?plant=bondas&lang=uk#token=RAW_TOKEN_VALUE
+https://host/solaroid/index.html?plant=bondas&lang=uk#access_token=SUPABASE_AUTH_ACCESS_TOKEN
 ```
 
 Query params:
@@ -177,7 +207,42 @@ Query params:
 - `plant`: optional requested plant. If omitted, the Edge Function uses the token's own plant.
 - `lang`: `en` or `uk`.
 
-Do not put the token into a public bundle env var. For the Home Assistant iframe use the hash token so it is not sent as a normal query parameter.
+Do not put the token into a public bundle env var. For HA mode use the hash token so it is not sent as a normal query parameter.
+
+## Portal
+
+The portal is the same dashboard app built with the auth shell enabled.
+
+```sh
+cd dashboard
+rtk npm run build:portal
+rtk npm run dev:portal
+```
+
+Portal config:
+
+```sh
+VITE_APP_MODE=portal
+VITE_SUPABASE_URL=https://PROJECT_ID.supabase.co
+VITE_SUPABASE_ANON_KEY=SUPABASE_ANON_KEY
+VITE_API_PATH=/functions/v1/ingest
+```
+
+Email/password auth config in Supabase Auth:
+
+- Site URL: `https://solaroid.app`.
+- Redirect URLs: `https://solaroid.app`, plus `http://localhost:5174` for local portal dev.
+- Users sign up and sign in with email/password.
+- Password reset links return to the portal and open the reset form.
+
+Portal mode ships as an installable SPA with `manifest.webmanifest`, app icons, theme metadata, and a service worker. The service worker is registered only in portal mode.
+
+Manual approval flow:
+
+- User signs up in the portal.
+- Admin confirms the user in Supabase Auth.
+- Admin inserts one or more rows into `user_plant_access`.
+- The first assigned plant returned by the Edge Function is treated as the main plant. Other assigned plants stay available for comparison.
 
 ## Formulas
 
@@ -244,7 +309,7 @@ Dashboard:
 ```sh
 cd dashboard
 rtk npm run build
-rtk npm run dev -- --host 127.0.0.1
+rtk npm run dev
 rtk npm run preview
 rtk npm run deploy:ha
 rtk npm run deploy:lev
@@ -363,16 +428,3 @@ actions:
           message: Update failed!
           title: 💵 Utility Payment
 ```
-
-## Agent Notes
-
-Respect these repo/user preferences:
-
-- Use `interface` with `readonly` props for object shapes. Avoid object-shaped `type` aliases.
-- Avoid semicolons unless JavaScript/TypeScript syntax requires them.
-- Do not add `/// <reference path="./types.d.ts" />` to Edge Function files.
-- Keep formulas in `domain/formulas.ts`; do not duplicate math in UI code unless it is display-only.
-- Use `apply_patch` for manual edits.
-- Be careful with user changes. This repo has often been manually edited between agent turns.
-- When working on visuals, build and, when possible, inspect in a browser. The user cares strongly about mobile UX.
-- Do not put private plant data into generic app code.

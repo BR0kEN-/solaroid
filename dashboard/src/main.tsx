@@ -4,6 +4,8 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   CalendarClock,
+  CheckCircle2,
+  CircleAlert,
   CircleDollarSign,
   GitCompareArrows,
   Info,
@@ -56,7 +58,6 @@ interface DashboardDataState extends DataState {
 
 type DashboardDataHookState = Omit<DashboardDataState, "refresh">;
 type AuthMode = "sign-in" | "sign-up" | "recover" | "reset";
-
 interface PortalSession {
   readonly access_token: string;
   readonly refresh_token: string;
@@ -68,6 +69,7 @@ interface PortalUser {
   readonly id: string;
   readonly email?: string;
   readonly confirmed_at?: string | null;
+  readonly email_confirmed_at?: string | null;
 }
 
 interface PortalPlant {
@@ -104,7 +106,6 @@ interface PortalCopy {
   readonly needAccount: string;
   readonly haveAccount: string;
   readonly forgotPassword: string;
-  readonly rememberPassword: string;
   readonly resetPassword: string;
   readonly resetSent: string;
   readonly passwordUpdated: string;
@@ -158,6 +159,7 @@ const i18n = {
     compareMonth: "Month",
     compareYear: "Year",
     comparisonHint: "Select two plants and a period to compare performance.",
+    comparisonUnavailable: "No other assigned plants yet. Ask admin to assign another plant for comparison.",
     latestRoi: "Latest ROI",
     latestRoiInfo: "ROI shows how much investment was effectively recovered during the latest month. It includes the value of electricity consumed from your own solar production plus any export income, minus grid electricity costs. Net payment is only the cash balance for the month: export income minus grid electricity costs.",
     refresh: "Refresh",
@@ -206,7 +208,7 @@ const i18n = {
     payback: "Payback",
     recovered: "recovered",
     remaining: "remaining",
-    currentAverage: "at the current daily average",
+    currentAverage: "at the current pace",
     addInvestment: "Add investment cost",
     investmentHelp: "Set the installed system cost to turn monthly ROI into a payback projection.",
     investment: "Investment",
@@ -276,6 +278,7 @@ const i18n = {
     compareMonth: "Місяць",
     compareYear: "Рік",
     comparisonHint: "Оберіть дві станції та період для порівняння показників.",
+    comparisonUnavailable: "Інші станції ще не привязані. Попросіть адміна додати ще одну станцію для порівняння.",
     latestRoi: "Останнє ПІ",
     latestRoiInfo: "ПІ показує, скільки інвестиції фактично повернулось за останній місяць. Воно включає вартість електроенергії, спожитої з власної генерації, плюс дохід від експорту, мінус витрати на електроенергію з мережі. Баланс — це лише грошовий результат місяця: дохід від експорту мінус витрати на електроенергію з мережі.",
     refresh: "Оновити",
@@ -324,7 +327,7 @@ const i18n = {
     payback: "Окупність",
     recovered: "повернуто",
     remaining: "залишилось",
-    currentAverage: "за поточного середнього денного темпу",
+    currentAverage: "за поточного темпу",
     addInvestment: "Додайте вартість станції",
     investmentHelp: "Вкажіть вартість системи, щоб бачити прогноз окупності.",
     investment: "Інвестиція",
@@ -381,7 +384,6 @@ const portalCopy: Record<Lang, PortalCopy> = {
     needAccount: "Need access?",
     haveAccount: "Already approved?",
     forgotPassword: "Forgot password?",
-    rememberPassword: "Remember password?",
     resetPassword: "Reset password",
     resetSent: "Password reset link sent. Check your email.",
     passwordUpdated: "Password updated. Opening dashboard.",
@@ -412,7 +414,6 @@ const portalCopy: Record<Lang, PortalCopy> = {
     needAccount: "Потрібен доступ?",
     haveAccount: "Доступ уже є?",
     forgotPassword: "Забули пароль?",
-    rememberPassword: "Згадали пароль?",
     resetPassword: "Скинути пароль",
     resetSent: "Посилання для скидання пароля надіслано. Перевірте email.",
     passwordUpdated: "Пароль оновлено. Відкриваємо дашборд.",
@@ -455,9 +456,9 @@ function langFromNavigator(): Lang | undefined {
   const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
   const lang = languages
     .map((lang) => lang.toLowerCase())
-    .find((lang) => lang.startsWith("uk") || lang.startsWith("en"));
+    .find((lang) => lang.startsWith("uk") || lang.startsWith("ru") || lang.startsWith("en"));
   if (!lang) return undefined;
-  return lang.startsWith("uk") ? "uk" : "en";
+  return lang.startsWith("uk") || lang.startsWith("ru") ? "uk" : "en";
 }
 
 function storedLang(): Lang | undefined {
@@ -961,13 +962,7 @@ function App({
     () => [dataState.plantId, ...dataState.readablePlantIds].filter((plantId, index, plantIds) => plantId && plantIds.indexOf(plantId) === index),
     [dataState.plantId, dataState.readablePlantIds],
   );
-  const hasOtherReadablePlants = dataState.readablePlantIds.length > 0;
-  const viewOptions = useMemo(
-    () => hasOtherReadablePlants
-      ? ["monthly", "daily", "comparison"] as const
-      : ["monthly", "daily"] as const,
-    [hasOtherReadablePlants],
-  );
+  const viewOptions = ["monthly", "daily", "comparison"] as const;
 
   const activePlantComparison = useMemo<PlantComparison>(() => ({
     plantId: dataState.plantId,
@@ -992,10 +987,6 @@ function App({
     if (!firstPlantId) setFirstPlantId(dataState.plantId || readablePlantOptions[0]);
     if (!secondPlantId) setSecondPlantId(readablePlantOptions.find((plantId) => plantId !== (dataState.plantId || readablePlantOptions[0])) ?? readablePlantOptions[0]);
   }, [dataState.plantId, firstPlantId, readablePlantOptions, secondPlantId]);
-
-  useEffect(() => {
-    if (viewMode === "comparison" && !hasOtherReadablePlants) setViewMode("monthly");
-  }, [hasOtherReadablePlants, viewMode]);
 
   const ensureComparisonPlant = async (plantId: string, granularity: string) => {
     if (!plantId) return undefined;
@@ -1292,68 +1283,29 @@ function App({
     <LanguageContext.Provider value={lang}>
     <main className="app-shell">
       <section className="content">
-        <header className="topbar">
-          <div className="toolbar">
-            <div className="investment-pill" aria-label={`${t.investment} USD`}>
-              <span>{t.investment}</span>
-              <strong>
-                {showPlaceholders ? (
-                  <SkeletonText width="92px" height="1rem" />
-                ) : payback ? (
-                  formatDisplayMoney(moneyFromUsd(payback.investmentUsd, currency, totals.launchUsdRate), currency, lang)
-                ) : (
-                  "-"
-                )}
-              </strong>
-              <button type="button" className="investment-info-button" aria-label={t.investment} onClick={() => setInfoModal("investment")}>
-                <Info size={14} />
-              </button>
-            </div>
-            <div className="segmented currency" aria-label={t.currency}>
-              {(["UAH", "USD"] as Currency[]).map((item) => (
-                <button key={item} className={currency === item ? "selected" : ""} onClick={() => setCurrency(item)}>
-                  {item}
-                </button>
-              ))}
-            </div>
-            <div className={`segmented view view-${viewOptions.length}`} aria-label="View">
-              {viewOptions.map((item) => (
-                <button key={item} className={viewMode === item ? "selected" : ""} onClick={() => setViewMode(item)}>
-                  {item === "monthly" ? t.monthly : item === "daily" ? t.daily : t.comparison}
-                </button>
-              ))}
-            </div>
-            {viewMode === "monthly" ? (
-              <div className="segmented" aria-label="Date range">
-                {(["all", "12m", "6m", "3m", "1m"] as RangeKey[]).map((item) => (
-                  <button
-                    key={item}
-                    className={range === item ? "selected" : ""}
-                    onClick={() => setRange(item)}
-                  >
-                    {item === "all" ? t.all : item.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            ) : viewMode === "daily" ? (
-              <div className="segmented daily-tools" aria-label={t.compareDays}>
-                <button type="button" className={isDailyCompareOpen ? "selected" : ""} onClick={() => setDailyCompareOpen(true)}>
-                  {t.compareDays}
-                </button>
-              </div>
-            ) : null}
-            <button
-              type="button"
-              className={`icon-button refresh-button${dataState.isRefreshing ? " is-refreshing" : ""}`}
-              onClick={dataState.refresh}
-              disabled={dataState.isRefreshing}
-              aria-label={t.refresh}
-              title={t.refresh}
-            >
-              <RefreshCw size={18} />
-            </button>
-          </div>
-        </header>
+        <DashboardToolbar
+          t={t}
+          currency={currency}
+          setCurrency={setCurrency}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          viewOptions={viewOptions}
+          range={range}
+          setRange={setRange}
+          isDailyCompareOpen={isDailyCompareOpen}
+          setDailyCompareOpen={setDailyCompareOpen}
+          investmentValue={showPlaceholders ? (
+            <SkeletonText width="92px" height="1rem" />
+          ) : payback ? (
+            formatDisplayMoney(moneyFromUsd(payback.investmentUsd, currency, totals.launchUsdRate), currency, lang)
+          ) : (
+            "-"
+          )}
+          onInvestmentInfo={() => setInfoModal("investment")}
+          isRefreshing={dataState.isRefreshing}
+          refresh={dataState.refresh}
+          isLoading={showPlaceholders}
+        />
 
         {dataState.error && (
           <div className="notice">
@@ -1421,7 +1373,7 @@ function App({
           ) : (
             <div className="notice">
               <strong>{t.plantComparison}</strong>
-              <small>{t.comparisonHint}</small>
+              <small>{t.comparisonUnavailable}</small>
             </div>
           )
         ) : (
@@ -1748,8 +1700,10 @@ function App({
               `${t.updated}: ${dataState.sheetUpdatedAt ? formatDateTimeLabel(dataState.sheetUpdatedAt, lang) : "-"}`
             )}
           </span>
-          {footerExtra}
-          <LanguageSwitcher lang={lang} setLang={setAppLang} />
+          <span className="dash-footer-controls">
+            {footerExtra}
+            <LanguageSwitcher lang={lang} setLang={setAppLang} />
+          </span>
         </footer>
       </section>
     </main>
@@ -1773,6 +1727,10 @@ function PortalRoot() {
   const t = portalCopy[lang];
   const apiUrl = API_URL;
   const selectedPlant = plants.find((plant) => plant.id === selectedPlantId);
+  const clearToast = () => {
+    setError("");
+    setInfo("");
+  };
 
   const savePortalSession = (next: PortalSession) => {
     localStorage.setItem(PORTAL_SESSION_KEY, JSON.stringify(next));
@@ -1859,7 +1817,7 @@ function PortalRoot() {
 
   const submitAuth = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setBusy(true);
+    setBusy(authMode === "sign-in" || authMode === "sign-up");
     setError("");
     setInfo("");
 
@@ -1907,15 +1865,15 @@ function PortalRoot() {
       setInfo(t.waitingCopy);
       setUser(response.user);
     } catch (authError) {
-      const message = portalErrorMessage(authError);
+      const message = portalAuthErrorMessage(authError, t);
       if (authMode === "sign-in" && message.toLowerCase().includes("email not confirmed")) {
         setBusy(false);
         setError("");
-      setInfo(t.waitingCopy);
-      setSession(undefined);
-      setUser(undefined);
-      setDashboardData(undefined);
-      return;
+        setInfo(t.waitingCopy);
+        setSession(undefined);
+        setUser(undefined);
+        setDashboardData(undefined);
+        return;
       }
 
       setBusy(false);
@@ -1940,9 +1898,9 @@ function PortalRoot() {
       }).catch(() => undefined);
     }
 
-    setAuthMode("sign-in");
     setError("");
     setInfo("");
+    setAuthMode("sign-in");
     setPlants([]);
     setSelectedPlantId("");
     setDashboardData(undefined);
@@ -1952,21 +1910,7 @@ function PortalRoot() {
 
   const shell = (content: React.ReactNode) => (
     <div className="portal-shell">
-      <header className="portal-top">
-        <div className="portal-identity">
-          <strong>{t.brand}</strong>
-          {session ? (
-            busy ? <SkeletonText width="138px" height="13px" /> : <span>{user?.email ?? ""}</span>
-          ) : null}
-        </div>
-        <div className="portal-actions">
-          {session ? (
-            <button className="portal-sign-out-button" type="button" onClick={signOut} aria-label={t.signOut} title={t.signOut}>
-              <LogOut size={17} />
-            </button>
-          ) : null}
-        </div>
-      </header>
+      <PortalToast error={error} info={info} onClose={clearToast} />
       {content}
     </div>
   );
@@ -1977,7 +1921,7 @@ function PortalRoot() {
 
   if (busy) {
     return shell(
-      <PortalLoading label={t.loading} />,
+      <PortalLoading label={t.loading} lang={lang} />,
     );
   }
 
@@ -1987,12 +1931,12 @@ function PortalRoot() {
     const isReset = authMode === "reset";
     return shell(
       <main className="portal-auth-layout">
+        <strong className="portal-auth-brand">{t.brand}</strong>
         <form className="portal-auth-card" onSubmit={submitAuth}>
           <div className="portal-auth-card-head">
             <h2>{isReset || isRecover ? t.resetPassword : isSignUp ? t.signUp : t.signIn}</h2>
             <LanguageSwitcher lang={lang} setLang={setLang} />
           </div>
-          <PortalMessage error={error} info={info} />
           {!isReset ? (
             <input name="email" type="email" autoComplete="email" placeholder={t.email} aria-label={t.email} required />
           ) : null}
@@ -2014,8 +1958,7 @@ function PortalRoot() {
               type="button"
               onClick={() => {
                 setAuthMode(isSignUp || isRecover || isReset ? "sign-in" : "sign-up");
-                setError("");
-                setInfo("");
+                clearToast();
               }}
             >
               {isSignUp || isRecover || isReset ? t.haveAccount : t.needAccount}
@@ -2026,8 +1969,7 @@ function PortalRoot() {
                 type="button"
                 onClick={() => {
                   setAuthMode("recover");
-                  setError("");
-                  setInfo("");
+                  clearToast();
                 }}
               >
                 {t.forgotPassword}
@@ -2041,17 +1983,17 @@ function PortalRoot() {
 
   if (!isPortalUserConfirmed(user)) {
     return shell(
-      <PortalStatusPanel title={t.waitingTitle} body={t.waitingCopy} actionLabel={t.retry} message={<PortalMessage error={error} info={info} />} onAction={() => void loadAuthedState()} />,
+      <PortalStatusPanel title={t.waitingTitle} body={t.waitingCopy} actionLabel={t.retry} onAction={() => void loadAuthedState()} />,
     );
   }
 
   if (!plants.length) {
     return shell(
-      <PortalStatusPanel title={t.noPlantsTitle} body={t.noPlantsCopy} actionLabel={t.retry} message={<PortalMessage error={error} info={info} />} onAction={() => void loadAuthedState()} />,
+      <PortalStatusPanel title={t.noPlantsTitle} body={t.noPlantsCopy} actionLabel={t.retry} onAction={() => void loadAuthedState()} />,
     );
   }
 
-  if (!selectedPlant) return shell(<PortalLoading label={t.loading} />);
+  if (!selectedPlant) return shell(<PortalLoading label={t.loading} lang={lang} />);
 
   return shell(
     <div className="portal-dashboard">
@@ -2059,36 +2001,127 @@ function PortalRoot() {
         key={`${selectedPlant.id}:${session.access_token}`}
         initialLang={lang}
         initialData={dashboardData}
+        footerExtra={(
+          <button className="portal-footer-logout" type="button" onClick={signOut} aria-label={t.signOut} title={t.signOut}>
+            <LogOut size={16} />
+          </button>
+        )}
         onLangChange={setLang}
       />
     </div>,
   );
 }
 
-function PortalLoading({ label }: { readonly label: string }) {
+interface DashboardToolbarProps {
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly setCurrency?: (currency: Currency) => void;
+  readonly viewMode: ViewMode;
+  readonly setViewMode?: (viewMode: ViewMode) => void;
+  readonly viewOptions: readonly ViewMode[];
+  readonly range: RangeKey;
+  readonly setRange?: (range: RangeKey) => void;
+  readonly isDailyCompareOpen: boolean;
+  readonly setDailyCompareOpen?: (isOpen: boolean) => void;
+  readonly investmentValue: React.ReactNode;
+  readonly onInvestmentInfo?: () => void;
+  readonly isRefreshing: boolean;
+  readonly refresh?: () => void;
+  readonly isLoading: boolean;
+}
+
+function DashboardToolbar({
+  t,
+  currency,
+  setCurrency,
+  viewMode,
+  setViewMode,
+  viewOptions,
+  range,
+  setRange,
+  isDailyCompareOpen,
+  setDailyCompareOpen,
+  investmentValue,
+  onInvestmentInfo,
+  isRefreshing,
+  refresh,
+  isLoading,
+}: DashboardToolbarProps) {
+  return (
+    <header className="topbar">
+      <div className="toolbar">
+        <div className="investment-pill" aria-label={`${t.investment} USD`}>
+          <span>{t.investment}</span>
+          <strong>{investmentValue}</strong>
+          <button type="button" className="investment-info-button" aria-label={t.investment} onClick={onInvestmentInfo} disabled={isLoading || !onInvestmentInfo}>
+            <Info size={14} />
+          </button>
+        </div>
+        <div className="segmented currency" aria-label={t.currency}>
+          {(["UAH", "USD"] as Currency[]).map((item) => (
+            <button key={item} className={currency === item ? "selected" : ""} onClick={() => setCurrency?.(item)} disabled={isLoading}>
+              {item}
+            </button>
+          ))}
+        </div>
+        <div className={`segmented view view-${viewOptions.length}`} aria-label="View">
+          {viewOptions.map((item) => (
+            <button key={item} className={viewMode === item ? "selected" : ""} onClick={() => setViewMode?.(item)} disabled={isLoading}>
+              {item === "monthly" ? t.monthly : item === "daily" ? t.daily : t.comparison}
+            </button>
+          ))}
+        </div>
+        {viewMode === "monthly" ? (
+          <div className="segmented" aria-label="Date range">
+            {(["all", "12m", "6m", "3m", "1m"] as RangeKey[]).map((item) => (
+              <button
+                key={item}
+                className={range === item ? "selected" : ""}
+                onClick={() => setRange?.(item)}
+                disabled={isLoading}
+              >
+                {item === "all" ? t.all : item.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        ) : viewMode === "daily" ? (
+          <div className="segmented daily-tools" aria-label={t.compareDays}>
+            <button type="button" className={isDailyCompareOpen ? "selected" : ""} onClick={() => setDailyCompareOpen?.(true)} disabled={isLoading}>
+              {t.compareDays}
+            </button>
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className={`icon-button refresh-button${isRefreshing ? " is-refreshing" : ""}`}
+          onClick={refresh}
+          disabled={isRefreshing}
+          aria-label={t.refresh}
+          title={t.refresh}
+        >
+          <RefreshCw size={18} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function PortalLoading({ label, lang }: { readonly label: string; readonly lang: Lang }) {
+  const t = i18n[lang];
   return (
     <main className="app-shell portal-loading-app" aria-label={label} aria-busy="true">
       <section className="content">
-        <header className="topbar">
-          <div className="toolbar">
-            <div className="investment-pill">
-              <SkeletonText width="72px" height="11px" />
-              <SkeletonText width="92px" height="16px" />
-            </div>
-            <div className="segmented currency">
-              <SkeletonText width="54px" height="32px" />
-              <SkeletonText width="54px" height="32px" />
-            </div>
-            <div className="segmented view view-2">
-              <SkeletonText width="104px" height="32px" />
-              <SkeletonText width="104px" height="32px" />
-            </div>
-            <div className="segmented" aria-hidden="true">
-              {Array.from({ length: 5 }, (_, index) => <SkeletonText key={index} width="48px" height="32px" />)}
-            </div>
-            <SkeletonBlock className="icon-button refresh-button" />
-          </div>
-        </header>
+        <DashboardToolbar
+          t={t}
+          currency="UAH"
+          viewMode="monthly"
+          viewOptions={["monthly", "daily", "comparison"]}
+          range="all"
+          isDailyCompareOpen={false}
+          investmentValue={<SkeletonText width="92px" height="1rem" />}
+          isRefreshing
+          isLoading
+        />
         <KpiSkeletonGrid />
         <section className="payback-band">
           <div className="payback-copy">
@@ -2103,23 +2136,72 @@ function PortalLoading({ label }: { readonly label: string }) {
         <section className="forecast-section">
           <div className="section-heading">
             <div>
-              <SkeletonText width="124px" height="18px" />
-              <SkeletonText width="180px" height="13px" />
+              <h2 className="heading-with-info">
+                <SkeletonText width="124px" height="18px" />
+              </h2>
             </div>
           </div>
           <div className="forecast-grid">
             {Array.from({ length: 3 }, (_, index) => (
               <article className="kpi-card" key={index}>
-                <SkeletonText width="88px" height="13px" />
-                <SkeletonText width="118px" height="22px" />
-                <SkeletonText width="130px" height="14px" />
+                <SkeletonText width="90px" height="12px" />
+                <SkeletonText width="120px" height="22px" />
+                <SkeletonText width="110px" height="12px" />
+                <SkeletonText width="130px" height="12px" />
               </article>
             ))}
           </div>
         </section>
-        <ChartSkeleton />
+        <MonthlyPageSkeletonTail />
       </section>
     </main>
+  );
+}
+
+function MonthlyPageSkeletonTail() {
+  return (
+    <>
+      <section id="finance" className="chart-grid">
+        <ChartPanelSkeleton />
+        <ChartPanelSkeleton />
+      </section>
+      <section id="energy" className="chart-grid">
+        <ChartPanelSkeleton />
+        <ChartPanelSkeleton />
+      </section>
+      <section className="chart-grid chart-grid-single">
+        <ChartPanelSkeleton />
+      </section>
+      <section id="data" className="data-section">
+        <div className="section-heading">
+          <div>
+            <SkeletonText width="96px" height="18px" />
+          </div>
+          <div className="filter-controls">
+            <SkeletonText width="132px" height="40px" />
+            <SkeletonText width="112px" height="40px" />
+          </div>
+        </div>
+        <DataTableSkeleton />
+      </section>
+    </>
+  );
+}
+
+function ChartPanelSkeleton() {
+  return (
+    <article className="chart-panel" aria-busy="true">
+      <div className="chart-head">
+        <div>
+          <SkeletonText width="128px" height="18px" />
+        </div>
+        <div className="legend">
+          <SkeletonText width="72px" height="14px" />
+          <SkeletonText width="86px" height="14px" />
+        </div>
+      </div>
+      <ChartSkeleton />
+    </article>
   );
 }
 
@@ -2146,10 +2228,21 @@ function PortalStatusPanel({
   );
 }
 
-function PortalMessage({ error, info }: { readonly error: string; readonly info: string }) {
+function PortalToast({ error, info, onClose }: { readonly error: string; readonly info: string; readonly onClose: () => void }) {
   if (!error && !info) return null;
 
-  return <p className={error ? "portal-message error" : "portal-message"}>{error || info}</p>;
+  const isError = Boolean(error);
+  return (
+    <div className="portal-toast-region" aria-live={isError ? "assertive" : "polite"}>
+      <section className={isError ? "portal-toast error" : "portal-toast"} role={isError ? "alert" : "status"}>
+        {isError ? <CircleAlert size={18} /> : <CheckCircle2 size={18} />}
+        <p>{error || info}</p>
+        <button type="button" onClick={onClose} aria-label="Dismiss">
+          <X size={16} />
+        </button>
+      </section>
+    </div>
+  );
 }
 
 async function portalSignUp(email: string, password: string) {
@@ -2332,8 +2425,12 @@ function portalErrorMessage(error: unknown) {
   }
 }
 
+function portalAuthErrorMessage(error: unknown, t: PortalCopy) {
+  return portalErrorMessage(error) || t.sessionExpired;
+}
+
 function isPortalUserConfirmed(user: PortalUser | undefined) {
-  return Boolean(user?.confirmed_at);
+  return Boolean(user?.confirmed_at ?? user?.email_confirmed_at);
 }
 
 function LanguageSwitcher({ lang, setLang }: { readonly lang: Lang; readonly setLang: (lang: Lang) => void }) {
@@ -2440,7 +2537,7 @@ function ForecastDetail({
   return (
     <span className="forecast-detail">
       <span>{current}</span>
-      {base ? (
+      {label ? (
         <span className={deltaTone(delta)}>
           {formattedDelta}
           {formatDeltaPct(delta, base)} {label}

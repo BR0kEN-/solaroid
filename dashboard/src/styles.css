@@ -163,6 +163,18 @@ button {
   }
 }
 
+@keyframes portal-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .app-shell {
   min-height: 0;
   overscroll-behavior: none;
@@ -177,76 +189,85 @@ button {
   flex-direction: column;
   min-height: 100dvh;
   color: var(--text);
-  background:
-    linear-gradient(132deg, var(--shell-wash) 0 12rem, transparent 30rem),
-    linear-gradient(180deg, var(--shell-tint), transparent 16rem),
-    var(--bg);
+  background: transparent;
 }
 
-.portal-top {
-  position: sticky;
-  top: 0;
-  z-index: 8;
-  flex: 0 0 var(--portal-header-height);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  height: var(--portal-header-height);
-  padding: 7px 14px;
-  background: color-mix(in srgb, var(--panel), transparent 8%);
-  border-bottom: 1px solid var(--border);
-}
-
-.portal-identity {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.portal-identity strong {
-  color: var(--text);
-  font-size: 1rem;
-  line-height: 1.1;
-}
-
-.portal-identity span {
-  max-width: 58vw;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.72rem;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.portal-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
-}
-
-.portal-sign-out-button {
+.portal-footer-logout {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  min-height: 32px;
   color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.portal-footer-logout:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text), transparent 92%);
+}
+
+.portal-toast-region {
+  position: fixed;
+  z-index: 60;
+  right: 18px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: min(420px, calc(100% - 28px));
+  pointer-events: none;
+}
+
+.portal-toast {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 48px;
+  padding: 12px;
+  color: var(--text);
+  pointer-events: auto;
   background:
     linear-gradient(180deg, var(--panel-highlight), transparent),
-    var(--control);
-  border: 1px solid color-mix(in srgb, var(--border), transparent 12%);
+    var(--panel);
+  border: 1px solid color-mix(in srgb, var(--green), var(--border) 58%);
+  border-radius: 8px;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--shadow-color), transparent 28%);
+  animation: portal-toast-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.portal-toast.error {
+  border-color: color-mix(in srgb, var(--rose), var(--border) 48%);
+}
+
+.portal-toast > svg {
+  color: var(--green);
+}
+
+.portal-toast.error > svg {
+  color: var(--rose);
+}
+
+.portal-toast p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.portal-toast button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
   border-radius: 8px;
 }
 
-.portal-sign-out-button:hover {
+.portal-toast button:hover {
   color: var(--text);
-  background:
-    linear-gradient(180deg, var(--panel-highlight), transparent),
-    color-mix(in srgb, var(--control), var(--rose) 8%);
-  border-color: color-mix(in srgb, var(--rose), var(--border) 42%);
+  background: var(--control);
 }
 
 .portal-auth-layout,
@@ -259,6 +280,7 @@ button {
   flex: 1 1 auto;
   display: grid;
   place-items: center;
+  position: relative;
   min-height: 0;
   padding: 0;
   overflow: clip;
@@ -296,6 +318,17 @@ button {
   gap: 14px;
   width: 100%;
   box-shadow: var(--block-shadow);
+}
+
+.portal-auth-brand {
+  position: absolute;
+  top: max(24px, env(safe-area-inset-top));
+  left: 50%;
+  color: var(--text);
+  font-size: 1.35rem;
+  line-height: 1.1;
+  text-align: center;
+  transform: translateX(-50%);
 }
 
 .portal-auth-card h2 {
@@ -380,19 +413,6 @@ button {
   border-color: transparent;
 }
 
-.portal-message {
-  padding: 10px;
-  margin: 0;
-  color: var(--green);
-  background: color-mix(in srgb, var(--green), transparent 88%);
-  border-radius: 8px;
-}
-
-.portal-message.error {
-  color: var(--rose);
-  background: color-mix(in srgb, var(--rose), transparent 88%);
-}
-
 .portal-center-panel {
   display: grid;
   flex: 1 1 auto;
@@ -407,6 +427,15 @@ button {
   width: min(1180px, calc(100% - 28px));
   margin: 0 auto;
   padding: 18px 0 28px;
+}
+
+.chart-panel:has(.chart-skeleton) {
+  overflow: hidden;
+}
+
+.chart-skeleton {
+  min-width: 0;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 
 .portal-loading-toolbar {
@@ -456,17 +485,17 @@ button {
 
 .portal-dashboard {
   flex: 1 1 auto;
-  min-height: calc(100dvh - var(--portal-header-height));
+  min-height: 100dvh;
 }
 
 .portal-dashboard .app-shell {
-  min-height: calc(100dvh - var(--portal-header-height));
+  min-height: 100dvh;
 }
 
 .portal-dashboard .content {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - var(--portal-header-height));
+  min-height: 100dvh;
 }
 
 .portal-dashboard .dash-footer {
@@ -588,6 +617,11 @@ h2 {
   background: color-mix(in srgb, var(--control), var(--text) 8%);
 }
 
+.investment-info-button:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
 .investment-pill strong {
   color: var(--text);
   font-size: 1rem;
@@ -634,6 +668,10 @@ h2 {
     background-color 160ms ease,
     color 160ms ease,
     box-shadow 160ms ease;
+}
+
+.segmented button:disabled {
+  cursor: default;
 }
 
 .segmented button.selected {
@@ -1485,6 +1523,22 @@ h2 {
   min-width: 0;
 }
 
+.dash-footer-controls {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 2px;
+  background: color-mix(in srgb, var(--panel), transparent 20%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dash-footer-controls .language-switcher {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
 .language-switcher {
   display: inline-flex;
   flex: 0 0 auto;
@@ -2317,16 +2371,7 @@ tbody tr:hover {
   }
 
   .language-switcher {
-    margin-left: auto;
     align-self: flex-end;
-  }
-
-  .portal-actions {
-    width: auto;
-  }
-
-  .portal-identity span {
-    max-width: 66vw;
   }
 
   .portal-auth-layout {

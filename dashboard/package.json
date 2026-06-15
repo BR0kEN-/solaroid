@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "dev:portal": "VITE_APP_MODE=portal vite --host 0.0.0.0",
+    "dev": "VITE_APP_MODE=ha vite --host 0.0.0.0 --port 5173 --strictPort",
+    "dev:portal": "VITE_APP_MODE=portal vite --host 0.0.0.0 --port 5174 --strictPort",
     "build": "tsc -b && vitest run && vite build",
     "build:ha": "VITE_APP_MODE=ha npm run build",
     "build:portal": "VITE_APP_MODE=portal npm run build",
