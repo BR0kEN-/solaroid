@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, PlantMetadata, Tariff } from '../domain/types'
+import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -49,6 +49,7 @@ interface ApiResponse {
   readonly tariffs?: readonly TariffRecord[]
   readonly reads?: readonly string[]
   readonly records?: readonly DayRecord[] | readonly MonthRecord[]
+  readonly projection?: ProductionProjection | null
 }
 
 interface DashboardAccess {
@@ -66,8 +67,8 @@ export function configureDashboardAccess(next: DashboardAccess) {
 export async function loadDashboardData(): Promise<LoadedData> {
   assertConfig()
 
-  const { plant, months, days, tariffs, reads } = await fetchDashboardData()
-  const loaded = toLoadedPlant({ plant, months, days, tariffs })
+  const { plant, months, days, tariffs, reads, projection } = await fetchDashboardData()
+  const loaded = toLoadedPlant({ plant, months, days, tariffs, projection })
 
   return {
     ...loaded,
@@ -78,15 +79,15 @@ export async function loadDashboardData(): Promise<LoadedData> {
 export async function loadPlantData(plantId: string): Promise<PlantComparison> {
   assertConfig()
 
-  const { plant, months, days, tariffs } = await fetchDashboardData(plantId)
+  const { plant, months, days, tariffs, projection } = await fetchDashboardData(plantId)
 
-  return toLoadedPlant({ plant, months, days, tariffs })
+  return toLoadedPlant({ plant, months, days, tariffs, projection })
 }
 
 export async function loadPlantGranularity(plantId: string, granularity: string): Promise<PlantComparison> {
   assertConfig()
 
-  const { plant, records, tariffs } = await fetchDashboardData(plantId, granularity)
+  const { plant, records, tariffs, projection } = await fetchDashboardData(plantId, granularity)
   const isDayGranularity = /^\d{4}-\d{2}-\d{2}$/.test(granularity)
 
   return toLoadedPlant({
@@ -94,6 +95,7 @@ export async function loadPlantGranularity(plantId: string, granularity: string)
     months: isDayGranularity ? [] : records as readonly MonthRecord[],
     days: isDayGranularity ? records as readonly DayRecord[] : [],
     tariffs,
+    projection,
   })
 }
 
@@ -102,11 +104,13 @@ export function toLoadedPlant({
   months,
   days,
   tariffs,
+  projection,
 }: {
   readonly plant: PlantRecord
   readonly months: readonly MonthRecord[]
   readonly days: readonly DayRecord[]
   readonly tariffs: readonly TariffRecord[]
+  readonly projection?: ProductionProjection | null
 }): PlantComparison {
   const monthlyRates = latestUsdRateByMonth(days)
   const fallbackUsdRate = latestPositiveRate(days)
@@ -123,6 +127,8 @@ export function toLoadedPlant({
     investmentUsd: plant.investment_usd,
     launchDate: parseDate(plant.launch_date),
     commercialDate,
+    metadata: plant.metadata ?? null,
+    projection: projection ?? null,
     sheetUpdatedAt: latestUpdatedAt([plant.updated_at, ...months.map((row) => row.updated_at), ...days.map((row) => row.updated_at), ...tariffs.map((row) => row.updated_at)]),
   }
 }
@@ -169,6 +175,7 @@ async function fetchDashboardData(
     records: data.records ?? [],
     tariffs: data.tariffs ?? [],
     reads: data.reads ?? [],
+    projection: data.projection ?? null,
   }
 }
 

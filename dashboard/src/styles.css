@@ -1483,7 +1483,6 @@ h2 {
   overscroll-behavior-y: auto;
   overscroll-behavior-inline: none;
   -webkit-overflow-scrolling: touch;
-  background: color-mix(in srgb, var(--panel), var(--panel-soft) 34%);
   border-radius: 6px;
   contain: paint;
 }
@@ -1799,6 +1798,52 @@ h2 {
   color: var(--text);
   font-weight: 700;
   text-align: right;
+}
+
+.pv-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.pv-fields-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.pv-fields-head strong {
+  color: var(--text);
+}
+
+.pv-field {
+  display: grid;
+  gap: 6px;
+}
+
+.pv-field h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.pv-spec-list {
+  gap: 0;
+}
+
+.pv-spec-list div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 14px;
+  padding: 5px 0;
+  line-height: 1.25;
+}
+
+.pv-spec-list dd {
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .modal-heading {

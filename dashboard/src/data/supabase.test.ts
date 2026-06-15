@@ -58,6 +58,40 @@ describe('Supabase data mapping', () => {
     expect(loaded.dailyRows.map((row) => row.usdRate)).toEqual([41, 0, 43])
   })
 
+  it('keeps plant metadata and projection from the plant payload', () => {
+    const metadata = {
+      pvs: [
+        {
+          azimuth: 155,
+          power: 11160,
+          slope: 35,
+          elevation: 74,
+          lat: 48.33552356395866,
+          lng: 35.04246667027474,
+          loss: 2,
+          mounting: 'building',
+        },
+      ],
+    }
+    const projection = {
+      monthlyKwh: Array.from({ length: 12 }, (_, index) => index + 1),
+      dailyKwh: Array.from({ length: 12 }, (_, index) => (index + 1) / 10),
+    }
+    const loaded = toLoadedPlant({
+      plant: {
+        ...plant,
+        metadata,
+      },
+      months: [],
+      days: [],
+      tariffs: [],
+      projection,
+    })
+
+    expect(loaded.metadata).toEqual(metadata)
+    expect(loaded.projection).toEqual(projection)
+  })
+
   it('uses manual monthly fallback when a month has no daily rates', () => {
     const loaded = toLoadedPlant({
       plant,
