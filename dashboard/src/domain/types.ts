@@ -68,3 +68,18 @@ export interface EnergySnapshot {
   readonly consumedDay: number
   readonly consumedNight: number
 }
+
+export interface PvMetadata {
+  readonly azimuth: number
+  readonly power: number
+  readonly slope: number
+  readonly elevation: number
+  readonly lat: number
+  readonly lng: number
+  readonly loss: number
+  readonly mounting: string
+}
+
+export interface PlantMetadata {
+  readonly pvs?: readonly PvMetadata[]
+}

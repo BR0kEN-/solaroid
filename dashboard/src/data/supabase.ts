@@ -1,9 +1,10 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, Tariff } from '../domain/types'
+import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, PlantMetadata, Tariff } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
+  readonly metadata?: PlantMetadata | null
   readonly investment_usd: number
   readonly launch_date: string
   readonly commercial_date: string
