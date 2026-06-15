@@ -1,14 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from './config.ts'
+import { fetchPvgisProductionProjection } from './pvgis.ts'
+import { hash } from './utils/crypto.ts'
 import { dateUtil } from './utils/date.ts'
-
-async function tokenHash(token: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
-
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
 
 export class SupabaseClient {
   protected readonly client
@@ -30,7 +24,7 @@ export class SupabaseClient {
     const { data, error } = await this.client
       .from('access_tokens')
       .select(`id,plant_id,reads:access_token_read_scopes(plant_id)`)
-      .eq('token_hash', await tokenHash(bearer))
+      .eq('token_hash', await hash(bearer))
       .limit(1)
 
     if (error) throw new Error('access token lookup failed', { cause: error })
@@ -112,6 +106,7 @@ export class SupabaseClient {
       days,
       months,
       tariffs,
+      projection: await this.#getPvgisProjection(plant),
     }
   }
 
@@ -146,7 +141,7 @@ export class SupabaseClient {
     }
   }
 
-  async #getPlantMetadata(plantId: Solaroid.Supabase.Plant.Id) {
+  async #getPlantMetadata(plantId: Solaroid.Supabase.Plant.Id): Promise<Solaroid.Supabase.Plant.Record> {
     const { data, error } = await this.client
       .from('plants')
       .select('*')
@@ -182,5 +177,33 @@ export class SupabaseClient {
     if (error) throw new Error(`${table} lookup failed`, { cause: error })
 
     return data
+  }
+
+  async #getPvgisProjection(plant: Solaroid.Supabase.Plant.Record): Promise<Solaroid.Supabase.Pvgis.Projection | null> {
+    const currentHash = await hash(JSON.stringify(plant.metadata))
+    const { data: cache, error: cacheError } = await this.client
+      .from('plant_pvgis_projections')
+      .select('metadata_hash,projection')
+      .eq('plant_id', plant.id)
+      .maybeSingle()
+
+    if (cacheError) throw new Error('PVGIS projection cache lookup failed', { cause: cacheError })
+    if (cache?.metadata_hash === currentHash) return cache.projection
+
+    const projection = await fetchPvgisProductionProjection(plant.metadata)
+
+    if (!projection) return null
+
+    const { error: upsertError } = await this.client
+      .from('plant_pvgis_projections')
+      .upsert({
+        plant_id: plant.id,
+        metadata_hash: currentHash,
+        projection,
+      })
+
+    if (upsertError) throw new Error('PVGIS projection cache upsert failed', { cause: upsertError })
+
+    return projection
   }
 }
