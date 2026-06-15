@@ -21,7 +21,7 @@ import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMone
 import { calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
 import { importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
-import type { DataState, LoadedData, MonthRow, PlantComparison, Tariff } from "./domain/types";
+import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, Tariff } from "./domain/types";
 import "./styles.css";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
@@ -75,6 +75,7 @@ interface PortalUser {
 interface PortalPlant {
   readonly id: string;
   readonly domain?: string | null;
+  readonly metadata?: PlantMetadata | null;
 }
 
 interface PortalAuthResponse {
