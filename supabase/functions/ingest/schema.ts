@@ -1,15 +1,17 @@
 import { z } from 'zod'
 
-const Numeric = z.number()
+const Number = z.number()
+const NumberFinite = z.number().finite()
+const String = z.string().trim().min(3)
 
 const DayNight = z.object({
-  day: Numeric,
-  night: Numeric,
+  day: Number,
+  night: Number,
 })
 
 const Period = z.object({
-  production: Numeric,
-  export: Numeric,
+  production: Number,
+  export: Number,
   consumption: DayNight,
   import: DayNight,
 })
@@ -17,19 +19,31 @@ const Period = z.object({
 export const Input = z.object({
   today: Period.extend({
     currency: z.object({
-      uahUsd: Numeric,
-      uahEur: Numeric,
+      uahUsd: Number,
+      uahEur: Number,
     }),
   }),
   thisMonth: Period.extend({
     monetary: z.object({
       import: DayNight,
       export: z.object({
-        value: Numeric,
-        taxes: z.array(z.tuple([z.string().trim().min(3), Numeric])),
+        value: Number,
+        taxes: z.array(z.tuple([String, Number])),
       }),
     }),
   }),
 })
 
+export const Panel = z.object({
+  azimuth: NumberFinite,
+  power: z.number().finite().positive(),
+  slope: NumberFinite,
+  elevation: NumberFinite,
+  lat: NumberFinite,
+  lng: NumberFinite,
+  loss: NumberFinite,
+  mounting: String,
+})
+
 export type Input = z.infer<typeof Input>
+export type Panel = z.infer<typeof Panel>
