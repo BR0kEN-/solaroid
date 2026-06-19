@@ -60,7 +60,7 @@ def due(config: DtekConfig, now: float | None = None, path: Path = STATE_PATH) -
         return False
     state = load_state(path)
     checked_at = float(state.get("checkedAt", 0) or 0)
-    return (now or time.time()) - checked_at >= config.interval_minutes * 60
+    return (now or time.time()) - checked_at >= config.intervalMinutes * 60
 
 
 def curl_post_json(url: str, payload: dict[str, Any], token: str | None = None) -> dict[str, Any]:
