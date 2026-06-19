@@ -20,7 +20,7 @@ import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
-import { importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
+import { exportTotal, importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
 import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
 import "./styles.css";
 
@@ -48,7 +48,7 @@ type InfoModal =
   | "plantWorks"
   | "pvgis"
   | {
-    readonly kind: "importSplit" | "consumedSplit" | "exportPrice" | "netPayment";
+    readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "exportPrice" | "netPayment" | "utilityMeter";
     readonly row: MonthRow;
   };
 
@@ -227,6 +227,10 @@ const i18n = {
     roiTrajectory: "ROI trajectory",
     importMix: "Import",
     consumptionMix: "Consumption",
+    utilityMeter: "Utility meter",
+    dashboardValues: "Dashboard values",
+    meterValues: "Meter values",
+    usedForCalculations: "Meter values are used for monthly calculations when all four meter values are available. Daily rows stay unchanged.",
     electricityPayment: "Electricity payment",
     payment: "Payment",
     table: "Data table",
@@ -356,6 +360,10 @@ const i18n = {
     roiTrajectory: "Динаміка поверення інвестицій",
     importMix: "Імпорт",
     consumptionMix: "Споживання",
+    utilityMeter: "Покази лічильника",
+    dashboardValues: "Значення дашборда",
+    meterValues: "Значення лічильника",
+    usedForCalculations: "Покази лічильника використовуються для місячних розрахунків, коли доступні всі чотири значення. Денна таблиця не змінюється.",
     electricityPayment: "Оплата електрики",
     payment: "Оплата",
     table: "Таблиця даних",
@@ -605,6 +613,7 @@ function tariffFromRow(row: MonthRow): Tariff {
     importNight: row.importPriceNight,
     electricHeatingThresholdKwh: row.electricHeatingThresholdKwh,
     export: row.exportPrice,
+    exportNight: row.exportPriceNight,
     exportTaxes: [
       ["vat", row.exportVat],
       ["mil", row.exportMilitary],
@@ -618,6 +627,10 @@ function taxFraction(value: number) {
 
 function netExportRate(row: MonthRow) {
   return row.exportPrice * (1 - taxFraction(row.exportVat) - taxFraction(row.exportMilitary));
+}
+
+function netExportNightRate(row: MonthRow) {
+  return row.exportPriceNight * (1 - taxFraction(row.exportVat) - taxFraction(row.exportMilitary));
 }
 
 function exportPayoutKwh(row: MonthRow) {
@@ -847,6 +860,10 @@ function formatCompactActiveDuration(duration: { months: number; days: number },
 
 function netExportPrice(row: MonthRow) {
   return netExportRate(row);
+}
+
+function netExportNightPrice(row: MonthRow) {
+  return netExportNightRate(row);
 }
 
 function filteredMonthlyRows(
@@ -1131,7 +1148,7 @@ function App({
     const latestPaymentDisplay = latestRow ? moneyFromUah(latestRow.electricityPayment, currency, latestRow.usdRate) : 0;
     const production = rows.reduce((sum, row) => sum + row.production, 0);
     const productionSoldDisplay = sumRowsFromUah(rows, productionSoldUah, currency);
-    const exported = rows.reduce((sum, row) => sum + row.export, 0);
+    const exported = rows.reduce((sum, row) => sum + exportTotal(row), 0);
     const exportPayoutKwhTotal = rows.reduce((sum, row) => sum + exportPayoutKwh(row), 0);
     const exportPayoutDisplay = sumRowsFromUah(rows, exportPayoutUah, currency);
     const imported = rows.reduce((sum, row) => sum + row.importTotal, 0);
@@ -1211,6 +1228,21 @@ function App({
         ),
       };
     }
+    if (typeof infoModal === "object" && infoModal?.kind === "exportSplit") {
+      const row = infoModal.row;
+      return {
+        title: `${t.export} · ${row.month}`,
+        body: (
+          <SplitInfo
+            t={t}
+            lang={lang}
+            total={exportTotal(row)}
+            day={row.exportDay}
+            night={row.exportNight}
+          />
+        ),
+      };
+    }
     if (typeof infoModal === "object" && infoModal?.kind === "consumedSplit") {
       const row = infoModal.row;
       return {
@@ -1228,17 +1260,21 @@ function App({
     }
     if (typeof infoModal === "object" && infoModal?.kind === "exportPrice") {
       const row = infoModal.row;
-      const grossPrice = moneyFromUah(row.exportPrice, currency, row.usdRate);
-      const netPrice = moneyFromUah(netExportPrice(row), currency, row.usdRate);
+      const grossDayPrice = moneyFromUah(row.exportPriceDay, currency, row.usdRate);
+      const grossNightPrice = moneyFromUah(row.exportPriceNight, currency, row.usdRate);
+      const netDayPrice = moneyFromUah(netExportPrice(row), currency, row.usdRate);
+      const netNightPrice = moneyFromUah(netExportNightPrice(row), currency, row.usdRate);
       return {
         title: `${t.exportPrice} · ${row.month}`,
         body: (
           <PriceInfo
             rows={[
-              { label: t.grossExportPrice, value: `${formatDisplayMoney(grossPrice, currency, lang)} / ${energyUnit(lang)}` },
+              { label: `${t.grossExportPrice} ${t.day}`, value: `${formatDisplayMoney(grossDayPrice, currency, lang)} / ${energyUnit(lang)}` },
+              { label: `${t.grossExportPrice} ${t.night}`, value: `${formatDisplayMoney(grossNightPrice, currency, lang)} / ${energyUnit(lang)}` },
               { label: t.vat, value: `${formatNumber(row.exportVat, 2, 2)}%` },
               { label: t.militaryTax, value: `${formatNumber(row.exportMilitary, 2, 2)}%` },
-              { label: t.netExportPrice, value: `${formatDisplayMoney(netPrice, currency, lang)} / ${energyUnit(lang)}` },
+              { label: `${t.netExportPrice} ${t.day}`, value: `${formatDisplayMoney(netDayPrice, currency, lang)} / ${energyUnit(lang)}` },
+              { label: `${t.netExportPrice} ${t.night}`, value: `${formatDisplayMoney(netNightPrice, currency, lang)} / ${energyUnit(lang)}` },
             ]}
           />
         ),
@@ -1256,6 +1292,14 @@ function App({
             lang={lang}
           />
         ),
+      };
+    }
+    if (typeof infoModal === "object" && infoModal?.kind === "utilityMeter") {
+      const row = infoModal.row;
+      if (!row.utilityMeter) return { title: t.utilityMeter, body: "" };
+      return {
+        title: `${t.utilityMeter} · ${row.month}`,
+        body: <UtilityMeterInfo row={row} t={t} lang={lang} />,
       };
     }
     if (infoModal === "latestRoi") return { title: t.latestRoi, body: t.latestRoiInfo };
@@ -1413,6 +1457,7 @@ function App({
               onNetPaymentHeaderInfo={() => setInfoModal("netPayment")}
               onRoiInfo={() => setInfoModal("roi")}
               onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
+              onExportSplitInfo={(row) => setInfoModal({ kind: "exportSplit", row })}
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
@@ -1479,7 +1524,7 @@ function App({
               icon={<ArrowUpFromLine size={20} />}
               label={t.totalExport}
               value={formatMonthlyKpiKwh(totals.exported, lang)}
-              detail={`${t.latest} ${formatKwh(totals.latest?.export ?? 0, lang)}`}
+              detail={`${t.latest} ${formatKwh(totals.latest ? exportTotal(totals.latest) : 0, lang)}`}
               tone="mint"
               infoLabel={t.totalExport}
               onInfo={() => setInfoModal("totalExport")}
@@ -1736,9 +1781,11 @@ function App({
               onNetPaymentHeaderInfo={() => setInfoModal("netPayment")}
               onRoiInfo={() => setInfoModal("roi")}
               onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
+              onExportSplitInfo={(row) => setInfoModal({ kind: "exportSplit", row })}
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
+              onUtilityMeterInfo={(row) => setInfoModal({ kind: "utilityMeter", row })}
             />
           )}
         </section>
@@ -2798,7 +2845,7 @@ function PlantPeriodComparisonCharts({
     },
     {
       title: t.export,
-      value: (row: MonthRow) => row.export,
+      value: (row: MonthRow) => exportTotal(row),
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
     },
@@ -3048,7 +3095,7 @@ function PlantComparisonCharts({
     },
     {
       title: t.export,
-      values: plants.map((plant) => plant.row?.export ?? 0),
+      values: plants.map((plant) => (plant.row ? exportTotal(plant.row) : undefined) ?? 0),
       format: (value: number) => formatKwh(value, lang),
       color: colors.green,
       tone: () => "muted",
@@ -3427,7 +3474,7 @@ function ProductionExportChart({
               month: formatPeriodLabel(row, lang),
               items: [
               { label: t.production, value: formatKwh(row.production, lang), color: colors.amber },
-              { label: t.export, value: formatKwh(row.export, lang), color: colors.green },
+              { label: t.export, value: formatKwh(exportTotal(row), lang), color: colors.green },
               ...(expected ? [{ label: t.expected, value: formatKwh(expected, lang), color: colors.blue }] : []),
               ],
             },
@@ -3446,7 +3493,7 @@ function ProductionExportChart({
   const expectedValues = displayRows
     .map((row) => expectedByMonth.get(row.month))
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
-  const max = axisMax(displayRows.flatMap((row) => [row.production, row.export, expectedByMonth.get(row.month) ?? 0]));
+  const max = axisMax(displayRows.flatMap((row) => [row.production, exportTotal(row), expectedByMonth.get(row.month) ?? 0]));
   const band = chartBand(innerW, displayRows.length);
   const bar = Math.max(14, band * 0.24);
   const y = (value: number) => pad.top + innerH - (value / max) * innerH;
@@ -3478,9 +3525,9 @@ function ProductionExportChart({
                 />
                 <rect
                   x={x + 3}
-                  y={y(row.export)}
+                  y={y(exportTotal(row))}
                   width={bar}
-                  height={innerH - (y(row.export) - pad.top)}
+                  height={innerH - (y(exportTotal(row)) - pad.top)}
                   rx="3"
                   fill={colors.green}
                 />
@@ -3990,6 +4037,7 @@ function DailyDashboard({
   onNetPaymentHeaderInfo,
   onRoiInfo,
   onImportSplitInfo,
+  onExportSplitInfo,
   onConsumedSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
@@ -4010,6 +4058,7 @@ function DailyDashboard({
   readonly onNetPaymentHeaderInfo: () => void;
   readonly onRoiInfo: () => void;
   readonly onImportSplitInfo: (row: MonthRow) => void;
+  readonly onExportSplitInfo: (row: MonthRow) => void;
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
@@ -4069,8 +4118,8 @@ function DailyDashboard({
           <KpiCard
             icon={<ArrowUpFromLine size={20} />}
             label={t.export}
-            value={formatKwh(latest.export, lang)}
-            detail={`${pct((latest.export / latest.production) * 100)} ${t.exported}`}
+            value={formatKwh(exportTotal(latest), lang)}
+            detail={`${pct((exportTotal(latest) / latest.production) * 100)} ${t.exported}`}
             tone="mint"
           />
           <KpiCard
@@ -4203,6 +4252,7 @@ function DailyDashboard({
           onNetPaymentHeaderInfo={onNetPaymentHeaderInfo}
           onRoiInfo={onRoiInfo}
           onImportSplitInfo={onImportSplitInfo}
+          onExportSplitInfo={onExportSplitInfo}
           onConsumedSplitInfo={onConsumedSplitInfo}
           onExportPriceInfo={onExportPriceInfo}
           onNetPaymentInfo={onNetPaymentInfo}
@@ -4240,12 +4290,12 @@ function DailyCompareTable({
     },
     {
       label: t.export,
-      first: formatKwh(first.export, lang),
-      second: formatKwh(second.export, lang),
-      delta: formatSignedKwh(second.export - first.export, lang),
-      firstValue: first.export,
-      secondValue: second.export,
-      value: second.export - first.export,
+      first: formatKwh(exportTotal(first), lang),
+      second: formatKwh(exportTotal(second), lang),
+      delta: formatSignedKwh(exportTotal(second) - exportTotal(first), lang),
+      firstValue: exportTotal(first),
+      secondValue: exportTotal(second),
+      value: exportTotal(second) - exportTotal(first),
       higherIsBetter: true,
     },
     {
@@ -4342,9 +4392,11 @@ function DataTable({
   onNetPaymentHeaderInfo,
   onRoiInfo,
   onImportSplitInfo,
+  onExportSplitInfo,
   onConsumedSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
+  onUtilityMeterInfo,
 }: {
   readonly rows: readonly MonthRow[];
   readonly period: "monthly" | "daily";
@@ -4356,9 +4408,11 @@ function DataTable({
   readonly onNetPaymentHeaderInfo: () => void;
   readonly onRoiInfo: () => void;
   readonly onImportSplitInfo: (row: MonthRow) => void;
+  readonly onExportSplitInfo: (row: MonthRow) => void;
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
+  readonly onUtilityMeterInfo?: (row: MonthRow) => void;
 }) {
   const newestFirst = [...rows].sort((a, b) => b.date.getTime() - a.date.getTime());
   const kwh = energyUnit(lang);
@@ -4366,7 +4420,7 @@ function DataTable({
   const totals = rows.reduce(
     (sum, row) => ({
       production: sum.production + row.production,
-      export: sum.export + row.export,
+      export: sum.export + exportTotal(row),
       importTotal: sum.importTotal + row.importTotal,
       consumedTotal: sum.consumedTotal + row.consumedTotal,
       balance: sum.balance + row.balance,
@@ -4404,9 +4458,17 @@ function DataTable({
         <tbody>
           {newestFirst.map((row) => (
             <tr key={row.month}>
-              <th>{period === "daily" ? formatDayMonthLabel(row.date, lang) : row.month}</th>
+              <th>
+                {period === "monthly" && row.utilityMeter && onUtilityMeterInfo ? (
+                  <TableValueInfo value={row.month} label={t.utilityMeter} onInfo={() => onUtilityMeterInfo(row)} />
+                ) : (
+                  period === "daily" ? formatDayMonthLabel(row.date, lang) : row.month
+                )}
+              </th>
               <td>{formatNumber(row.production, 2, 2)}</td>
-              <td>{formatNumber(row.export, 2, 2)}</td>
+              <td>
+                <TableValueInfo value={formatNumber(exportTotal(row), 2, 2)} label={t.export} onInfo={() => onExportSplitInfo(row)} />
+              </td>
               <td>
                 <TableValueInfo value={formatNumber(row.importTotal, 2, 2)} label={t.import} onInfo={() => onImportSplitInfo(row)} />
               </td>
@@ -4530,6 +4592,74 @@ function PriceInfo({
   );
 }
 
+function UtilityMeterInfo({
+  row,
+  t,
+  lang,
+}: {
+  readonly row: MonthRow;
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+}) {
+  const meter = row.utilityMeter;
+  if (!meter) return null;
+  const utilityExportTotal = meter.utility.exportDay + meter.utility.exportNight;
+  const diff = {
+    importDay: meter.utility.importDay - meter.ha.importDay,
+    importNight: meter.utility.importNight - meter.ha.importNight,
+    export: utilityExportTotal - meter.ha.export,
+  };
+  const signedKwh = (value: number) => `${value >= 0 ? "+" : ""}${formatKwh(value, lang)}`;
+
+  return (
+    <div className="info-stack">
+      <MathInfo
+        rows={[
+          {
+            label: t.dashboardValues,
+            value: (
+              <StackedValues
+                rows={[
+                  { label: t.importDay, value: formatKwh(meter.ha.importDay, lang) },
+                  { label: t.importNight, value: formatKwh(meter.ha.importNight, lang) },
+                  { label: t.export, value: formatKwh(meter.ha.export, lang) },
+                ]}
+              />
+            ),
+          },
+          {
+            label: t.meterValues,
+            value: (
+              <StackedValues
+                rows={[
+                  { label: t.importDay, value: formatKwh(meter.utility.importDay, lang) },
+                  { label: t.importNight, value: formatKwh(meter.utility.importNight, lang) },
+                  { label: `${t.export} ${t.day}`, value: formatKwh(meter.utility.exportDay, lang) },
+                  { label: `${t.export} ${t.night}`, value: formatKwh(meter.utility.exportNight, lang) },
+                  { label: t.export, value: formatKwh(utilityExportTotal, lang) },
+                ]}
+              />
+            ),
+          },
+          {
+            label: t.delta,
+            value: (
+              <StackedValues
+                rows={[
+                  { label: t.importDay, value: signedKwh(diff.importDay) },
+                  { label: t.importNight, value: signedKwh(diff.importNight) },
+                  { label: t.export, value: signedKwh(diff.export) },
+                ]}
+              />
+            ),
+          },
+        ]}
+      />
+      <p>{t.usedForCalculations}</p>
+    </div>
+  );
+}
+
 function NetPaymentInfo({
   row,
   t,
@@ -4614,7 +4744,7 @@ function NetPaymentInfo({
         <StackedValues
           rows={[
             { label: t.import, value: `${formatKwh(row.importTotal, lang)} (${formatKwh(row.importDay, lang)} / ${formatKwh(row.importNight, lang)})` },
-            { label: t.export, value: formatKwh(row.export, lang) },
+            { label: t.export, value: formatKwh(exportTotal(row), lang) },
             { label: t.balance, value: formatKwh(row.balance, lang) },
             { label: t.consumed, value: `${formatKwh(row.consumedTotal, lang)} (${formatKwh(row.consumedDay, lang)} / ${formatKwh(row.consumedNight, lang)})` },
           ]}
@@ -4669,7 +4799,7 @@ function NetPaymentInfo({
     rows.push(
       {
         label: t.exportedOffset,
-        value: `${t.exportUnpaid}: ${formatKwh(row.export, lang)} → ${displayMoney(0)}`,
+        value: `${t.exportUnpaid}: ${formatKwh(exportTotal(row), lang)} → ${displayMoney(0)}`,
       },
       {
         label: t.netPayment,
@@ -4685,7 +4815,7 @@ function NetPaymentInfo({
         label: t.netSurplus,
         value: (
           <>
-            <FormulaResult>{formatKwh(surplus, lang)}</FormulaResult> = {formatKwh(row.export, lang)} - {formatKwh(row.importTotal, lang)}
+            <FormulaResult>{formatKwh(surplus, lang)}</FormulaResult> = {formatKwh(exportTotal(row), lang)} - {formatKwh(row.importTotal, lang)}
           </>
         ),
       },
@@ -4706,8 +4836,8 @@ function NetPaymentInfo({
   } else {
     const dayShare = row.importDay / importTotalValue;
     const nightShare = row.importNight / importTotalValue;
-    const coveredDay = row.export * dayShare;
-    const coveredNight = row.export * nightShare;
+    const coveredDay = exportTotal(row) * dayShare;
+    const coveredNight = exportTotal(row) * nightShare;
     const coveredTotal = coveredDay + coveredNight;
     const remainingDay = row.importDay - coveredDay;
     const remainingNight = row.importNight - coveredNight;
@@ -4722,7 +4852,7 @@ function NetPaymentInfo({
                 label: t.day,
                 value: (
                   <>
-                    <FormulaResult>{formatKwh(coveredDay, lang)}</FormulaResult> = {formatKwh(row.export, lang)} × {formatNumber(dayShare * 100, 2, 2)}% ({formatKwh(row.importDay, lang)} / {formatKwh(row.importTotal, lang)})
+                    <FormulaResult>{formatKwh(coveredDay, lang)}</FormulaResult> = {formatKwh(exportTotal(row), lang)} × {formatNumber(dayShare * 100, 2, 2)}% ({formatKwh(row.importDay, lang)} / {formatKwh(row.importTotal, lang)})
                   </>
                 ),
               },
@@ -4730,7 +4860,7 @@ function NetPaymentInfo({
                 label: t.night,
                 value: (
                   <>
-                    <FormulaResult>{formatKwh(coveredNight, lang)}</FormulaResult> = {formatKwh(row.export, lang)} × {formatNumber(nightShare * 100, 2, 2)}% ({formatKwh(row.importNight, lang)} / {formatKwh(row.importTotal, lang)})
+                    <FormulaResult>{formatKwh(coveredNight, lang)}</FormulaResult> = {formatKwh(exportTotal(row), lang)} × {formatNumber(nightShare * 100, 2, 2)}% ({formatKwh(row.importNight, lang)} / {formatKwh(row.importTotal, lang)})
                   </>
                 ),
               },

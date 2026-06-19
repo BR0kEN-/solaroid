@@ -2,7 +2,8 @@ export interface MonthRow {
   readonly month: string
   readonly date: Date
   readonly production: number
-  readonly export: number
+  readonly exportDay: number
+  readonly exportNight: number
   readonly importDay: number
   readonly importNight: number
   readonly consumedDay: number
@@ -11,6 +12,8 @@ export interface MonthRow {
   readonly importTotal: number
   readonly balance: number
   readonly exportPrice: number
+  readonly exportPriceDay: number
+  readonly exportPriceNight: number
   readonly exportVat: number
   readonly exportMilitary: number
   readonly importPriceDay: number
@@ -22,6 +25,21 @@ export interface MonthRow {
   readonly usdRate: number
   readonly roiUsd: number
   readonly isCommercial: boolean
+  readonly utilityMeter?: UtilityMeterReconciliation
+}
+
+export interface UtilityMeterReconciliation {
+  readonly ha: {
+    readonly importDay: number
+    readonly importNight: number
+    readonly export: number
+  }
+  readonly utility: {
+    readonly importDay: number
+    readonly importNight: number
+    readonly exportDay: number
+    readonly exportNight: number
+  }
 }
 
 export interface DataState {
@@ -61,12 +79,14 @@ export interface Tariff {
   readonly importNight: number
   readonly electricHeatingThresholdKwh?: number
   readonly export: number
+  readonly exportNight: number
   readonly exportTaxes: readonly ExportTax[]
 }
 
 export interface EnergySnapshot {
   readonly production: number
-  readonly export: number
+  readonly exportDay: number
+  readonly exportNight: number
   readonly importDay: number
   readonly importNight: number
   readonly consumedDay: number

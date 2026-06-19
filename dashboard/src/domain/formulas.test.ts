@@ -20,6 +20,7 @@ const tariff: Tariff = {
   importDay: 4.32,
   importNight: 2.16,
   export: 6,
+  exportNight: 0,
   exportTaxes: [
     ['vat', 20],
     ['mil', 5],
@@ -28,7 +29,8 @@ const tariff: Tariff = {
 
 const row: EnergySnapshot = {
   production: 100,
-  export: 30,
+  exportDay: 30,
+  exportNight: 0,
   importDay: 20,
   importNight: 10,
   consumedDay: 80,
@@ -101,7 +103,8 @@ describe('self consumption', () => {
   it('falls back to production minus export at weighted import price', () => {
     const inferred: EnergySnapshot = {
       production: 50,
-      export: 15,
+      exportDay: 15,
+      exportNight: 0,
       importDay: 20,
       importNight: 10,
       consumedDay: 10,
@@ -115,13 +118,14 @@ describe('self consumption', () => {
 describe('payment and savings', () => {
   it('charges remaining import after commercial export offset', () => {
     expect(payment(row, tariff, true)).toBeCloseTo(0)
-    expect(payment({ ...row, export: 15 }, tariff, true)).toBe(-54)
+    expect(payment({ ...row, exportDay: 15, exportNight: 0 }, tariff, true)).toBe(-54)
   })
 
   it('applies electric heating threshold after proportional export offset', () => {
     const nearThreshold: EnergySnapshot = {
       production: 0,
-      export: 9,
+      exportDay: 9,
+      exportNight: 0,
       importDay: 1150,
       importNight: 851,
       consumedDay: 1150,
@@ -129,7 +133,8 @@ describe('payment and savings', () => {
     }
     const aboveThreshold: EnergySnapshot = {
       production: 0,
-      export: 10,
+      exportDay: 10,
+      exportNight: 0,
       importDay: 1170,
       importNight: 900,
       consumedDay: 1170,
@@ -152,11 +157,11 @@ describe('payment and savings', () => {
   })
 
   it('falls back to regular import rates without electric heating eligibility', () => {
-    expect(payment({ ...row, export: 15 }, tariff, true)).toBe(-54)
+    expect(payment({ ...row, exportDay: 15, exportNight: 0 }, tariff, true)).toBe(-54)
   })
 
   it('pays export surplus after taxes in commercial periods', () => {
-    expect(payment({ ...row, export: 50 }, tariff, true)).toBe(90)
+    expect(payment({ ...row, exportDay: 50, exportNight: 0 }, tariff, true)).toBe(90)
   })
 
   it('ignores export offset before commercial date', () => {
@@ -165,6 +170,6 @@ describe('payment and savings', () => {
   })
 
   it('calculates commercial savings as consumed price plus net payment', () => {
-    expect(savings({ ...row, export: 15 }, tariff, true)).toBe(334.8)
+    expect(savings({ ...row, exportDay: 15, exportNight: 0 }, tariff, true)).toBe(334.8)
   })
 })

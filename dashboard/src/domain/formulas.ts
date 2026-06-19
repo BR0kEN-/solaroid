@@ -11,12 +11,16 @@ export function importTotal(row: EnergySnapshot) {
   return row.importDay + row.importNight
 }
 
+export function exportTotal(row: EnergySnapshot) {
+  return row.exportDay + row.exportNight
+}
+
 export function balance(row: EnergySnapshot) {
-  return importTotal(row) - row.export
+  return importTotal(row) - exportTotal(row)
 }
 
 export function commercialBalance(row: EnergySnapshot, isCommercial: boolean) {
-  return importTotal(row) - (isCommercial ? row.export : 0)
+  return importTotal(row) - (isCommercial ? exportTotal(row) : 0)
 }
 
 export function exportTaxRate(tariff: Tariff) {
@@ -118,7 +122,7 @@ export function weightedImportPrice(row: EnergySnapshot, tariff: Tariff) {
 }
 
 export function selfConsumed(row: EnergySnapshot) {
-  return Math.max(0, row.production - row.export)
+  return Math.max(0, row.production - exportTotal(row))
 }
 
 export function selfConsumptionSavings(row: EnergySnapshot, tariff: Tariff) {
@@ -142,7 +146,7 @@ export function payment(row: EnergySnapshot, tariff: Tariff, isCommercial = true
   const currentImportTotal = importTotal(row)
   if (currentImportTotal <= 0) return 0
 
-  const paidExport = isCommercial ? row.export : 0
+  const paidExport = isCommercial ? exportTotal(row) : 0
   const coveredImportDay = paidExport * (row.importDay / currentImportTotal)
   const coveredImportNight = paidExport * (row.importNight / currentImportTotal)
   const remainingImportDay = row.importDay - coveredImportDay

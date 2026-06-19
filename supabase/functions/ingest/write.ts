@@ -3,16 +3,28 @@ import { ForbiddenError } from './errors.ts'
 import { Input } from './schema.ts'
 import { dateUtil } from './utils/date.ts'
 
+function exportSplit(value: Input['today']['export']) {
+  return typeof value === 'number' ? { day: value, night: 0 } : value
+}
+
+function exportPriceSplit(value: Input['thisMonth']['monetary']['export']) {
+  return 'value' in value ? { day: value.value, night: 0 } : value
+}
+
 function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
   const date = dateUtil.format.ymd()
   const month = dateUtil.getMonthStart(date)
+  const todayExport = exportSplit(input.today.export)
+  const monthExport = exportSplit(input.thisMonth.export)
+  const priceExport = exportPriceSplit(input.thisMonth.monetary.export)
 
   return {
     day: {
       plant_id: token.plant_id,
       date,
       production: input.today.production,
-      export: input.today.export,
+      export_day: todayExport.day,
+      export_night: todayExport.night,
       import_day: input.today.import.day,
       import_night: input.today.import.night,
       consumption_day: input.today.consumption.day,
@@ -24,7 +36,8 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
       plant_id: token.plant_id,
       date: month,
       production: input.thisMonth.production,
-      export: input.thisMonth.export,
+      export_day: monthExport.day,
+      export_night: monthExport.night,
       import_day: input.thisMonth.import.day,
       import_night: input.thisMonth.import.night,
       consumption_day: input.thisMonth.consumption.day,
@@ -45,7 +58,8 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
       date: month,
       price_import_day: input.thisMonth.monetary.import.day,
       price_import_night: input.thisMonth.monetary.import.night,
-      price_export: input.thisMonth.monetary.export.value,
+      price_export_day: priceExport.day,
+      price_export_night: priceExport.night,
       export_taxes: input.thisMonth.monetary.export.taxes,
     },
   }
