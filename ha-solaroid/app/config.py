@@ -9,7 +9,7 @@ CONFIG_PATH = Path("/data/options.json")
 
 
 @dataclass(frozen=True)
-class UtilityConfig:
+class DtekConfig:
     phone: str
     password: str
     accountId: str
@@ -27,7 +27,7 @@ class SolaroidConfig:
     token: str
     intervalMinutes: int
     payload: dict[str, Any]
-    utility: UtilityConfig
+    dtek: DtekConfig
 
     @cached_property
     def url(self) -> str:
@@ -40,5 +40,5 @@ def load_config(path: Path = CONFIG_PATH) -> SolaroidConfig:
 
     return SolaroidConfig(
         **data,
-        utility=UtilityConfig(**data.pop("utility")),
+        dtek=DtekConfig(**data.pop("dtek")),
     )

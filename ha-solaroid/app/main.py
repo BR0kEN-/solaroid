@@ -14,7 +14,7 @@ def run_once(client: HomeAssistantClient, config: SolaroidConfig) -> None:
     utility = None
 
     try:
-        utility = get_utility_values(config.utility)
+        utility = get_utility_values(config.dtek)
     except Exception:
         logging.exception("Utility meter fetch failed; posting HA values only")
 

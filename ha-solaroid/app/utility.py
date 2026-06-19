@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from config import UtilityConfig
+from config import DtekConfig
 
 
 STATE_PATH = Path("/data/solaroid-utility-meter-state.json")
@@ -22,6 +22,7 @@ IMPORT_CODE = "01"
 EXPORT_CODE = "03"
 DAY_SCALE = "04"
 NIGHT_SCALE = "05"
+USER_TYPE = "person"
 
 
 @dataclass(frozen=True)
@@ -54,7 +55,7 @@ def save_state(state: dict[str, Any], path: Path = STATE_PATH) -> None:
         json.dump(state, file, ensure_ascii=False, indent=2)
 
 
-def due(config: UtilityConfig, now: float | None = None, path: Path = STATE_PATH) -> bool:
+def due(config: DtekConfig, now: float | None = None, path: Path = STATE_PATH) -> bool:
     if not config.enabled or not should_check():
         return False
     state = load_state(path)
@@ -95,16 +96,16 @@ def post_json(url: str, payload: dict[str, Any], token: str | None = None) -> di
         raise
 
 
-def fetch_history(config: UtilityConfig) -> dict[str, Any]:
+def fetch_history(config: DtekConfig) -> dict[str, Any]:
     auth_token = base64.b64encode(f"{config.phone}:{config.password}".encode("utf-8")).decode("ascii")
     auth_payload = {
         "language": "en-US",
         "phone": config.phone,
         "platform": "HomeAssistant",
         "site": config.department,
-        "userType": config.user_type,
+        "userType": USER_TYPE,
     }
-    auth_data = post_json(f"{config.url}/auth/person", auth_payload, auth_token)
+    auth_data = post_json(f"{config.url}/auth/{USER_TYPE}", auth_payload, auth_token)
     token = auth_data.get("user", {}).get("token")
     if not token:
         raise RuntimeError("Utility auth response missing user.token")
@@ -113,8 +114,8 @@ def fetch_history(config: UtilityConfig) -> dict[str, Any]:
         {
             "token": token,
             "account": config.account_id,
-            "userType": config.user_type,
-            "url": "/person/cust_data_history",
+            "userType": USER_TYPE,
+            "url": f"/{USER_TYPE}/cust_data_history",
         },
     )
 
@@ -189,7 +190,7 @@ def is_complete_payload(payload: Any) -> bool:
     return all(isinstance(value, (int, float)) and value == value for value in values)
 
 
-def get_utility_values(config: UtilityConfig, path: Path = STATE_PATH) -> dict[str, Any] | None:
+def get_utility_values(config: DtekConfig, path: Path = STATE_PATH) -> dict[str, Any] | None:
     if not config.enabled or not should_check():
         return None
     if not due(config, path=path):
