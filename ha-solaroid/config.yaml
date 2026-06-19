@@ -2,7 +2,7 @@
 url: https://github.com/BR0kEN-/solaroid
 name: Solaroid
 slug: solaroid
-version: 0.1.2
+version: 0.1.3
 description: Push Home Assistant solar telemetry and utility meter readings to Solaroid backend.
 init: false
 arch:
@@ -70,7 +70,9 @@ schema:
   payload:
     today:
       production: "str"
-      export: "str"
+      export:
+        day: "str"
+        night: "str"
       consumption:
         day: "str"
         night: "str"
@@ -82,7 +84,9 @@ schema:
         uahEur: "str"
     thisMonth:
       production: "str"
-      export: "str"
+      export:
+        day: "str"
+        night: "str"
       consumption:
         day: "str"
         night: "str"
