@@ -26,7 +26,7 @@ def run_once(client: HomeAssistantClient, config: SolaroidConfig) -> None:
 def main() -> None:
     client = HomeAssistantClient()
     config = load_config()
-    sleep_seconds = config.interval_minutes * 60
+    sleep_seconds = config.intervalMinutes * 60
 
     while True:
         try:

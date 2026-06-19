@@ -2,7 +2,7 @@
 url: https://github.com/BR0kEN-/solaroid
 name: Solaroid
 slug: solaroid
-version: 0.1.6
+version: 0.1.7
 description: Push Home Assistant solar telemetry and utility meter readings to Solaroid backend.
 init: false
 arch:
