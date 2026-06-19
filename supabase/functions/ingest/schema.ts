@@ -31,6 +31,7 @@ export const Input = z.object({
         taxes: z.array(z.tuple([String, Number])),
       }),
     }),
+    utility: z.object({ import: DayNight, export: DayNight }).optional(),
   }),
 })
 
