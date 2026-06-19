@@ -201,6 +201,8 @@ const i18n = {
     regularTier: "Regular tier",
     electricHeatingThreshold: "Electric heating threshold",
     exportedOffset: "Export offset",
+    beforeCommercialDate: "Before commercial date",
+    fromCommercialDate: "From commercial date",
     remainingImport: "Remaining import",
     netSurplus: "Net surplus",
     exportUnpaid: "Export is unpaid before the commercial date",
@@ -334,6 +336,8 @@ const i18n = {
     regularTier: "Звичайний тариф",
     electricHeatingThreshold: "Ліміт електроопалення",
     exportedOffset: "Покриття експортом",
+    beforeCommercialDate: "До комерційної дати",
+    fromCommercialDate: "З комерційної дати",
     remainingImport: "Залишок імпорту",
     netSurplus: "Чистий надлишок",
     exportUnpaid: "До комерційної дати експорт не оплачується",
@@ -1149,9 +1153,13 @@ function App({
     const production = rows.reduce((sum, row) => sum + row.production, 0);
     const productionSoldDisplay = sumRowsFromUah(rows, productionSoldUah, currency);
     const exported = rows.reduce((sum, row) => sum + exportTotal(row), 0);
+    const exportedDay = rows.reduce((sum, row) => sum + row.exportDay, 0);
+    const exportedNight = rows.reduce((sum, row) => sum + row.exportNight, 0);
     const exportPayoutKwhTotal = rows.reduce((sum, row) => sum + exportPayoutKwh(row), 0);
     const exportPayoutDisplay = sumRowsFromUah(rows, exportPayoutUah, currency);
     const imported = rows.reduce((sum, row) => sum + row.importTotal, 0);
+    const importedDay = rows.reduce((sum, row) => sum + row.importDay, 0);
+    const importedNight = rows.reduce((sum, row) => sum + row.importNight, 0);
     const importCostDisplay = sumRowsFromUah(rows, importCostUah, currency);
     const consumed = rows.reduce((sum, row) => sum + row.consumedTotal, 0);
     const savings = rows.reduce((sum, row) => sum + row.electricitySavings, 0);
@@ -1173,9 +1181,13 @@ function App({
       production,
       productionSoldDisplay,
       exported,
+      exportedDay,
+      exportedNight,
       exportPayoutKwhTotal,
       exportPayoutDisplay,
       imported,
+      importedDay,
+      importedNight,
       importCostDisplay,
       consumed,
       savings,
@@ -1287,6 +1299,8 @@ function App({
         body: (
           <NetPaymentInfo
             row={row}
+            commercialDate={dataState.commercialDate}
+            dailyRows={dataState.dailyRows}
             t={t}
             currency={currency}
             lang={lang}
@@ -1367,24 +1381,42 @@ function App({
       const exportValue = formatKwh(totals.exported, lang);
       const paidExportValue = formatKwh(totals.exportPayoutKwhTotal, lang);
       const payoutValue = formatDisplayMoney(totals.exportPayoutDisplay, currency, lang);
-      const body =
-        lang === "uk"
-          ? `Усього експортовано ${exportValue}. З них ${paidExportValue} чистого надлишку принесли ${payoutValue}. ${t.totalExportCostInfoDetails}`
-          : `${exportValue} was exported to the grid. Of that, ${paidExportValue} net surplus earned ${payoutValue}. ${t.totalExportCostInfoDetails}`;
-      return { title: t.totalExport, body };
+      return {
+        title: t.totalExport,
+        body: (
+          <div className="info-stack">
+            <p>
+              {lang === "uk"
+                ? `Усього експортовано ${exportValue}. З них ${paidExportValue} чистого надлишку принесли ${payoutValue}. ${t.totalExportCostInfoDetails}`
+                : `${exportValue} was exported to the grid. Of that, ${paidExportValue} net surplus earned ${payoutValue}. ${t.totalExportCostInfoDetails}`}
+            </p>
+            <DayNightInfo t={t} lang={lang} day={totals.exportedDay} night={totals.exportedNight} />
+          </div>
+        ),
+      };
     }
     if (infoModal === "totalImport") {
       const importValue = formatKwh(totals.imported, lang);
       const costValue = formatDisplayMoney(totals.importCostDisplay, currency, lang);
-      const body =
-        lang === "uk"
-          ? `Імпортовані з мережі ${importValue} коштували б ${costValue}. ${t.totalImportCostInfoDetails}`
-          : `The ${importValue} imported from the grid would have cost ${costValue}. ${t.totalImportCostInfoDetails}`;
-      return { title: t.totalImport, body };
+      return {
+        title: t.totalImport,
+        body: (
+          <div className="info-stack">
+            <p>
+              {lang === "uk"
+                ? `Імпортовані з мережі ${importValue} коштували б ${costValue}. ${t.totalImportCostInfoDetails}`
+                : `The ${importValue} imported from the grid would have cost ${costValue}. ${t.totalImportCostInfoDetails}`}
+            </p>
+            <DayNightInfo t={t} lang={lang} day={totals.importedDay} night={totals.importedNight} />
+          </div>
+        ),
+      };
     }
     return null;
   }, [
     currency,
+    dataState.commercialDate,
+    dataState.dailyRows,
     dataState.metadata,
     infoModal,
     lang,
@@ -1392,8 +1424,12 @@ function App({
     totals.exportPayoutDisplay,
     totals.exportPayoutKwhTotal,
     totals.exported,
+    totals.exportedDay,
+    totals.exportedNight,
     totals.importCostDisplay,
     totals.imported,
+    totals.importedDay,
+    totals.importedNight,
     totals.production,
     totals.productionSoldDisplay,
   ]);
@@ -4572,6 +4608,31 @@ function SplitInfo({
   );
 }
 
+function DayNightInfo({
+  t,
+  lang,
+  day,
+  night,
+}: {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly day: number;
+  readonly night: number;
+}) {
+  return (
+    <dl className="split-info">
+      <div>
+        <dt>{t.day}</dt>
+        <dd>{formatKwh(day, lang)}</dd>
+      </div>
+      <div>
+        <dt>{t.night}</dt>
+        <dd>{formatKwh(night, lang)}</dd>
+      </div>
+    </dl>
+  );
+}
+
 function PriceInfo({
   rows,
 }: {
@@ -4662,11 +4723,15 @@ function UtilityMeterInfo({
 
 function NetPaymentInfo({
   row,
+  commercialDate,
+  dailyRows,
   t,
   currency,
   lang,
 }: {
   readonly row: MonthRow;
+  readonly commercialDate?: Date;
+  readonly dailyRows: readonly MonthRow[];
   readonly t: Record<string, string>;
   readonly currency: Currency;
   readonly lang: Lang;
@@ -4737,6 +4802,7 @@ function NetPaymentInfo({
   };
   const importTotalValue = Math.max(row.importTotal, 0);
   const consumedBreakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
+  const transitionRows = commercialTransitionRows(row, commercialDate, dailyRows);
   const inputRows: MathInfoRow[] = [
     {
       label: t.formulaInputs,
@@ -4744,7 +4810,18 @@ function NetPaymentInfo({
         <StackedValues
           rows={[
             { label: t.import, value: `${formatKwh(row.importTotal, lang)} (${formatKwh(row.importDay, lang)} / ${formatKwh(row.importNight, lang)})` },
-            { label: t.export, value: formatKwh(exportTotal(row), lang) },
+            {
+              label: t.export,
+              value: (
+                <StackedValues
+                  rows={[
+                    { label: t.total, value: formatKwh(exportTotal(row), lang) },
+                    { label: t.day, value: formatKwh(row.exportDay, lang) },
+                    { label: t.night, value: formatKwh(row.exportNight, lang) },
+                  ]}
+                />
+              ),
+            },
             { label: t.balance, value: formatKwh(row.balance, lang) },
             { label: t.consumed, value: `${formatKwh(row.consumedTotal, lang)} (${formatKwh(row.consumedDay, lang)} / ${formatKwh(row.consumedNight, lang)})` },
           ]}
@@ -4774,10 +4851,12 @@ function NetPaymentInfo({
       value: (
         <StackedValues
           rows={[
-            { label: t.grossExportPrice, value: `${displayMoney(row.exportPrice)} / ${energyUnit(lang)}` },
+            { label: `${t.grossExportPrice} ${t.day}`, value: `${displayMoney(row.exportPriceDay)} / ${energyUnit(lang)}` },
+            { label: `${t.grossExportPrice} ${t.night}`, value: `${displayMoney(row.exportPriceNight)} / ${energyUnit(lang)}` },
             { label: t.vat, value: `${formatNumber(row.exportVat, 2, 2)}%` },
             { label: t.militaryTax, value: `${formatNumber(row.exportMilitary, 2, 2)}%` },
-            { label: t.netExportPrice, value: `${displayMoney(netExportPrice(row))} / ${energyUnit(lang)}` },
+            { label: `${t.netExportPrice} ${t.day}`, value: `${displayMoney(netExportPrice(row))} / ${energyUnit(lang)}` },
+            { label: `${t.netExportPrice} ${t.night}`, value: `${displayMoney(netExportNightPrice(row))} / ${energyUnit(lang)}` },
           ]}
         />
       ),
@@ -4795,7 +4874,37 @@ function NetPaymentInfo({
     },
   ];
 
-  if (!row.isCommercial) {
+  if (transitionRows) {
+    const beforeExport = transitionRows.before.reduce((sum, current) => sum + exportTotal(current), 0);
+    const afterExport = transitionRows.after.reduce((sum, current) => sum + exportTotal(current), 0);
+    const beforePayment = transitionRows.before.reduce((sum, current) => sum + current.electricityPayment, 0);
+    const afterPayment = transitionRows.after.reduce((sum, current) => sum + current.electricityPayment, 0);
+    rows.push(
+      {
+        label: t.exportedOffset,
+        value: (
+          <StackedValues
+            rows={[
+              { label: t.beforeCommercialDate, value: `${t.exportUnpaid}: ${formatKwh(beforeExport, lang)} → ${displayMoney(0)}` },
+              { label: t.fromCommercialDate, value: `${formatKwh(afterExport, lang)} → ${displayMoney(afterPayment)}` },
+            ]}
+          />
+        ),
+      },
+      {
+        label: t.netPayment,
+        value: (
+          <StackedValues
+            rows={[
+              { label: t.beforeCommercialDate, value: displayMoneyMath(beforePayment) },
+              { label: t.fromCommercialDate, value: displayMoneyMath(afterPayment) },
+              { label: t.total, value: displayMoneyMath(row.electricityPayment) },
+            ]}
+          />
+        ),
+      },
+    );
+  } else if (!row.isCommercial) {
     rows.push(
       {
         label: t.exportedOffset,
@@ -4919,6 +5028,19 @@ function NetPaymentInfo({
   }
 
   return <MathInfo rows={rows} />;
+}
+
+function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefined, dailyRows: readonly MonthRow[]) {
+  if (!commercialDate) return undefined;
+  if (!sameMonth(row.date, commercialDate) || row.date >= commercialDate) return undefined;
+
+  const rows = dailyRows.filter((current) => sameMonth(current.date, row.date));
+  if (!rows.length) return undefined;
+
+  return {
+    before: rows.filter((current) => current.date < commercialDate),
+    after: rows.filter((current) => current.date >= commercialDate),
+  };
 }
 
 function MathInfo({
