@@ -16,12 +16,17 @@ interface MonthRecord {
   readonly plant_id: string
   readonly date: string
   readonly production: number
-  readonly export: number
+  readonly export_day: number
+  readonly export_night: number
   readonly import_day: number
   readonly import_night: number
   readonly consumption_day: number
   readonly consumption_night: number
   readonly uah_usd_rate?: number | null
+  readonly utility_import_day?: number | null
+  readonly utility_import_night?: number | null
+  readonly utility_export_day?: number | null
+  readonly utility_export_night?: number | null
   readonly updated_at?: string
 }
 
@@ -35,7 +40,8 @@ interface TariffRecord {
   readonly date: string
   readonly price_import_day: number
   readonly price_import_night: number
-  readonly price_export: number
+  readonly price_export_day: number
+  readonly price_export_night: number
   readonly export_taxes: readonly ExportTax[]
   readonly updated_at?: string
 }
@@ -117,8 +123,9 @@ export function toLoadedPlant({
   const tariffByMonth = new Map(tariffs.map((tariff) => [tariff.date, tariff]))
   const commercialDate = parseDate(plant.commercial_date)
   const electricHeatingThresholdKwh = plant.electric_heating_import_threshold_kwh ?? undefined
+  const adjustedDays = applyUtilityMeterToDays(days, utilityTargetsByMonth(months))
   const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthUsdRate(month, monthlyRates, fallbackUsdRate), commercialDate, electricHeatingThresholdKwh))
-  const dailyRows = days.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialDate))
+  const dailyRows = adjustedDays.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialDate))
 
   return {
     plantId: plant.id,
@@ -247,7 +254,8 @@ function toDashboardRow({
   readonly month: string
   readonly commercialDate: Date
 }): MonthRow {
-  const snapshot = toSnapshot(row)
+  const utilityMeter = toUtilityMeter(row)
+  const snapshot = toSnapshot(row, utilityMeter)
   const isCommercial = date >= commercialDate
   const rowConsumedPrice = consumedPrice(snapshot, tariff)
   const rowPayment = payment(snapshot, tariff, isCommercial)
@@ -257,15 +265,18 @@ function toDashboardRow({
     month,
     date,
     production: row.production,
-    export: row.export,
-    importDay: row.import_day,
-    importNight: row.import_night,
+    exportDay: utilityMeter?.utility.exportDay ?? row.export_day,
+    exportNight: utilityMeter?.utility.exportNight ?? row.export_night,
+    importDay: snapshot.importDay,
+    importNight: snapshot.importNight,
     consumedDay: row.consumption_day,
     consumedNight: row.consumption_night,
     consumedTotal: consumedTotal(snapshot),
     importTotal: importTotal(snapshot),
     balance: balance(snapshot),
     exportPrice: tariff.export,
+    exportPriceDay: tariff.export,
+    exportPriceNight: tariff.exportNight,
     exportVat: taxValue(tariff.exportTaxes, 'vat'),
     exportMilitary: taxValue(tariff.exportTaxes, 'mil'),
     importPriceDay: tariff.importDay,
@@ -277,17 +288,52 @@ function toDashboardRow({
     usdRate,
     roiUsd: usdRate ? rowSavings / usdRate : 0,
     isCommercial,
+    utilityMeter,
   }
 }
 
-function toSnapshot(row: MonthRecord): EnergySnapshot {
+function toSnapshot(row: MonthRecord, utilityMeter?: MonthRow['utilityMeter']): EnergySnapshot {
   return {
     production: row.production,
-    export: row.export,
-    importDay: row.import_day,
-    importNight: row.import_night,
+    exportDay: utilityMeter?.utility.exportDay ?? row.export_day,
+    exportNight: utilityMeter?.utility.exportNight ?? row.export_night,
+    importDay: utilityMeter?.utility.importDay ?? row.import_day,
+    importNight: utilityMeter?.utility.importNight ?? row.import_night,
     consumedDay: row.consumption_day,
     consumedNight: row.consumption_night,
+  }
+}
+
+function toUtilityMeter(row: MonthRecord): MonthRow['utilityMeter'] {
+  const values = [
+    row.utility_import_day,
+    row.utility_import_night,
+    row.utility_export_day,
+    row.utility_export_night,
+  ]
+
+  if (!values.every((value): value is number => typeof value === 'number' && Number.isFinite(value))) {
+    return undefined
+  }
+  const [
+    utilityImportDay,
+    utilityImportNight,
+    utilityExportDay,
+    utilityExportNight,
+  ] = values
+
+  return {
+    ha: {
+      importDay: row.import_day,
+      importNight: row.import_night,
+      export: row.export_day + row.export_night,
+    },
+    utility: {
+      importDay: utilityImportDay,
+      importNight: utilityImportNight,
+      exportDay: utilityExportDay,
+      exportNight: utilityExportNight,
+    },
   }
 }
 
@@ -296,9 +342,92 @@ function toTariff(row: TariffRecord | undefined, electricHeatingThresholdKwh?: n
     importDay: row?.price_import_day ?? 0,
     importNight: row?.price_import_night ?? 0,
     electricHeatingThresholdKwh,
-    export: row?.price_export ?? 0,
+    export: row?.price_export_day ?? 0,
+    exportNight: row?.price_export_night ?? 0,
     exportTaxes: row?.export_taxes ?? [],
   }
+}
+
+interface UtilityTargets {
+  readonly importDay: number
+  readonly importNight: number
+  readonly exportDay: number
+  readonly exportNight: number
+}
+
+function utilityTargetsByMonth(months: readonly MonthRecord[]) {
+  return new Map(
+    months
+      .map((month) => [month.date, utilityTargets(month)] as const)
+      .filter((entry): entry is readonly [string, UtilityTargets] => Boolean(entry[1])),
+  )
+}
+
+function utilityTargets(row: MonthRecord): UtilityTargets | undefined {
+  const values = [
+    row.utility_import_day,
+    row.utility_import_night,
+    row.utility_export_day,
+    row.utility_export_night,
+  ]
+  if (!values.every((value): value is number => typeof value === 'number' && Number.isFinite(value))) {
+    return undefined
+  }
+  const [importDay, importNight, exportDay, exportNight] = values
+  return { importDay, importNight, exportDay, exportNight }
+}
+
+function applyUtilityMeterToDays(days: readonly DayRecord[], targetsByMonth: ReadonlyMap<string, UtilityTargets>): readonly DayRecord[] {
+  if (!targetsByMonth.size) return days
+
+  const daysByMonth = new Map<string, readonly DayRecord[]>()
+  days.forEach((day) => {
+    const month = monthDate(day.date)
+    daysByMonth.set(month, [...daysByMonth.get(month) ?? [], day])
+  })
+
+  const adjusted = new Map<string, DayRecord>()
+  targetsByMonth.forEach((targets, month) => {
+    const monthDays = daysByMonth.get(month) ?? []
+    if (!monthDays.length) return
+
+    const importDay = distribute(monthDays.map((day) => day.import_day), targets.importDay)
+    const importNight = distribute(monthDays.map((day) => day.import_night), targets.importNight)
+    const exportDay = distribute(monthDays.map((day) => day.export_day), targets.exportDay)
+    const exportNight = distribute(monthDays.map((day) => day.export_night), targets.exportNight)
+
+    monthDays.forEach((day, index) => {
+      adjusted.set(day.date, {
+        ...day,
+        import_day: importDay[index],
+        import_night: importNight[index],
+        export_day: exportDay[index],
+        export_night: exportNight[index],
+      })
+    })
+  })
+
+  return days.map((day) => adjusted.get(day.date) ?? day)
+}
+
+function distribute(values: readonly number[], targetTotal: number): readonly number[] {
+  if (!values.length) return []
+
+  const currentTotal = values.reduce((sum, value) => sum + value, 0)
+  const delta = targetTotal - currentTotal
+  const evenDelta = delta / values.length
+  const even = values.map((value) => value + evenDelta)
+
+  if (even.every((value) => value >= 0)) {
+    return even
+  }
+
+  if (currentTotal <= 0) {
+    return values.map(() => targetTotal / values.length)
+  }
+
+  const factor = targetTotal / currentTotal
+  return values.map((value) => value * factor)
 }
 
 function electricHeatingSeasonThreshold(date: string, threshold?: number) {

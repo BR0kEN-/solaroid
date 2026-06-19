@@ -9,9 +9,14 @@ const DayNight = z.object({
   night: Number,
 })
 
+const WithTaxes = {
+  taxes: z.array(z.tuple([String, Number])),
+}
+
 const Period = z.object({
   production: Number,
-  export: Number,
+  // Old - number, new - day/night.
+  export: z.union([Number, DayNight]),
   consumption: DayNight,
   import: DayNight,
 })
@@ -26,10 +31,11 @@ export const Input = z.object({
   thisMonth: Period.extend({
     monetary: z.object({
       import: DayNight,
-      export: z.object({
-        value: Number,
-        taxes: z.array(z.tuple([String, Number])),
-      }),
+      // Old - number, new - day/night.
+      export: z.union([
+        z.object({ value: Number, ...WithTaxes }),
+        DayNight.extend(WithTaxes),
+      ]),
     }),
     utility: z.object({ import: DayNight, export: DayNight }).optional(),
   }),

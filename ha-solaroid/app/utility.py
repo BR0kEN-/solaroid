@@ -1,7 +1,5 @@
 import base64
 import json
-import ssl
-import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -36,17 +34,28 @@ class MonthReading:
 
 
 def should_check(today: date | None = None) -> bool:
+    # @todo
+    return True
     current = today or date.today()
     first_next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
     days_before_end = (first_next_month - current).days
     return current.day <= CHECK_DAYS_AFTER_MONTH_START or days_before_end <= CHECK_DAYS_BEFORE_MONTH_END
 
 
+def due(config: DtekConfig, now: float | None = None, path: Path = STATE_PATH) -> bool:
+    # @todo
+    return True
+    state = load_state(path)
+    checked_at = float(state.get("checkedAt", 0) or 0)
+    return (now or time.time()) - checked_at >= config.intervalMinutes * 60
+
+
 def load_state(path: Path = STATE_PATH) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with path.open(encoding="utf-8") as file:
-        return json.load(file)
+    if path.exists():
+        with path.open(encoding="utf-8") as file:
+            return json.load(file)
+
+    return {}
 
 
 def save_state(state: dict[str, Any], path: Path = STATE_PATH) -> None:
@@ -55,67 +64,50 @@ def save_state(state: dict[str, Any], path: Path = STATE_PATH) -> None:
         json.dump(state, file, ensure_ascii=False, indent=2)
 
 
-def due(config: DtekConfig, now: float | None = None, path: Path = STATE_PATH) -> bool:
-    if not config.enabled or not should_check():
-        return False
-    state = load_state(path)
-    checked_at = float(state.get("checkedAt", 0) or 0)
-    return (now or time.time()) - checked_at >= config.intervalMinutes * 60
-
-
-def curl_post_json(url: str, payload: dict[str, Any], token: str | None = None) -> dict[str, Any]:
-    command = [
-        "curl",
-        url,
-        "--silent",
-        "--show-error",
-        "--fail",
-        "--header",
-        "Content-Type: application/json",
-        "--data",
-        json.dumps(payload),
-    ]
-    if token is not None:
-        command.extend(["--header", f"Authorization: Basic {token}"])
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
-    return json.loads(result.stdout)
-
-
 def post_json(url: str, payload: dict[str, Any], token: str | None = None) -> dict[str, Any]:
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+    }
+
     if token is not None:
         headers["Authorization"] = f"Basic {token}"
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
-    except urllib.error.URLError as error:
-        if isinstance(error.reason, ssl.SSLCertVerificationError):
-            return curl_post_json(url, payload, token)
-        raise
+
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=45) as response:
+        return json.load(response)
 
 
 def fetch_history(config: DtekConfig) -> dict[str, Any]:
-    auth_token = base64.b64encode(f"{config.phone}:{config.password}".encode("utf-8")).decode("ascii")
-    auth_payload = {
-        "language": "en-US",
-        "phone": config.phone,
-        "platform": "HomeAssistant",
-        "site": config.department,
-        "userType": USER_TYPE,
-    }
-    auth_data = post_json(f"{config.url}/auth/{USER_TYPE}", auth_payload, auth_token)
-    token = auth_data.get("user", {}).get("token")
+    auth = post_json(
+        f"{config.url}/auth/{USER_TYPE}",
+        {
+            "site": config.department,
+            "phone": config.phone,
+            "userType": USER_TYPE,
+            "language": "en-US",
+            "platform": "MacIntel",
+        },
+        base64.b64encode(f"{config.phone}:{config.password}".encode("utf-8")).decode("ascii"),
+    )
+
+    token = auth.get("user", {}).get("token")
+
     if not token:
         raise RuntimeError("Utility auth response missing user.token")
+
     return post_json(
         f"{config.url}/get-common",
         {
-            "token": token,
-            "account": config.account_id,
-            "userType": USER_TYPE,
             "url": f"/{USER_TYPE}/cust_data_history",
+            "token": token,
+            "account": config.accountId,
+            "userType": USER_TYPE,
         },
     )
 
@@ -191,7 +183,7 @@ def is_complete_payload(payload: Any) -> bool:
 
 
 def get_utility_values(config: DtekConfig, path: Path = STATE_PATH) -> dict[str, Any] | None:
-    if not config.enabled or not should_check():
+    if not should_check():
         return None
     if not due(config, path=path):
         state = load_state(path)
