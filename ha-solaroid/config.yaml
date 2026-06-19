@@ -65,7 +65,7 @@ schema:
     intervalMinutes: "int(20,4320)"
     department: "list(dnem|kem|krem|oem)"
     accountId: "match(^12\\d{10}$)"
-    phone: "match(^+380\\d{9}$)"
+    phone: "match(^\\+380\\d{9}$)"
     password: "password"
   payload:
     today:
