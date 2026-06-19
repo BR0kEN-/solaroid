@@ -38,7 +38,6 @@ def load_config(path: Path = CONFIG_PATH) -> SolaroidConfig:
     with path.open(encoding="utf-8") as file:
         data = json_load(file)
 
-    return SolaroidConfig(
-        **data,
-        dtek=DtekConfig(**data.pop("dtek")),
-    )
+    data["dtek"] = DtekConfig(**data["dtek"])
+
+    return SolaroidConfig(**data)
