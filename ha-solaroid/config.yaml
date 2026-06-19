@@ -1,0 +1,93 @@
+---
+url: https://github.com/BR0kEN-/solaroid
+name: Solaroid
+slug: solaroid
+version: 0.1.0
+description: Push Home Assistant solar telemetry and utility meter readings to Solaroid backend.
+init: false
+arch:
+  - aarch64
+  - amd64
+homeassistant_api: true
+options:
+  api: "https://PROJECT.supabase.co"
+  token: ""
+  intervalMinutes: 20
+  dtek:
+    phone: "+380970000000"
+    password: ""
+    accountId: "120001234567"
+    department: dnem
+    intervalMinutes: 60
+  payload:
+    today:
+      production: sensor.inverter_today_production
+      export: sensor.inverter_today_energy_export
+      consumption:
+        day: sensor.deye_sun_20k_lp_electricity_consumed_today_day
+        night: sensor.deye_sun_20k_lp_electricity_consumed_today_night
+      import:
+        day: sensor.deye_sun_20k_lp_grid_import_today_day
+        night: sensor.deye_sun_20k_lp_grid_import_today_night
+      currency:
+        uahUsd: sensor.usd_selling_rate_dnipro
+        uahEur: sensor.eur_selling_rate_dnipro
+    thisMonth:
+      production: sensor.deye_sun_20k_lp_electricity_produced
+      export: sensor.grid_export
+      consumption:
+        day: sensor.electricity_consumed_day
+        night: sensor.electricity_consumed_night
+      import:
+        day: sensor.grid_import_day
+        night: sensor.grid_import_night
+      monetary:
+        import:
+          day: input_number.electricity_base_rate
+          night: sensor.electricity_night_rate
+        export:
+          value: input_number.electricity_export_rate
+          taxes:
+            - [vat, 18.0]
+            - [mil, 5.0]
+schema:
+  api: "url"
+  token: "password"
+  intervalMinutes: "int(5,60)"
+  dtek:
+    # Between 20 mins and 3 days (60*24*3).
+    intervalMinutes: "int(20,4320)"
+    department: "list(dnem|kem|krem|oem)"
+    accountId: "match(^12\\d{10}$)"
+    phone: "match(^+380\\d{9}$)"
+    password: "password"
+  payload:
+    today:
+      production: "str"
+      export: "str"
+      consumption:
+        day: "str"
+        night: "str"
+      import:
+        day: "str"
+        night: "str"
+      currency:
+        uahUsd: "str"
+        uahEur: "str"
+    thisMonth:
+      production: "str"
+      export: "str"
+      consumption:
+        day: "str"
+        night: "str"
+      import:
+        day: "str"
+        night: "str"
+      monetary:
+        import:
+          day: "str"
+          night: "str"
+        export:
+          value: "str"
+          taxes:
+            - ["list(vat|mil)", "float(0.1,)"]

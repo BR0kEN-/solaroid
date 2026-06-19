@@ -29,6 +29,16 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
       import_night: input.thisMonth.import.night,
       consumption_day: input.thisMonth.consumption.day,
       consumption_night: input.thisMonth.consumption.night,
+      ...(
+        input.thisMonth.utility
+          ? {
+            utility_import_day: input.thisMonth.utility.import.day,
+            utility_import_night: input.thisMonth.utility.import.night,
+            utility_export_day: input.thisMonth.utility.export.day,
+            utility_export_night: input.thisMonth.utility.export.night,
+          }
+          : {}
+      ),
     },
     tariff: {
       plant_id: token.plant_id,

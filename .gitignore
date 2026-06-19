@@ -4,6 +4,16 @@
 !.git*
 !/.editorconfig
 !/README.md
+!/repository.yaml
+
+!/ha-solaroid/
+/ha-solaroid/*
+!/ha-solaroid/config.yaml
+!/ha-solaroid/Dockerfile
+!/ha-solaroid/run.sh
+!/ha-solaroid/app/
+!/ha-solaroid/app/*.py
+/ha-solaroid/app/__pycache__/
 
 !/dashboard/
 /dashboard/*

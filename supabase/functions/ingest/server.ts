@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ForbiddenError, MethodNotAllowedError, UnauthorizedError } from './errors.ts'
+import { HttpError, MethodNotAllowedError, UnauthorizedError } from './errors.ts'
 import { CORS_HEADERS } from './config.ts'
 import { SupabaseClient } from './client.ts'
 
@@ -33,12 +33,8 @@ class Responder {
     let status = 400
     let data
 
-    if (error instanceof UnauthorizedError) {
-      status = 401
-    } else if (error instanceof ForbiddenError) {
-      status = 403
-    } else if (error instanceof MethodNotAllowedError) {
-      status = 405
+    if (error instanceof HttpError) {
+      status = error.code
     } else if (error instanceof z.ZodError) {
       status = 422
       data = {
