@@ -52,7 +52,7 @@ describe('Supabase data mapping', () => {
     })
 
     expect(loaded.rows[0].usdRate).toBe(43)
-    expect(loaded.rows[0].isCommercial).toBe(false)
+    expect(loaded.rows[0].isCommercial).toBe(true)
     expect(loaded.rows[0].consumedTotal).toBe(100)
     expect(loaded.rows[0].importTotal).toBe(30)
     expect(loaded.rows[0].balance).toBe(-10)
@@ -154,6 +154,40 @@ describe('Supabase data mapping', () => {
     })
 
     expect(loaded.rows.map((row) => row.isCommercial)).toEqual([false, true])
+  })
+
+  it('uses daily payment for the month where commercial rules start mid-month', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [
+        {
+          ...month('2026-01-01'),
+          export_day: 40,
+          import_day: 20,
+          import_night: 0,
+        },
+      ],
+      days: [
+        {
+          ...day('2026-01-14', 40),
+          export_day: 20,
+          import_day: 10,
+          import_night: 0,
+        },
+        {
+          ...day('2026-01-15', 40),
+          export_day: 20,
+          import_day: 10,
+          import_night: 0,
+        },
+      ],
+      tariffs: [tariff],
+    })
+
+    expect(loaded.dailyRows.map((row) => row.electricityPayment)).toEqual([-40, 45])
+    expect(loaded.rows[0].isCommercial).toBe(true)
+    expect(loaded.rows[0].electricityPayment).toBe(5)
+    expect(loaded.rows[0].electricitySavings).toBe(725)
   })
 
   it('maps electric heating threshold and discounted import rates into payments', () => {

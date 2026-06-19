@@ -124,8 +124,16 @@ export function toLoadedPlant({
   const commercialDate = parseDate(plant.commercial_date)
   const electricHeatingThresholdKwh = plant.electric_heating_import_threshold_kwh ?? undefined
   const adjustedDays = applyUtilityMeterToDays(days, utilityTargetsByMonth(months))
-  const rows = months.map((month) => toMonthRow(month, tariffByMonth.get(month.date), monthUsdRate(month, monthlyRates, fallbackUsdRate), commercialDate, electricHeatingThresholdKwh))
   const dailyRows = adjustedDays.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialDate))
+  const dailyRowsByMonth = groupDailyRowsByMonth(dailyRows)
+  const rows = months.map((month) => toMonthRow(
+    month,
+    tariffByMonth.get(month.date),
+    monthUsdRate(month, monthlyRates, fallbackUsdRate),
+    commercialDate,
+    electricHeatingThresholdKwh,
+    dailyRowsByMonth.get(month.date),
+  ))
 
   return {
     plantId: plant.id,
@@ -215,7 +223,14 @@ function queryParam(name: string) {
   return new URLSearchParams(window.location.search).get(name) ?? ''
 }
 
-function toMonthRow(row: MonthRecord, tariffRecord: TariffRecord | undefined, usdRate: number, commercialDate: Date, electricHeatingThresholdKwh?: number): MonthRow {
+function toMonthRow(
+  row: MonthRecord,
+  tariffRecord: TariffRecord | undefined,
+  usdRate: number,
+  commercialDate: Date,
+  electricHeatingThresholdKwh?: number,
+  monthDailyRows?: readonly MonthRow[],
+): MonthRow {
   const tariff = toTariff(tariffRecord, electricHeatingSeasonThreshold(row.date, electricHeatingThresholdKwh))
   return toDashboardRow({
     row,
@@ -224,6 +239,7 @@ function toMonthRow(row: MonthRecord, tariffRecord: TariffRecord | undefined, us
     date: parseDate(row.date),
     month: displayMonth(row.date),
     commercialDate,
+    monthDailyRows,
   })
 }
 
@@ -246,6 +262,7 @@ function toDashboardRow({
   date,
   month,
   commercialDate,
+  monthDailyRows,
 }: {
   readonly row: MonthRecord
   readonly tariff: Tariff
@@ -253,13 +270,17 @@ function toDashboardRow({
   readonly date: Date
   readonly month: string
   readonly commercialDate: Date
+  readonly monthDailyRows?: readonly MonthRow[]
 }): MonthRow {
   const utilityMeter = toUtilityMeter(row)
   const snapshot = toSnapshot(row, utilityMeter)
-  const isCommercial = date >= commercialDate
+  const isCommercial = monthDailyRows?.some((dailyRow) => dailyRow.isCommercial) ?? date >= commercialDate
+  const transitionTotals = commercialTransitionTotals(row.date, commercialDate, monthDailyRows)
   const rowConsumedPrice = consumedPrice(snapshot, tariff)
   const rowPayment = payment(snapshot, tariff, isCommercial)
   const rowSavings = savings(snapshot, tariff, isCommercial)
+  const electricityPayment = transitionTotals?.electricityPayment ?? rowPayment
+  const electricitySavings = transitionTotals?.electricitySavings ?? rowSavings
 
   return {
     month,
@@ -283,13 +304,36 @@ function toDashboardRow({
     importPriceNight: tariff.importNight,
     electricHeatingThresholdKwh: tariff.electricHeatingThresholdKwh,
     consumedPayment: rowConsumedPrice,
-    electricityPayment: rowPayment,
-    electricitySavings: rowSavings,
+    electricityPayment,
+    electricitySavings,
     usdRate,
-    roiUsd: usdRate ? rowSavings / usdRate : 0,
+    roiUsd: usdRate ? electricitySavings / usdRate : 0,
     isCommercial,
     utilityMeter,
   }
+}
+
+function commercialTransitionTotals(month: string, commercialDate: Date, monthDailyRows?: readonly MonthRow[]) {
+  if (!monthDailyRows?.length) return undefined
+  if (month !== dateMonth(commercialDate)) return undefined
+  if (parseDate(month) >= commercialDate) return undefined
+
+  return monthDailyRows.reduce(
+    (sum, row) => ({
+      electricityPayment: sum.electricityPayment + row.electricityPayment,
+      electricitySavings: sum.electricitySavings + row.electricitySavings,
+    }),
+    { electricityPayment: 0, electricitySavings: 0 },
+  )
+}
+
+function groupDailyRowsByMonth(rows: readonly MonthRow[]) {
+  const grouped = new Map<string, MonthRow[]>()
+  rows.forEach((row) => {
+    const month = dateMonth(row.date)
+    grouped.set(month, [...grouped.get(month) ?? [], row])
+  })
+  return grouped
 }
 
 function toSnapshot(row: MonthRecord, utilityMeter?: MonthRow['utilityMeter']): EnergySnapshot {
@@ -459,6 +503,11 @@ function monthUsdRate(row: MonthRecord, dailyRates: ReadonlyMap<string, number>,
 
 function monthDate(date: string) {
   return `${date.slice(0, 7)}-01`
+}
+
+function dateMonth(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-01`
 }
 
 function displayMonth(date: string) {
