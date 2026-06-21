@@ -12,13 +12,14 @@ class Responder {
     this.methods = methods.join(', ')
   }
 
-  text(data: string, status = 200) {
+  text(data: string, status = 200, contentType?: string) {
     return new Response(
       data,
       {
         status,
         headers: {
           ...CORS_HEADERS,
+          ...(contentType ? { 'Content-Type': contentType } : {}),
           'Access-Control-Allow-Methods': this.methods,
         },
       },
@@ -26,7 +27,7 @@ class Responder {
   }
 
   json(body: Solaroid.Supabase.Json, status = 200) {
-    return this.text(JSON.stringify(body), status)
+    return this.text(JSON.stringify(body), status, 'application/json')
   }
 
   error(error: unknown) {

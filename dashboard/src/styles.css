@@ -1765,11 +1765,16 @@ h2 {
 .info-modal-body {
   margin-bottom: 0;
   color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 500;
   line-height: 1.5;
 }
 
 .info-modal-body p {
-  margin-bottom: 0;
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .info-modal-actions {
@@ -1791,8 +1796,12 @@ h2 {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 0 0;
-  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.info-list div:last-child {
+  border-bottom: 0;
 }
 
 .info-list dt,
@@ -1802,17 +1811,23 @@ h2 {
 
 .info-list dt {
   color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .info-list dd {
   color: var(--text);
+  font-size: 0.92rem;
   font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 
 .pv-fields {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .pv-fields-head {
@@ -1820,22 +1835,31 @@ h2 {
   justify-content: space-between;
   gap: 16px;
   color: var(--muted);
-  font-weight: 700;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .pv-fields-head strong {
   color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .pv-field {
   display: grid;
-  gap: 6px;
+  gap: 4px;
+  padding: 9px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
 }
 
 .pv-field h3 {
   margin: 0;
-  color: var(--text);
-  font-size: 0.9rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .pv-spec-list {
@@ -1848,10 +1872,21 @@ h2 {
   align-items: baseline;
   gap: 14px;
   padding: 5px 0;
-  line-height: 1.25;
+  line-height: 1.35;
+}
+
+.pv-spec-list dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .pv-spec-list dd {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
   text-align: left;
   overflow-wrap: anywhere;
 }
@@ -1919,13 +1954,17 @@ h2 {
 }
 
 .split-info dt {
+  color: var(--muted);
+  font-size: 0.78rem;
   font-weight: 600;
+  line-height: 1.35;
 }
 
 .split-info dd {
   margin: 0;
   color: var(--text);
-  font-weight: 500;
+  font-weight: 700;
+  line-height: 1.45;
   overflow-wrap: anywhere;
   text-align: right;
 }
@@ -1947,19 +1986,123 @@ h2 {
   border-bottom: 0;
 }
 
-.math-info dt {
+.math-info > div > dt {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
   text-transform: uppercase;
 }
 
-.math-info dd {
+.math-info > div > dd {
   margin: 0;
   color: var(--text);
   font-weight: 500;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.math-note-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.math-note-stack span + span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.price-tax-block {
+  display: grid;
+  gap: 8px;
+}
+
+.price-tax-block h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.price-tax-block dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.price-tax-block div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.price-tax-block dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.price-tax-block dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.price-comparison-table {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: transparent;
+  font-size: 0.92rem;
+}
+
+.price-comparison-table th,
+.price-comparison-table td {
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+  white-space: normal;
+}
+
+.price-comparison-table thead th {
+  position: static;
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.price-comparison-table thead th:first-child,
+.price-comparison-table tbody th:first-child,
+.price-comparison-table tbody tr:hover {
+  background: transparent;
+}
+
+.price-comparison-table tbody th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.price-comparison-table tbody td {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.price-comparison-table tr:last-child th,
+.price-comparison-table tr:last-child td {
+  border-bottom: 0;
 }
 
 .stacked-values {
@@ -1976,7 +2119,16 @@ h2 {
 
 .stacked-values b {
   color: var(--muted);
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.stacked-values > span > span {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .formula-result {

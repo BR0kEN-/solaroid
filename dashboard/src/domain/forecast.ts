@@ -17,20 +17,24 @@ export function calculateForecast({
   currency,
   today = new Date(),
   projectMonthValue,
+  projectProductionValue,
 }: {
   readonly rows: readonly MonthRow[]
   readonly currency: Currency
   readonly today?: Date
   readonly projectMonthValue: (value: number, date: Date) => number
+  readonly projectProductionValue?: (value: number, date: Date) => number
 }): ForecastResult | null {
   const currentMonthRow = rows.find((row) => sameMonth(row.date, today)) ?? rows.at(-1)
   if (!currentMonthRow) return null
 
   const currentIndex = rows.findIndex((row) => sameMonth(row.date, currentMonthRow.date))
   const previousMonthRow = currentIndex > 0 ? rows[currentIndex - 1] : undefined
-  const production = projectMonthValue(currentMonthRow.production, currentMonthRow.date)
-  const roi = projectMonthValue(rowRoiMoney(currentMonthRow, currency), currentMonthRow.date)
-  const income = projectMonthValue(moneyFromUah(currentMonthRow.electricityPayment, currency, currentMonthRow.usdRate), currentMonthRow.date)
+  const production = (projectProductionValue ?? projectMonthValue)(currentMonthRow.production, currentMonthRow.date)
+  const productionScale = currentMonthRow.production > 0 ? production / currentMonthRow.production : undefined
+  const projectMoneyValue = (value: number) => productionScale ? value * productionScale : projectMonthValue(value, currentMonthRow.date)
+  const roi = projectMoneyValue(rowRoiMoney(currentMonthRow, currency))
+  const income = projectMoneyValue(moneyFromUah(currentMonthRow.electricityPayment, currency, currentMonthRow.usdRate))
   const previousRoi = previousMonthRow ? rowRoiMoney(previousMonthRow, currency) : 0
   const previousIncome = previousMonthRow ? moneyFromUah(previousMonthRow.electricityPayment, currency, previousMonthRow.usdRate) : 0
 

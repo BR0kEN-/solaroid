@@ -81,6 +81,23 @@ describe('forecast calculations', () => {
     expect(forecast?.incomeDelta).toBe(0)
   })
 
+  it('uses production projection scale for ROI and income when available', () => {
+    const forecast = calculateForecast({
+      rows: [
+        month({ date: '2026-05-01', production: 100, electricitySavings: 1_000, electricityPayment: 2_000, usdRate: 40 }),
+        month({ date: '2026-06-01', production: 60, electricitySavings: 660, electricityPayment: 1_100, usdRate: 44 }),
+      ],
+      currency: 'UAH',
+      today: new Date('2026-06-10T00:00:00'),
+      projectMonthValue: (value) => value * 2,
+      projectProductionValue: () => 180,
+    })
+
+    expect(forecast?.production).toBe(180)
+    expect(forecast?.roi).toBe(1980)
+    expect(forecast?.income).toBe(3300)
+  })
+
   it('returns null without rows', () => {
     expect(calculateForecast({ rows: [], currency: 'UAH', projectMonthValue: (value) => value })).toBeNull()
   })

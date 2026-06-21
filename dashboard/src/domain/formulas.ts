@@ -31,6 +31,20 @@ export function netExportPrice(tariff: Tariff) {
   return tariff.export * (1 - exportTaxRate(tariff))
 }
 
+export function netExportNightPrice(tariff: Tariff) {
+  return tariff.exportNight * (1 - exportTaxRate(tariff))
+}
+
+export function exportPayout(row: EnergySnapshot, tariff: Tariff) {
+  const surplus = Math.max(0, -commercialBalance(row, true))
+  const totalExport = exportTotal(row)
+  if (surplus <= 0 || totalExport <= 0) return 0
+
+  const paidDay = surplus * (row.exportDay / totalExport)
+  const paidNight = surplus - paidDay
+  return paidDay * netExportPrice(tariff) + paidNight * netExportNightPrice(tariff)
+}
+
 function hasElectricHeatingTier(tariff: Tariff) {
   return Boolean(
     tariff.electricHeatingThresholdKwh &&
@@ -140,7 +154,7 @@ export function payment(row: EnergySnapshot, tariff: Tariff, isCommercial = true
   const currentBalance = commercialBalance(row, isCommercial)
 
   if (currentBalance < 0) {
-    return Math.abs(currentBalance) * netExportPrice(tariff)
+    return exportPayout(row, tariff)
   }
 
   const currentImportTotal = importTotal(row)
