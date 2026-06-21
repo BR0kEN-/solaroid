@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, time as datetime_time, timedelta
 from typing import Any, Callable
 
 from config import load_config, SolaroidConfig
@@ -12,6 +13,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 DTEK_FAILURE_NOTIFICATION_ID = "solaroid_dtek_fetch_failed"
 DTEK_FAILURE_TITLE = "Solaroid: DTEK fetch failed"
+INGEST_INTERVAL_SECONDS = 20 * 60
+INGEST_ANCHOR_HOUR = 23
+INGEST_ANCHOR_MINUTE = 59
+INGEST_ANCHOR_SECOND = 50
+INGEST_SLOTS_PER_DAY = 24 * 60 * 60 // INGEST_INTERVAL_SECONDS
 
 
 def dtek_failure_message(error: DtekFetchError) -> str:
@@ -55,6 +61,29 @@ def dismiss_dtek_failure_notification(service_call: Callable[[str, dict[str, Any
         logging.warning("DTEK failure notification dismiss failed")
 
 
+def ingest_anchor(day: datetime) -> datetime:
+    return datetime.combine(
+        day.date(),
+        datetime_time(INGEST_ANCHOR_HOUR, INGEST_ANCHOR_MINUTE, INGEST_ANCHOR_SECOND),
+    )
+
+
+def daily_ingest_slots(day: datetime) -> list[datetime]:
+    anchor = ingest_anchor(day)
+    return [
+        anchor - timedelta(seconds=INGEST_INTERVAL_SECONDS * index)
+        for index in range(INGEST_SLOTS_PER_DAY - 1, -1, -1)
+    ]
+
+
+def next_ingest_slot(now: datetime) -> datetime:
+    for slot in daily_ingest_slots(now):
+        if slot >= now:
+            return slot
+
+    return daily_ingest_slots(now + timedelta(days=1))[0]
+
+
 def run_once(
     dtek: Dtek,
     config: SolaroidConfig,
@@ -80,16 +109,20 @@ def run_once(
 def main() -> None:
     config = load_config()
     dtek = Dtek(config.dtek)
-    sleep_seconds = config.intervalMinutes * 60
 
     while True:
+        slot = next_ingest_slot(datetime.now())
+        sleep_seconds = max(0, (slot - datetime.now()).total_seconds())
+        logging.info("Next ingest shot planned at %s", slot.strftime("%Y-%m-%d %H:%M:%S"))
+        time.sleep(sleep_seconds)
+        shot_at = datetime.now()
+        logging.info("Ingest shot at %s (drift %.3fs)", shot_at.strftime("%Y-%m-%d %H:%M:%S"), (shot_at - slot).total_seconds())
+
         # noinspection PyBroadException
         try:
             run_once(dtek, config)
         except:
             logging.exception("Sync failed")
-
-        time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":

@@ -534,6 +534,7 @@ button {
 }
 
 .topbar {
+  position: relative;
   z-index: 4;
   justify-content: flex-end;
   padding: 8px 0 12px;
@@ -563,11 +564,11 @@ h2 {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+  overflow: visible;
   padding-bottom: 2px;
 }
 
@@ -672,7 +673,7 @@ h2 {
   background: transparent;
   border: 0;
   border-radius: 6px;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   transition:
     background-color 160ms ease,
     color 160ms ease,
@@ -798,16 +799,22 @@ h2 {
   width: 22px;
   height: 22px;
   flex: 0 0 auto;
+  padding: 0;
   color: var(--muted);
   background: transparent;
   border: 0;
   border-radius: 6px;
+  line-height: 1;
 }
 
 .table-info-button:hover,
 .table-info-button:focus-visible {
   color: var(--text);
   background: var(--control);
+}
+
+.table-info-button svg {
+  display: block;
 }
 
 .heading-with-info {
@@ -842,7 +849,7 @@ h2 {
 }
 
 .kpi-card span {
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -852,7 +859,7 @@ h2 {
   position: relative;
   z-index: 1;
   overflow-wrap: anywhere;
-  font-size: 1.25rem;
+  font-size: 1.16rem;
   line-height: 1.08;
 }
 
@@ -1294,6 +1301,57 @@ h2 {
   background: transparent;
   border: 0;
   outline: 0;
+}
+
+.range-tools {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-tools .segmented {
+  grid-template-columns: repeat(2, minmax(62px, auto));
+}
+
+.month-range-controls {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  gap: 10px;
+  width: min(280px, calc(100vw - 28px));
+  padding: 10px;
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent),
+    var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--modal-shadow);
+}
+
+.month-field {
+  display: grid;
+  gap: 5px;
+}
+
+.month-field span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.month-field input {
+  height: 38px;
+  width: 100%;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 18%);
+  border-radius: 8px;
+  color-scheme: light dark;
 }
 
 .progress-track {
@@ -1990,7 +2048,6 @@ h2 {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
-  text-transform: uppercase;
 }
 
 .math-info > div > dd {
@@ -2098,6 +2155,18 @@ h2 {
   font-weight: 700;
   line-height: 1.45;
   text-align: right;
+}
+
+.price-comparison-table tbody td.positive {
+  color: var(--green);
+}
+
+.price-comparison-table tbody td.negative {
+  color: var(--rose);
+}
+
+.price-comparison-table tbody td.muted {
+  color: var(--muted);
 }
 
 .price-comparison-table tr:last-child th,
