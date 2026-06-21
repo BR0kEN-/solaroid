@@ -32,6 +32,11 @@ function month(electricitySavings: number, date = '2026-01-01', usdRate = 50): M
   }
 }
 
+function dateKey(date: Date | null | undefined) {
+  if (!date) return ''
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 describe('date durations', () => {
   it('calculates full months and days between dates', () => {
     expect(fullDurationBetween(new Date('2026-01-15T00:00:00'), new Date('2027-03-20T00:00:00'))).toEqual({ months: 14, days: 5 })
@@ -258,6 +263,6 @@ describe('payback', () => {
 
     expect(result.recovered).toBeCloseTo(12_638.89)
     expect(result.roiPhase).toBe('post-commercial')
-    expect(result.roiDate?.toISOString().slice(0, 10)).toBe('2030-01-19')
+    expect(dateKey(result.roiDate)).toBe('2030-01-20')
   })
 })
