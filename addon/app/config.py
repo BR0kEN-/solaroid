@@ -31,7 +31,6 @@ class NotificationsConfig:
 class SolaroidConfig:
     api: str
     token: str
-    intervalMinutes: int
     payload: dict[str, Any]
     dtek: DtekConfig
     notifications: NotificationsConfig

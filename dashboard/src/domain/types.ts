@@ -32,7 +32,8 @@ export interface UtilityMeterReconciliation {
   readonly ha: {
     readonly importDay: number
     readonly importNight: number
-    readonly export: number
+    readonly exportDay: number
+    readonly exportNight: number
   }
   readonly utility: {
     readonly importDay: number

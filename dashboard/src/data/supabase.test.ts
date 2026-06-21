@@ -270,7 +270,8 @@ describe('Supabase data mapping', () => {
       ha: {
         importDay: 20,
         importNight: 10,
-        export: 40,
+        exportDay: 40,
+        exportNight: 0,
       },
       utility: {
         importDay: 30,

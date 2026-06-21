@@ -24,7 +24,7 @@ import { exportPayout as splitExportPayout, exportTotal, importCostBreakdown, im
 import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
 import "./styles.css";
 
-type RangeKey = "all" | "1m" | "3m" | "6m" | "12m";
+type RangeKey = "all" | "range";
 type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly";
 type Lang = "en" | "uk";
@@ -193,6 +193,7 @@ const i18n = {
     solarCoverage: "solar coverage",
     net: "Net",
     netPayment: "Net payment",
+    totalNetPayment: "Total net payment",
     electricityCostWithoutSolar: "Electricity cost without solar",
     formulaInputs: "Inputs",
     importPrices: "Import prices",
@@ -221,7 +222,7 @@ const i18n = {
     launchDate: "Launch date",
     commercialDate: "Commercial date",
     commercialEndDate: "Commercial period end",
-    plantWorksInfo: "Plant works is counted from the launch date. Commercial export rules start from the commercial date.",
+    plantWorksInfo: "Plant age is counted from the launch date. Paid commercial export runs from the commercial date until the commercial period end. After that, net billing is expected: export money becomes a virtual balance, and kWh prices will vary by hour instead of using one fixed payout rate.",
     investmentRecovered: "investment recovered",
     recoverableByCommercialEnd: "Possible recovery by commercial period end",
     pvgisAdjustedForecast: "PVGIS-adjusted forecast",
@@ -263,11 +264,14 @@ const i18n = {
     utilityMeter: "Utility meter",
     dashboardValues: "Dashboard values",
     meterValues: "Meter values",
-    usedForCalculations: "Meter values are used for monthly calculations when all four meter values are available. Daily rows stay unchanged.",
+    usedForCalculations: "Meter values are distributed across existing daily rows before monthly calculations. The adjustment is even while no day goes below zero; otherwise it is proportional to the original daily values.",
     electricityPayment: "Electricity payment",
     payment: "Payment",
     table: "Data table",
     filterMonth: "Filter month",
+    range: "Range",
+    from: "From",
+    to: "To",
     allMonths: "All months",
     allYears: "All years",
     month: "Month",
@@ -356,6 +360,7 @@ const i18n = {
     solarCoverage: "покриття сонцем",
     net: "Баланс",
     netPayment: "Баланс оплати",
+    totalNetPayment: "Загальний баланс оплати",
     electricityCostWithoutSolar: "Вартість електрики без сонця",
     formulaInputs: "Вхідні дані",
     importPrices: "Ціни імпорту",
@@ -384,7 +389,7 @@ const i18n = {
     launchDate: "Дата запуску",
     commercialDate: "Комерційна дата",
     commercialEndDate: "Кінець комерційного періоду",
-    plantWorksInfo: "Час роботи станції рахується від дати запуску. Правила комерційного експорту починають діяти з комерційної дати.",
+    plantWorksInfo: "Вік станції рахується від дати запуску. Оплачений комерційний експорт діє з комерційної дати до кінця комерційного періоду. Після цього очікується net billing: гроші за експорт стають віртуальним балансом, а ціна кВт·г змінюватиметься щогодини замість фіксованої ставки виплати.",
     investmentRecovered: "інвестиції повернуто",
     recoverableByCommercialEnd: "Можливе повернення до кінця комерційного періоду",
     pvgisAdjustedForecast: "прогноз з урахуванням PVGIS",
@@ -426,11 +431,14 @@ const i18n = {
     utilityMeter: "Покази лічильника",
     dashboardValues: "Значення дашборда",
     meterValues: "Значення лічильника",
-    usedForCalculations: "Покази лічильника використовуються для місячних розрахунків, коли доступні всі чотири значення. Денна таблиця не змінюється.",
+    usedForCalculations: "Покази лічильника розподіляються по наявних денних рядках перед місячними розрахунками. Корекція рівномірна, доки жоден день не йде нижче нуля; інакше вона пропорційна початковим денним значенням.",
     electricityPayment: "Оплата електрики",
     payment: "Оплата",
     table: "Таблиця даних",
     filterMonth: "Фільтр місяця",
+    range: "Діапазон",
+    from: "З",
+    to: "До",
     allMonths: "Усі місяці",
     allYears: "Усі роки",
     month: "Місяць",
@@ -988,21 +996,12 @@ function netExportNightPrice(row: MonthRow) {
 function filteredMonthlyRows(
   sourceRows: readonly MonthRow[],
   range: RangeKey,
-  monthFilter: string,
-  yearFilter: string,
+  fromMonth: string,
+  toMonth: string,
 ) {
-  const rangeMonths: Record<Exclude<RangeKey, "all">, number> = {
-    "1m": 1,
-    "3m": 3,
-    "6m": 6,
-    "12m": 12,
-  };
-  const base = range === "all" ? sourceRows : sourceRows.slice(-rangeMonths[range]);
-  return base.filter((row) => {
-    const monthMatches = monthFilter === "all" || String(row.date.getMonth() + 1) === monthFilter;
-    const yearMatches = yearFilter === "all" || String(row.date.getFullYear()) === yearFilter;
-    return monthMatches && yearMatches;
-  });
+  if (range === "all" || !fromMonth || !toMonth) return sourceRows;
+  const [from, to] = fromMonth <= toMonth ? [fromMonth, toMonth] : [toMonth, fromMonth];
+  return sourceRows.filter((row) => monthKey(row.date) >= from && monthKey(row.date) <= to);
 }
 
 function firstDateKey(rows: readonly MonthRow[]) {
@@ -1085,8 +1084,8 @@ function App({
   const dataState = useDashboardData(initialData);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [range, setRange] = useState<RangeKey>("all");
-  const [monthFilter, setMonthFilter] = useState("all");
-  const [yearFilter, setYearFilter] = useState("all");
+  const [rangeFromMonth, setRangeFromMonth] = useState("");
+  const [rangeToMonth, setRangeToMonth] = useState("");
   const [currency, setCurrency] = useState<Currency>("UAH");
   const [firstDay, setFirstDay] = useState("");
   const [secondDay, setSecondDay] = useState("");
@@ -1107,16 +1106,9 @@ function App({
     onLangChange?.(nextLang);
   };
   const t = i18n[lang];
-  const monthNames = useMemo(
-    () =>
-      Array.from({ length: 12 }, (_, index) =>
-        new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", { month: "short" }).format(new Date(2026, index, 1)),
-      ),
-    [lang],
-  );
-  const yearOptions = useMemo(
-    () => [...new Set(dataState.rows.map((row) => String(row.date.getFullYear())))].sort((a, b) => Number(b) - Number(a)),
-    [dataState.rows],
+  const monthOptions = useMemo(
+    () => dataState.rows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)] as const),
+    [dataState.rows, lang],
   );
 
   const dailyRows = useMemo(() => dataState.dailyRows.slice(-30), [dataState.dailyRows]);
@@ -1133,6 +1125,14 @@ function App({
     const latest = dataState.rows.at(-1);
     if (!plantComparisonYear && latest) setPlantComparisonYear(String(latest.date.getFullYear()));
   }, [dataState.rows, plantComparisonYear]);
+
+  useEffect(() => {
+    if (!monthOptions.length) return;
+    const firstMonth = monthOptions[0][0];
+    const latestMonth = monthOptions.at(-1)?.[0] ?? firstMonth;
+    if (!rangeFromMonth || !monthOptions.some(([value]) => value === rangeFromMonth)) setRangeFromMonth(firstMonth);
+    if (!rangeToMonth || !monthOptions.some(([value]) => value === rangeToMonth)) setRangeToMonth(latestMonth);
+  }, [monthOptions, rangeFromMonth, rangeToMonth]);
 
   useEffect(() => {
     if (viewMode !== "daily") setDailyCompareOpen(false);
@@ -1205,8 +1205,8 @@ function App({
   }, [initialLang]);
 
   const rows = useMemo(() => {
-    return filteredMonthlyRows(dataState.rows, range, monthFilter, yearFilter);
-  }, [dataState.rows, monthFilter, range, yearFilter]);
+    return filteredMonthlyRows(dataState.rows, range, rangeFromMonth, rangeToMonth);
+  }, [dataState.rows, range, rangeFromMonth, rangeToMonth]);
   const productionProjection = dataState.projection ?? null;
 
   const plantComparisonMonthOptions = useMemo(
@@ -1682,6 +1682,11 @@ function App({
           viewOptions={viewOptions}
           range={range}
           setRange={setRange}
+          monthOptions={monthOptions}
+          rangeFromMonth={rangeFromMonth}
+          rangeToMonth={rangeToMonth}
+          setRangeFromMonth={setRangeFromMonth}
+          setRangeToMonth={setRangeToMonth}
           isDailyCompareOpen={isDailyCompareOpen}
           setDailyCompareOpen={setDailyCompareOpen}
           investmentValue={showPlaceholders ? (
@@ -1811,11 +1816,11 @@ function App({
             />
             <KpiCard
               icon={<WalletCards size={20} />}
-              label={t.netPayment}
+              label={t.totalNetPayment}
               value={formatDisplayMoney(totals.paymentsDisplay, currency, lang)}
               detail={`${t.savings} ${formatDisplayMoney(totals.savingsDisplay, currency, lang)}`}
               tone={totals.payments >= 0 ? "green" : "rose"}
-              infoLabel={t.netPayment}
+              infoLabel={t.totalNetPayment}
               onInfo={() => setInfoModal("netPayment")}
             />
             <KpiCard
@@ -2019,28 +2024,6 @@ function App({
           <div className="section-heading">
             <div>
               <h2>{t.table}</h2>
-            </div>
-            <div className="filter-controls" aria-label={t.filterMonth}>
-              <label className="filter-box">
-                <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)}>
-                  <option value="all">{t.allMonths}</option>
-                  {monthNames.map((label, index) => (
-                    <option key={label} value={String(index + 1)}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="filter-box">
-                <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)}>
-                  <option value="all">{t.allYears}</option>
-                  {yearOptions.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
           </div>
           {showPlaceholders ? (
@@ -2422,6 +2405,11 @@ interface DashboardToolbarProps {
   readonly viewOptions: readonly ViewMode[];
   readonly range: RangeKey;
   readonly setRange?: (range: RangeKey) => void;
+  readonly monthOptions?: readonly (readonly [string, string])[];
+  readonly rangeFromMonth?: string;
+  readonly rangeToMonth?: string;
+  readonly setRangeFromMonth?: (month: string) => void;
+  readonly setRangeToMonth?: (month: string) => void;
   readonly isDailyCompareOpen: boolean;
   readonly setDailyCompareOpen?: (isOpen: boolean) => void;
   readonly investmentValue: React.ReactNode;
@@ -2440,6 +2428,11 @@ function DashboardToolbar({
   viewOptions,
   range,
   setRange,
+  monthOptions = [],
+  rangeFromMonth = "",
+  rangeToMonth = "",
+  setRangeFromMonth,
+  setRangeToMonth,
   isDailyCompareOpen,
   setDailyCompareOpen,
   investmentValue,
@@ -2448,6 +2441,28 @@ function DashboardToolbar({
   refresh,
   isLoading,
 }: DashboardToolbarProps) {
+  const [isRangePickerOpen, setRangePickerOpen] = useState(false);
+  const rangeToolsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isRangePickerOpen) return undefined;
+
+    const closeOnOutside = (event: PointerEvent) => {
+      if (rangeToolsRef.current?.contains(event.target as Node)) return;
+      setRangePickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRangePickerOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isRangePickerOpen]);
+
   return (
     <header className="topbar">
       <div className="toolbar">
@@ -2473,17 +2488,57 @@ function DashboardToolbar({
           ))}
         </div>
         {viewMode === "monthly" ? (
-          <div className="segmented" aria-label="Date range">
-            {(["all", "12m", "6m", "3m", "1m"] as RangeKey[]).map((item) => (
+          <div className="range-tools" aria-label="Date range" ref={rangeToolsRef}>
+            <div className="segmented">
               <button
-                key={item}
-                className={range === item ? "selected" : ""}
-                onClick={() => setRange?.(item)}
+                className={range === "all" ? "selected" : ""}
+                onClick={() => {
+                  setRange?.("all");
+                  setRangePickerOpen(false);
+                }}
                 disabled={isLoading}
               >
-                {item === "all" ? t.all : item.toUpperCase()}
+                {t.all}
               </button>
-            ))}
+              <button
+                className={range === "range" ? "selected" : ""}
+                onClick={() => {
+                  setRange?.("range");
+                  setRangePickerOpen((current) => !current);
+                }}
+                disabled={isLoading}
+                aria-expanded={isRangePickerOpen}
+                aria-haspopup="dialog"
+              >
+                {t.range}
+              </button>
+            </div>
+            {range === "range" && isRangePickerOpen ? (
+              <div className="month-range-controls">
+                <label className="month-field">
+                  <span>{t.from}</span>
+                  <input
+                    type="month"
+                    value={rangeFromMonth}
+                    onChange={(event) => setRangeFromMonth?.(event.target.value)}
+                    min={monthOptions[0]?.[0]}
+                    max={monthOptions.at(-1)?.[0]}
+                    disabled={isLoading}
+                  />
+                </label>
+                <label className="month-field">
+                  <span>{t.to}</span>
+                  <input
+                    type="month"
+                    value={rangeToMonth}
+                    onChange={(event) => setRangeToMonth?.(event.target.value)}
+                    min={monthOptions[0]?.[0]}
+                    max={monthOptions.at(-1)?.[0]}
+                    disabled={isLoading}
+                  />
+                </label>
+              </div>
+            ) : null}
           </div>
         ) : viewMode === "daily" ? (
           <div className="segmented daily-tools" aria-label={t.compareDays}>
@@ -4343,10 +4398,11 @@ function DailyDashboard({
     () => [...new Map(allRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
     [allRows, lang],
   );
-  const [dailyMonthFilter, setDailyMonthFilter] = useState(monthOptions[0]?.[0] ?? "all");
+  const [dailyMonthFilter, setDailyMonthFilter] = useState(monthOptions[0]?.[0] ?? "");
+  const effectiveDailyMonthFilter = dailyMonthFilter || (monthOptions[0]?.[0] ?? "");
   const selectedRows = useMemo(
-    () => allRows.filter((row) => dailyMonthFilter === "all" || monthKey(row.date) === dailyMonthFilter),
-    [allRows, dailyMonthFilter],
+    () => allRows.filter((row) => monthKey(row.date) === effectiveDailyMonthFilter),
+    [allRows, effectiveDailyMonthFilter],
   );
   const latest = selectedRows.at(-1);
   const chartRows = selectedRows.length ? selectedRows : rows.length ? rows : allRows.slice(-30);
@@ -4358,7 +4414,7 @@ function DailyDashboard({
 
   useEffect(() => {
     if (!monthOptions.length) return;
-    if (dailyMonthFilter !== "all" && !monthOptions.some(([key]) => key === dailyMonthFilter)) {
+    if (!dailyMonthFilter || !monthOptions.some(([key]) => key === dailyMonthFilter)) {
       setDailyMonthFilter(monthOptions[0][0]);
     }
   }, [dailyMonthFilter, monthOptions]);
@@ -4506,8 +4562,7 @@ function DailyDashboard({
           </div>
           <div className="filter-controls" aria-label={t.filterMonth}>
             <label className="filter-box">
-              <select value={dailyMonthFilter} onChange={(event) => setDailyMonthFilter(event.target.value)}>
-                <option value="all">{t.allMonths}</option>
+              <select value={effectiveDailyMonthFilter} onChange={(event) => setDailyMonthFilter(event.target.value)}>
                 {monthOptions.map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
@@ -4940,13 +4995,13 @@ function UtilityMeterInfo({
 }) {
   const meter = row.utilityMeter;
   if (!meter) return null;
-  const utilityExportTotal = meter.utility.exportDay + meter.utility.exportNight;
   const diff = {
     importDay: meter.utility.importDay - meter.ha.importDay,
     importNight: meter.utility.importNight - meter.ha.importNight,
-    export: utilityExportTotal - meter.ha.export,
+    exportDay: meter.utility.exportDay - meter.ha.exportDay,
+    exportNight: meter.utility.exportNight - meter.ha.exportNight,
   };
-  const signedKwh = (value: number) => `${value >= 0 ? "+" : ""}${formatKwh(value, lang)}`;
+  const signedKwh = (value: number) => `${value > 0 ? "+" : ""}${formatKwh(value, lang)}`;
 
   return (
     <div className="info-stack">
@@ -4955,45 +5010,70 @@ function UtilityMeterInfo({
           {
             label: t.dashboardValues,
             value: (
-              <StackedValues
-                rows={[
-                  { label: t.importDay, value: formatKwh(meter.ha.importDay, lang) },
-                  { label: t.importNight, value: formatKwh(meter.ha.importNight, lang) },
-                  { label: t.export, value: formatKwh(meter.ha.export, lang) },
-                ]}
-              />
+              <UtilitySplitTable t={t} lang={lang} values={meter.ha} />
             ),
           },
           {
             label: t.meterValues,
             value: (
-              <StackedValues
-                rows={[
-                  { label: t.importDay, value: formatKwh(meter.utility.importDay, lang) },
-                  { label: t.importNight, value: formatKwh(meter.utility.importNight, lang) },
-                  { label: `${t.export} ${t.day}`, value: formatKwh(meter.utility.exportDay, lang) },
-                  { label: `${t.export} ${t.night}`, value: formatKwh(meter.utility.exportNight, lang) },
-                  { label: t.export, value: formatKwh(utilityExportTotal, lang) },
-                ]}
-              />
+              <UtilitySplitTable t={t} lang={lang} values={meter.utility} />
             ),
           },
           {
             label: t.delta,
             value: (
-              <StackedValues
-                rows={[
-                  { label: t.importDay, value: signedKwh(diff.importDay) },
-                  { label: t.importNight, value: signedKwh(diff.importNight) },
-                  { label: t.export, value: signedKwh(diff.export) },
-                ]}
-              />
+              <UtilitySplitTable t={t} lang={lang} values={diff} formatValue={signedKwh} colorDeltas />
             ),
           },
         ]}
       />
       <p>{t.usedForCalculations}</p>
     </div>
+  );
+}
+
+function UtilitySplitTable({
+  t,
+  lang,
+  values,
+  formatValue = (value: number) => formatKwh(value, lang),
+  colorDeltas = false,
+}: {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly values: {
+    readonly importDay: number;
+    readonly importNight: number;
+    readonly exportDay: number;
+    readonly exportNight: number;
+  };
+  readonly formatValue?: (value: number) => string;
+  readonly colorDeltas?: boolean;
+}) {
+  const deltaClass = (value: number) => colorDeltas ? deltaTone(value) : undefined;
+
+  return (
+    <table className="price-comparison-table">
+      <thead>
+        <tr>
+          <th aria-label={t.utilityMeter} />
+          <th>{t.day}</th>
+          <th>{t.night}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>{t.import}</th>
+          <td className={deltaClass(values.importDay)}>{formatValue(values.importDay)}</td>
+          <td className={deltaClass(values.importNight)}>{formatValue(values.importNight)}</td>
+        </tr>
+        <tr>
+          <th>{t.export}</th>
+          <td className={deltaClass(values.exportDay)}>{formatValue(values.exportDay)}</td>
+          <td className={deltaClass(values.exportNight)}>{formatValue(values.exportNight)}</td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
 

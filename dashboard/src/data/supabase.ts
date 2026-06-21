@@ -370,7 +370,8 @@ function toUtilityMeter(row: MonthRecord): MonthRow['utilityMeter'] {
     ha: {
       importDay: row.import_day,
       importNight: row.import_night,
-      export: row.export_day + row.export_night,
+      exportDay: row.export_day,
+      exportNight: row.export_night,
     },
     utility: {
       importDay: utilityImportDay,
