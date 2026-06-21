@@ -15,10 +15,16 @@ class DtekConfig:
     accountId: str
     department: str
     intervalMinutes: int
+    cookies: dict[str, str]
 
     @cached_property
     def url(self) -> str:
         return f"https://ok.dtek-{self.department}.com.ua/api"
+
+
+@dataclass(frozen=True)
+class NotificationsConfig:
+    mobileServices: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -28,6 +34,7 @@ class SolaroidConfig:
     intervalMinutes: int
     payload: dict[str, Any]
     dtek: DtekConfig
+    notifications: NotificationsConfig
 
     @cached_property
     def url(self) -> str:
@@ -38,6 +45,10 @@ def load_config(path: Path = CONFIG_PATH) -> SolaroidConfig:
     with path.open(encoding="utf-8") as file:
         data = json_load(file)
 
+    data["dtek"]["cookies"] = {i["name"]: i["value"] for i in data["dtek"]["cookies"] or []}
     data["dtek"] = DtekConfig(**data["dtek"])
+
+    data.setdefault("notifications", {"mobileServices": ("notify.notify_admins",)})
+    data["notifications"] = NotificationsConfig(**data["notifications"])
 
     return SolaroidConfig(**data)

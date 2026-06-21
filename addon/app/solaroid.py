@@ -1,7 +1,6 @@
-import json
-import urllib.error
-import urllib.request
 from typing import Any, Callable
+
+import requests
 
 
 StateReader = Callable[[str], float]
@@ -53,21 +52,23 @@ def normalize_taxes(taxes: Any) -> list[list[Any]]:
 
 
 def post_payload(url: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Solaroid POST failed: HTTP {error.code}: {body}") from error
-    except (urllib.error.URLError, json.JSONDecodeError) as error:
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.HTTPError as error:
+        body = error.response.text if error.response is not None else ""
+        status_code = error.response.status_code if error.response is not None else "unknown"
+        raise RuntimeError(f"Solaroid POST failed: HTTP {status_code}: {body}") from error
+    except (requests.RequestException, ValueError) as error:
         raise RuntimeError("Solaroid POST failed") from error

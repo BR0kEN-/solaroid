@@ -42,16 +42,6 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
       import_night: input.thisMonth.import.night,
       consumption_day: input.thisMonth.consumption.day,
       consumption_night: input.thisMonth.consumption.night,
-      ...(
-        input.thisMonth.utility
-          ? {
-            utility_import_day: input.thisMonth.utility.import.day,
-            utility_import_night: input.thisMonth.utility.import.night,
-            utility_export_day: input.thisMonth.utility.export.day,
-            utility_export_night: input.thisMonth.utility.export.night,
-          }
-          : {}
-      ),
     },
     tariff: {
       plant_id: token.plant_id,
@@ -62,6 +52,16 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
       price_export_night: priceExport.night,
       export_taxes: input.thisMonth.monetary.export.taxes,
     },
+    utilityMonth: !input.thisMonth.utility
+      ? undefined
+      : {
+        plant_id: token.plant_id,
+        date: `${input.thisMonth.utility.month}-01`,
+        utility_import_day: input.thisMonth.utility.import.day,
+        utility_import_night: input.thisMonth.utility.import.night,
+        utility_export_day: input.thisMonth.utility.export.day,
+        utility_export_night: input.thisMonth.utility.export.night,
+      },
   }
 }
 
@@ -77,6 +77,10 @@ async function write(request: Request, token: Solaroid.Supabase.Access.Token, cl
   // Storing tariff only once, no updates allowed. That's
   // intentional because tariffs don't change mid-month.
   await client.upsertPlantRow('month_tariffs', rows.tariff, true)
+
+  if (rows.utilityMonth) {
+    await client.updatePlantRow('months', rows.utilityMonth)
+  }
 
   return {
     date: rows.day.date,

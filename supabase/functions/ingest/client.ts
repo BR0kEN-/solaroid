@@ -95,6 +95,20 @@ export class SupabaseClient {
     if (error) throw new Error(`upsert failed on ${table}`, { cause: error })
   }
 
+  async updatePlantRow(
+    table: string,
+    row: Solaroid.Supabase.Json,
+  ): Promise<void> {
+    const { plant_id: plantId, date, ...values } = row
+    const { error } = await this.client
+      .from(table)
+      .update(values)
+      .eq('plant_id', plantId)
+      .eq('date', date)
+
+    if (error) throw new Error(`update failed on ${table}`, { cause: error })
+  }
+
   async getPlant(plantId: Solaroid.Supabase.Plant.Id): Promise<Solaroid.Supabase.Json> {
     const plant = await this.#getPlantMetadata(plantId)
     const [days, months, tariffs] = await Promise.all(

@@ -18,9 +18,9 @@ import {
 import { configureDashboardAccess, loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
 import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
-import { calculatePayback } from "./domain/payback";
+import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
-import { exportTotal, importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
+import { exportPayout as splitExportPayout, exportTotal, importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
 import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
 import "./styles.css";
 
@@ -45,6 +45,7 @@ type InfoModal =
   | "roi"
   | "forecast"
   | "investment"
+  | "investmentForecast"
   | "plantWorks"
   | "pvgis"
   | {
@@ -126,6 +127,8 @@ interface PortalCopy {
   readonly retry: string;
 }
 
+const COMMERCIAL_PERIOD_END_DATE = new Date("2030-01-01T00:00:00");
+
 const i18n = {
   en: {
     all: "All",
@@ -150,7 +153,7 @@ const i18n = {
     expectedRoi: "Expected ROI",
     expectedIncome: "Expected income",
     soFar: "so far",
-    forecastInfo: "Forecast values are projected from the current month daylight pace: value so far divided by elapsed daylight this month, then multiplied by total expected daylight for the month. The colored comparison shows the projected value against the previous month's actual value.",
+    forecastInfo: "Forecast values use the current month daylight pace plus PVGIS seasonal production data when available. PVGIS gives the expected month shape; recent completed months correct it to this plant's real performance. ROI and income follow the projected production scale. The colored comparison shows the projected value against the previous month's actual value.",
     pvgisInfo: "PVGIS estimates expected solar production from long-term satellite radiation data, not from this year's weather. It models the sun path for the plant location, panel tilt and azimuth, horizon shading, system power, module technology, mounting type, and configured losses. The result is a typical monthly average. Real production can differ because of clouds, fog, snow cover, dust or dirt, temporary shadows, nearby trees or buildings, inverter limits, outages, maintenance, panel degradation, and unusually sunny or gloomy months.",
     pvgisFields: "PV fields",
     power: "Power",
@@ -195,6 +198,7 @@ const i18n = {
     importPrices: "Import prices",
     exportPriceInput: "Export price",
     usdRate: "USD/UAH rate",
+    taxes: "Taxes",
     dayCost: "Day cost",
     nightCost: "Night cost",
     electricHeatingTier: "Electric heating tier",
@@ -216,8 +220,35 @@ const i18n = {
     sinceLaunch: "since",
     launchDate: "Launch date",
     commercialDate: "Commercial date",
+    commercialEndDate: "Commercial period end",
     plantWorksInfo: "Plant works is counted from the launch date. Commercial export rules start from the commercial date.",
     investmentRecovered: "investment recovered",
+    recoverableByCommercialEnd: "Possible recovery by commercial period end",
+    pvgisAdjustedForecast: "PVGIS-adjusted forecast",
+    commercialRecoveryCalcInfo: "Forecast uses annual production, fixed annual consumption, current tariff rules, and month rates. Before the commercial date only self-consumption counts. During the commercial period, surplus is paid. After the commercial period, net billing is treated as closing the same 17 MWh/year internally, so electricity is still avoided but surplus has no cash payout.",
+    annualProduction: "Annual production",
+    annualConsumption: "Annual consumption",
+    annualSurplus: "Annual surplus",
+    commercialPeriod: "Commercial period",
+    commercialPeriodRange: "Commercial period from {from} to {to}.",
+    postCommercialAssumption: "Once the commercial period ends, the estimate assumes annual self-sufficiency: peak sun season surplus covers fall and winter import through net billing.",
+    paybackForecast: "Payback forecast",
+    paybackDate: "Date",
+    totalPaybackTime: "Total time",
+    remainingPaybackTime: "Time left",
+    productionSource: "Source",
+    pvgisSource: "PVGIS, no closed years yet",
+    closedYearSource: "1 closed year",
+    closedYearAverageSource: "closed year average",
+    actualFallbackSource: "actual rows fallback",
+    consumptionValue: "Value",
+    surplusValue: "Payout",
+    noCashPayout: "No cash payout after commercial period end",
+    expectedPaidExport: "Expected paid export",
+    expectedSelfConsumption: "Expected self-consumption",
+    expectedPostCommercialSelfConsumption: "Post-commercial self-consumption",
+    projectedRoiDate: "Projected ROI date",
+    postCommercialNetBilling: "Post-commercial net billing",
     investmentInfo: "The USD value is the stored plant investment. In UAH mode, the dashboard converts that USD investment using the USD/UAH rate from the plant launch month, because that represents the original hryvnia cost basis.",
     payback: "Payback",
     recovered: "recovered",
@@ -285,7 +316,7 @@ const i18n = {
     expectedRoi: "Очікуване ПІ",
     expectedIncome: "Очікуваний дохід",
     soFar: "зараз",
-    forecastInfo: "Прогноз рахується за поточним темпом світлового часу місяця: значення зараз ділиться на кількість світлового часу, що вже минув у цьому місяці, і множиться на очікуваний світловий час усього місяця. Кольорове порівняння показує прогнозоване значення відносно фактичного значення попереднього місяця.",
+    forecastInfo: "Прогноз використовує поточний темп світлового дня та сезонні дані PVGIS, якщо вони доступні. PVGIS дає очікувану форму місяця, а останні завершені місяці коригують її під фактичну роботу цієї станції. ПІ та дохід ідуть за масштабом прогнозованої генерації. Кольорове порівняння показує прогноз проти факту попереднього місяця.",
     pvgisInfo: "PVGIS рахує очікувану генерацію за довгостроковими супутниковими даними сонячної радіації, а не за погодою саме цього року. Він моделює шлях сонця для локації станції, нахил і азимут панелей, горизонт, потужність системи, тип модуля, монтаж і задані втрати. Результат — типовий середній місяць. Фактична генерація може відрізнятись через хмари, туман, сніг на панелях, пил чи бруд, тимчасові тіні, дерева або будівлі поруч, обмеження інвертора, відключення, обслуговування, деградацію панелей і нетипово сонячні чи похмурі місяці.",
     pvgisFields: "Фотоелектричні поля",
     power: "Потужність",
@@ -330,6 +361,7 @@ const i18n = {
     importPrices: "Ціни імпорту",
     exportPriceInput: "Ціна експорту",
     usdRate: "Курс USD/UAH",
+    taxes: "Податки",
     dayCost: "Вартість дня",
     nightCost: "Вартість ночі",
     electricHeatingTier: "Тариф електроопалення",
@@ -351,8 +383,35 @@ const i18n = {
     sinceLaunch: "з",
     launchDate: "Дата запуску",
     commercialDate: "Комерційна дата",
+    commercialEndDate: "Кінець комерційного періоду",
     plantWorksInfo: "Час роботи станції рахується від дати запуску. Правила комерційного експорту починають діяти з комерційної дати.",
     investmentRecovered: "інвестиції повернуто",
+    recoverableByCommercialEnd: "Можливе повернення до кінця комерційного періоду",
+    pvgisAdjustedForecast: "прогноз з урахуванням PVGIS",
+    commercialRecoveryCalcInfo: "Прогноз використовує річну генерацію, фіксоване річне споживання, поточні правила тарифів і місячні курси. До комерційної дати враховується лише власне споживання. У комерційний період надлишок оплачується. Після кінця комерційного періоду net billing вважається таким, що закриває ті самі 17 МВт·г/рік всередині року, тому витрати на електрику все ще не виникають, але надлишок не має грошової виплати.",
+    annualProduction: "Річна генерація",
+    annualConsumption: "Річне споживання",
+    annualSurplus: "Річний надлишок",
+    commercialPeriod: "Комерційний період",
+    commercialPeriodRange: "Комерційний період з {from} до {to}.",
+    postCommercialAssumption: "Після завершення комерційного періоду прогноз припускає річну самодостатність: надлишок пікового сонячного сезону покриває осінній і зимовий імпорт через net billing.",
+    paybackForecast: "Прогноз окупності",
+    paybackDate: "Дата",
+    totalPaybackTime: "Усього",
+    remainingPaybackTime: "Залишилось",
+    productionSource: "Джерело",
+    pvgisSource: "PVGIS, ще немає закритих років",
+    closedYearSource: "1 закритий рік",
+    closedYearAverageSource: "середнє закритих років",
+    actualFallbackSource: "резерв з фактичних рядків",
+    consumptionValue: "Вартість",
+    surplusValue: "Виплата",
+    noCashPayout: "Після кінця комерційного періоду грошової виплати немає",
+    expectedPaidExport: "Очікуваний оплачений експорт",
+    expectedSelfConsumption: "Очікуване власне споживання",
+    expectedPostCommercialSelfConsumption: "Власне споживання після комерційного періоду",
+    projectedRoiDate: "Прогнозована дата окупності",
+    postCommercialNetBilling: "Net billing після комерційного періоду",
     investmentInfo: "Значення в USD — це збережена вартість станції. У режимі UAH дашборд конвертує цю суму за курсом USD/UAH з місяця запуску станції, бо саме він відображає початкову вартість у гривні.",
     payback: "Окупність",
     recovered: "повернуто",
@@ -642,7 +701,20 @@ function exportPayoutKwh(row: MonthRow) {
 }
 
 function exportPayoutUah(row: MonthRow) {
-  return exportPayoutKwh(row) * netExportRate(row);
+  return splitExportPayout(row, tariffFromRow(row));
+}
+
+function exportPayoutSplit(row: MonthRow) {
+  const surplus = exportPayoutKwh(row);
+  const total = exportTotal(row);
+  if (!surplus || !total) return { day: 0, night: 0 };
+
+  const day = surplus * (row.exportDay / total);
+  return { day, night: surplus - day };
+}
+
+function hasSplitExportPrice(row: MonthRow) {
+  return Math.abs(netExportPrice(row) - netExportNightPrice(row)) > 0.000001;
 }
 
 function productionSoldUah(row: MonthRow) {
@@ -680,6 +752,10 @@ function formatMounting(value: string, lang: Lang) {
 function pct(value: number) {
   if (!Number.isFinite(value)) return "0%";
   return `${formatNumber(value)}%`;
+}
+
+function titleCase(value: string) {
+  return value ? `${value[0].toLocaleUpperCase()}${value.slice(1)}` : value;
 }
 
 function monthShort(month: string) {
@@ -835,6 +911,45 @@ function forecastMonthValue(value: number, date: Date, asOf = new Date()) {
   const totalDaylight = monthDaylightMinutes(date);
   const elapsedDaylight = Math.max(60, elapsedMonthDaylightMinutes(date, asOf));
   return (value / elapsedDaylight) * totalDaylight;
+}
+
+function forecastProductionValue(
+  value: number,
+  date: Date,
+  asOf: Date,
+  projection: ProductionProjection | null | undefined,
+  rows: readonly MonthRow[],
+) {
+  const daylightProjection = forecastMonthValue(value, date, asOf);
+  const expected = projection?.monthlyKwh[date.getMonth()];
+  if (!expected || expected <= 0) return daylightProjection;
+
+  const performanceFactor = pvgisPerformanceFactor(rows, date, projection);
+  if (!performanceFactor) return daylightProjection;
+
+  const pvgisProjection = expected * performanceFactor;
+  const elapsedShare = Math.min(1, Math.max(0, elapsedMonthDaylightMinutes(date, asOf) / monthDaylightMinutes(date)));
+  const currentPaceWeight = Math.min(0.85, Math.max(0.2, elapsedShare));
+  return daylightProjection * currentPaceWeight + pvgisProjection * (1 - currentPaceWeight);
+}
+
+function pvgisPerformanceFactor(
+  rows: readonly MonthRow[],
+  currentDate: Date,
+  projection: ProductionProjection,
+) {
+  const factors = rows
+    .filter((row) => row.date < currentDate && !sameMonth(row.date, currentDate))
+    .slice(-3)
+    .map((row) => {
+      const expected = projection.monthlyKwh[row.date.getMonth()];
+      return expected && expected > 0 ? row.production / expected : undefined;
+    })
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+
+  if (!factors.length) return undefined;
+
+  return factors.reduce((sum, value) => sum + value, 0) / factors.length;
 }
 
 function formatActiveDuration(duration: { months: number; days: number }, lang: Lang) {
@@ -1212,6 +1327,19 @@ function App({
     });
   }, [currency, dataState.investmentUsd, rows, totals.launchDate, totals.launchUsdRate]);
 
+  const commercialEndRecovery = useMemo(() => {
+    if (!payback) return null;
+    return calculateCommercialEndRecovery({
+      rows: dataState.rows,
+      payback,
+      currency,
+      commercialDate: dataState.commercialDate,
+      launchDate: totals.launchDate,
+      endDate: COMMERCIAL_PERIOD_END_DATE,
+      projection: dataState.projection,
+    });
+  }, [currency, dataState.commercialDate, dataState.projection, dataState.rows, payback, totals.launchDate]);
+
   const forecast = useMemo(() => {
     const today = new Date();
     const forecastAsOf = dataState.sheetUpdatedAt ?? today;
@@ -1220,8 +1348,9 @@ function App({
       currency,
       today,
       projectMonthValue: (value, date) => forecastMonthValue(value, date, forecastAsOf),
+      projectProductionValue: (value, date) => forecastProductionValue(value, date, forecastAsOf, dataState.projection, dataState.rows),
     });
-  }, [currency, dataState.rows, dataState.sheetUpdatedAt]);
+  }, [currency, dataState.projection, dataState.rows, dataState.sheetUpdatedAt]);
 
   const showPlaceholders = dataState.isLoading;
   const infoModalContent = useMemo(() => {
@@ -1279,15 +1408,13 @@ function App({
       return {
         title: `${t.exportPrice} · ${row.month}`,
         body: (
-          <PriceInfo
-            rows={[
-              { label: `${t.grossExportPrice} ${t.day}`, value: `${formatDisplayMoney(grossDayPrice, currency, lang)} / ${energyUnit(lang)}` },
-              { label: `${t.grossExportPrice} ${t.night}`, value: `${formatDisplayMoney(grossNightPrice, currency, lang)} / ${energyUnit(lang)}` },
-              { label: t.vat, value: `${formatNumber(row.exportVat, 2, 2)}%` },
-              { label: t.militaryTax, value: `${formatNumber(row.exportMilitary, 2, 2)}%` },
-              { label: `${t.netExportPrice} ${t.day}`, value: `${formatDisplayMoney(netDayPrice, currency, lang)} / ${energyUnit(lang)}` },
-              { label: `${t.netExportPrice} ${t.night}`, value: `${formatDisplayMoney(netNightPrice, currency, lang)} / ${energyUnit(lang)}` },
-            ]}
+          <ExportPriceInfo
+            t={t}
+            dayNightLabel={`${t.day}/${t.night}`}
+            gross={`${formatDisplayMoney(grossDayPrice, currency, lang)} / ${formatDisplayMoney(grossNightPrice, currency, lang)}`}
+            net={`${formatDisplayMoney(netDayPrice, currency, lang)} / ${formatDisplayMoney(netNightPrice, currency, lang)}`}
+            vat={`${formatNumber(row.exportVat, 2, 2)}%`}
+            military={`${formatNumber(row.exportMilitary, 2, 2)}%`}
           />
         ),
       };
@@ -1348,6 +1475,109 @@ function App({
       };
     }
     if (infoModal === "investment") return { title: t.investment, body: t.investmentInfo };
+    if (infoModal === "investmentForecast") {
+      const details = commercialEndRecovery?.details;
+      const sourceLabel = details?.annualProduction.source === "pvgis"
+        ? t.pvgisSource
+        : details?.annualProduction.source === "closed-year"
+          ? t.closedYearSource
+          : details?.annualProduction.source === "closed-year-average"
+            ? `${details.annualProduction.closedYearCount} ${t.closedYearAverageSource}`
+            : t.actualFallbackSource;
+      return {
+        title: titleCase(t.investmentRecovered),
+        body: (
+          <div className="info-stack">
+            {commercialEndRecovery ? (
+              <MathInfo
+                rows={[
+                  {
+                    label: t.recoverableByCommercialEnd,
+                    value: (
+                      <>
+                        <FormulaResult>{formatDisplayMoney(commercialEndRecovery.recovered, currency, lang)}</FormulaResult>{" "}
+                        ({formatNumber(commercialEndRecovery.progress)}%)
+                      </>
+                    ),
+                  },
+                  ...(details ? [
+                    {
+                      label: t.annualProduction,
+                      value: (
+                        <StackedValues
+                          rows={[
+                            { label: t.total, value: formatKwh(details.annualProduction.kwh, lang) },
+                            { label: t.productionSource, value: sourceLabel },
+                          ]}
+                        />
+                      ),
+                    },
+                    {
+                      label: t.annualConsumption,
+                      value: (
+                        <StackedValues
+                          rows={[
+                            {
+                              label: t.day,
+                              value: `${formatKwh(details.annualConsumption.dayKwh, lang)} · ${formatDisplayMoney(details.annualConsumption.dayValue, currency, lang)}`,
+                            },
+                            {
+                              label: t.night,
+                              value: `${formatKwh(details.annualConsumption.nightKwh, lang)} · ${formatDisplayMoney(details.annualConsumption.nightValue, currency, lang)}`,
+                            },
+                            {
+                              label: t.total,
+                              value: `${formatKwh(details.annualConsumption.totalKwh, lang)} · ${formatDisplayMoney(details.annualConsumption.totalValue, currency, lang)}`,
+                            },
+                          ]}
+                        />
+                      ),
+                    },
+                    {
+                      label: t.annualSurplus,
+                      value: (
+                        <StackedValues
+                          rows={[
+                            { label: t.total, value: formatKwh(details.annualSurplus.kwh, lang) },
+                            { label: t.surplusValue, value: formatDisplayMoney(details.annualSurplus.value, currency, lang) },
+                          ]}
+                        />
+                      ),
+                    },
+                    {
+                      label: t.commercialPeriod,
+                      value: (
+                        <span className="math-note-stack">
+                          <span>{formatLaunchDate(details.commercialStartDate, lang)} - {formatLaunchDate(details.commercialEndDate, lang)}</span>
+                          <span>{t.postCommercialAssumption}</span>
+                        </span>
+                      ),
+                    },
+                  ] : []),
+                  {
+                    label: t.paybackForecast,
+                    value: commercialEndRecovery.roiDate ? (
+                      <StackedValues
+                        rows={[
+                          { label: t.paybackDate, value: <FormulaResult>{formatLaunchDate(commercialEndRecovery.roiDate, lang)}</FormulaResult> },
+                          ...(commercialEndRecovery.roiDuration ? [
+                            { label: t.totalPaybackTime, value: formatActiveDuration(commercialEndRecovery.roiDuration, lang) },
+                          ] : []),
+                          ...(commercialEndRecovery.roiRemainingDuration ? [
+                            { label: t.remainingPaybackTime, value: formatActiveDuration(commercialEndRecovery.roiRemainingDuration, lang) },
+                          ] : []),
+                        ]}
+                      />
+                    ) : "-",
+                  },
+                ]}
+              />
+            ) : null}
+            <p>{t.commercialRecoveryCalcInfo}</p>
+          </div>
+        ),
+      };
+    }
     if (infoModal === "plantWorks") {
       return {
         title: t.plantWorks,
@@ -1362,6 +1592,10 @@ function App({
               <div>
                 <dt>{t.commercialDate}</dt>
                 <dd>{dataState.commercialDate ? formatLaunchDate(dataState.commercialDate, lang) : "-"}</dd>
+              </div>
+              <div>
+                <dt>{t.commercialEndDate}</dt>
+                <dd>{formatLaunchDate(COMMERCIAL_PERIOD_END_DATE, lang)}</dd>
               </div>
             </dl>
           </div>
@@ -1421,6 +1655,7 @@ function App({
     infoModal,
     lang,
     t,
+    commercialEndRecovery,
     totals.exportPayoutDisplay,
     totals.exportPayoutKwhTotal,
     totals.exported,
@@ -1610,7 +1845,12 @@ function App({
           ) : (
             <>
               <div className="payback-copy">
-                <h2>{payback ? `${formatNumber(payback.progress)}% ${t.investmentRecovered}` : t.addInvestment}</h2>
+                <h2 className="heading-with-info">
+                  <span>{payback ? `${formatNumber(payback.progress)}% ${t.investmentRecovered}` : t.addInvestment}</span>
+                  <button type="button" className="section-info-button" aria-label={t.investmentRecovered} onClick={() => setInfoModal("investmentForecast")}>
+                    <Info size={16} />
+                  </button>
+                </h2>
                 <p>
                   {payback ? (
                     <span className="payback-lines">
@@ -4516,7 +4756,11 @@ function DataTable({
               </td>
               <td>
                 <TableValueInfo
-                  value={formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang)}
+                  value={
+                    hasSplitExportPrice(row)
+                      ? `${formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang)} / ${formatTableMoney(moneyFromUah(netExportNightPrice(row), currency, row.usdRate), currency, lang)}`
+                      : formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang)
+                  }
                   label={t.exportPrice}
                   onInfo={() => onExportPriceInfo(row)}
                 />
@@ -4633,23 +4877,55 @@ function DayNightInfo({
   );
 }
 
-function PriceInfo({
-  rows,
+function ExportPriceInfo({
+  t,
+  dayNightLabel,
+  gross,
+  net,
+  vat,
+  military,
 }: {
-  readonly rows: readonly {
-    readonly label: string;
-    readonly value: string;
-  }[];
+  readonly t: Record<string, string>;
+  readonly dayNightLabel: string;
+  readonly gross: string;
+  readonly net: string;
+  readonly vat: string;
+  readonly military: string;
 }) {
   return (
-    <dl className="split-info">
-      {rows.map((row) => (
-        <div key={row.label}>
-          <dt>{row.label}</dt>
-          <dd>{row.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="info-stack">
+      <section className="price-tax-block">
+        <h3>{t.taxes}</h3>
+        <dl>
+          <div>
+            <dt>{t.vat}</dt>
+            <dd>{vat}</dd>
+          </div>
+          <div>
+            <dt>{t.militaryTax}</dt>
+            <dd>{military}</dd>
+          </div>
+        </dl>
+      </section>
+      <table className="price-comparison-table">
+        <thead>
+          <tr>
+            <th aria-label={t.exportPrice} />
+            <th>{dayNightLabel}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>{t.grossExportPrice}</th>
+            <td>{gross}</td>
+          </tr>
+          <tr>
+            <th>{t.netExportPrice}</th>
+            <td>{net}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -4803,24 +5079,24 @@ function NetPaymentInfo({
   const importTotalValue = Math.max(row.importTotal, 0);
   const consumedBreakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
   const transitionRows = commercialTransitionRows(row, commercialDate, dailyRows);
+  const splitRows = (total: number, day: number, night: number) => [
+    { label: t.total, value: formatKwh(total, lang) },
+    { label: t.day, value: formatKwh(day, lang) },
+    { label: t.night, value: formatKwh(night, lang) },
+  ];
   const inputRows: MathInfoRow[] = [
     {
       label: t.formulaInputs,
       value: (
         <StackedValues
           rows={[
-            { label: t.import, value: `${formatKwh(row.importTotal, lang)} (${formatKwh(row.importDay, lang)} / ${formatKwh(row.importNight, lang)})` },
+            {
+              label: t.import,
+              value: <StackedValues rows={splitRows(row.importTotal, row.importDay, row.importNight)} />,
+            },
             {
               label: t.export,
-              value: (
-                <StackedValues
-                  rows={[
-                    { label: t.total, value: formatKwh(exportTotal(row), lang) },
-                    { label: t.day, value: formatKwh(row.exportDay, lang) },
-                    { label: t.night, value: formatKwh(row.exportNight, lang) },
-                  ]}
-                />
-              ),
+              value: <StackedValues rows={splitRows(exportTotal(row), row.exportDay, row.exportNight)} />,
             },
             { label: t.balance, value: formatKwh(row.balance, lang) },
             { label: t.consumed, value: `${formatKwh(row.consumedTotal, lang)} (${formatKwh(row.consumedDay, lang)} / ${formatKwh(row.consumedNight, lang)})` },
@@ -4849,15 +5125,13 @@ function NetPaymentInfo({
     {
       label: t.exportPriceInput,
       value: (
-        <StackedValues
-          rows={[
-            { label: `${t.grossExportPrice} ${t.day}`, value: `${displayMoney(row.exportPriceDay)} / ${energyUnit(lang)}` },
-            { label: `${t.grossExportPrice} ${t.night}`, value: `${displayMoney(row.exportPriceNight)} / ${energyUnit(lang)}` },
-            { label: t.vat, value: `${formatNumber(row.exportVat, 2, 2)}%` },
-            { label: t.militaryTax, value: `${formatNumber(row.exportMilitary, 2, 2)}%` },
-            { label: `${t.netExportPrice} ${t.day}`, value: `${displayMoney(netExportPrice(row))} / ${energyUnit(lang)}` },
-            { label: `${t.netExportPrice} ${t.night}`, value: `${displayMoney(netExportNightPrice(row))} / ${energyUnit(lang)}` },
-          ]}
+        <ExportPriceInfo
+          t={t}
+          dayNightLabel={`${t.day}/${t.night}`}
+          gross={`${displayMoney(row.exportPriceDay)} / ${displayMoney(row.exportPriceNight)}`}
+          net={`${displayMoney(netExportPrice(row))} / ${displayMoney(netExportNightPrice(row))}`}
+          vat={`${formatNumber(row.exportVat, 2, 2)}%`}
+          military={`${formatNumber(row.exportMilitary, 2, 2)}%`}
         />
       ),
     },
@@ -4919,6 +5193,7 @@ function NetPaymentInfo({
     );
   } else if (row.balance < 0) {
     const surplus = Math.abs(row.balance);
+    const paidSurplus = exportPayoutSplit(row);
     rows.push(
       {
         label: t.netSurplus,
@@ -4930,7 +5205,21 @@ function NetPaymentInfo({
       },
       {
         label: t.netPayment,
-        value: (
+        value: hasSplitExportPrice(row) ? (
+          <StackedValues
+            rows={[
+              {
+                label: t.day,
+                value: `${displayMoney(paidSurplus.day * netExportPrice(row))} = ${formatKwh(paidSurplus.day, lang)} × ${displayMoney(netExportPrice(row))}`,
+              },
+              {
+                label: t.night,
+                value: `${displayMoney(paidSurplus.night * netExportNightPrice(row))} = ${formatKwh(paidSurplus.night, lang)} × ${displayMoney(netExportNightPrice(row))}`,
+              },
+              { label: t.total, value: displayMoneyMath(row.electricityPayment) },
+            ]}
+          />
+        ) : (
           <>
             {displayMoneyMath(row.electricityPayment)} = {formatKwh(surplus, lang)} × {displayMoney(netExportPrice(row))}
           </>

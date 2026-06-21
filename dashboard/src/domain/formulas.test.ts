@@ -4,10 +4,12 @@ import {
   commercialBalance,
   consumedPrice,
   consumedTotal,
+  exportPayout,
   exportTaxRate,
   importCostBreakdown,
   importTotal,
   netExportPrice,
+  netExportNightPrice,
   payment,
   savings,
   selfConsumed,
@@ -58,6 +60,7 @@ describe('prices and taxes', () => {
   it('calculates export taxes and net export price', () => {
     expect(exportTaxRate(tariff)).toBe(0.25)
     expect(netExportPrice(tariff)).toBe(4.5)
+    expect(netExportNightPrice({ ...tariff, exportNight: 4 })).toBe(3)
   })
 
   it('calculates consumed and weighted import prices', () => {
@@ -162,6 +165,14 @@ describe('payment and savings', () => {
 
   it('pays export surplus after taxes in commercial periods', () => {
     expect(payment({ ...row, exportDay: 50, exportNight: 0 }, tariff, true)).toBe(90)
+  })
+
+  it('pays export surplus with day/night export prices by export split', () => {
+    const splitTariff = { ...tariff, exportNight: 4 }
+    const splitRow = { ...row, exportDay: 40, exportNight: 20, importDay: 10, importNight: 10 }
+
+    expect(exportPayout(splitRow, splitTariff)).toBeCloseTo(160)
+    expect(payment(splitRow, splitTariff, true)).toBeCloseTo(160)
   })
 
   it('ignores export offset before commercial date', () => {

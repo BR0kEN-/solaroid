@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { dateUtil } from './utils/date.ts'
 
 const Number = z.number()
 const NumberFinite = z.number().finite()
@@ -12,6 +13,10 @@ const DayNight = z.object({
 const WithTaxes = {
   taxes: z.array(z.tuple([String, Number])),
 }
+
+const Month = z
+  .string()
+  .refine(dateUtil.granularity.is.month)
 
 const Period = z.object({
   production: Number,
@@ -37,7 +42,11 @@ export const Input = z.object({
         DayNight.extend(WithTaxes),
       ]),
     }),
-    utility: z.object({ import: DayNight, export: DayNight }).optional(),
+    utility: z.object({
+      month: Month,
+      import: DayNight,
+      export: DayNight,
+    }).optional(),
   }),
 })
 
