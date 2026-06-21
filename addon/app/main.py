@@ -74,7 +74,7 @@ def run_once(
 
     payload = build_payload(config.payload, read_state, utility)
     result = post(config.url, config.token, payload)
-    logging.info("Posted payload: %s", result)
+    logging.info("Posted payload: %s (%s)", result, payload)
 
 
 def main() -> None:
