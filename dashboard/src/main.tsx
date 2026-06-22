@@ -181,19 +181,23 @@ const i18n = {
     cumulative: "Cumulative",
     production: "Production",
     totalProduction: "Total production",
+    totalProductionKpi: "Production",
     totalProductionCostInfoDetails: "This hypothetical value treats every produced kWh as sold at its own month's export price after VAT and military tax. In USD mode, each month is converted using that month's USD/UAH rate.",
-    exported: "exported",
+    exported: "export",
     export: "Export",
     totalExport: "Total export",
+    totalExportKpi: "Export",
     totalExportCostInfoDetails: "The payout is calculated from net exported surplus after the monthly import/export balance, using each month's export price after VAT and military tax.",
     latest: "Latest",
     gridImport: "Import",
     totalImport: "Total import",
+    totalImportKpi: "Import",
     totalImportCostInfoDetails: "Day imports are calculated with each month's day import rate, night imports with each month's night import rate.",
-    solarCoverage: "solar coverage",
+    solarCoverage: "solar",
     net: "Net",
     netPayment: "Net payment",
     totalNetPayment: "Total net payment",
+    totalNetPaymentKpi: "Net payment",
     electricityCostWithoutSolar: "Electricity cost without solar",
     formulaInputs: "Inputs",
     importPrices: "Import prices",
@@ -348,19 +352,23 @@ const i18n = {
     cumulative: "Сумарно",
     production: "Генерація",
     totalProduction: "Загальна генерація",
+    totalProductionKpi: "Генерація",
     totalProductionCostInfoDetails: "Це умовне значення рахує кожну згенеровану кВт·г як продану за ціною експорту свого місяця після ПДВ і військового збору. У режимі USD кожен місяць конвертується за його курсом USD/UAH.",
-    exported: "експортовано",
+    exported: "експорт",
     export: "Експорт",
     totalExport: "Загальний експорт",
+    totalExportKpi: "Експорт",
     totalExportCostInfoDetails: "Виплата рахується з чистого експортного надлишку після місячного балансу імпорту/експорту, за ціною експорту кожного місяця після ПДВ і військового збору.",
     latest: "Останнє",
     gridImport: "Імпорт",
     totalImport: "Загальний імпорт",
+    totalImportKpi: "Імпорт",
     totalImportCostInfoDetails: "Денний імпорт рахується за денним тарифом кожного місяця, нічний імпорт - за нічним тарифом.",
-    solarCoverage: "покриття сонцем",
+    solarCoverage: "з сонця",
     net: "Баланс",
     netPayment: "Баланс оплати",
     totalNetPayment: "Загальний баланс оплати",
+    totalNetPaymentKpi: "Баланс оплати",
     electricityCostWithoutSolar: "Вартість електрики без сонця",
     formulaInputs: "Вхідні дані",
     importPrices: "Ціни імпорту",
@@ -1711,10 +1719,7 @@ function App({
 
         {viewMode === "daily" ? (
           showPlaceholders ? (
-            <>
-              <KpiSkeletonGrid />
-              <ChartSkeleton />
-            </>
+            <DailyPageSkeleton t={t} />
           ) : (
             <DailyDashboard
               rows={dailyRows}
@@ -1741,7 +1746,7 @@ function App({
           )
         ) : viewMode === "comparison" ? (
           showPlaceholders ? (
-            <KpiSkeletonGrid />
+            <PlantComparisonPageSkeleton />
           ) : dataState.readablePlantIds.length ? (
             <PlantComparisonSection
               activePlantId={dataState.plantId}
@@ -1775,7 +1780,10 @@ function App({
         ) : (
           <>
         {showPlaceholders ? (
-          <KpiSkeletonGrid />
+          <KpiSkeletonGrid
+            labels={[t.latestRoi, t.totalProductionKpi, t.totalExportKpi, t.totalImportKpi, t.totalNetPaymentKpi, t.plantWorks]}
+            showInfoIcons
+          />
         ) : (
           <section id="overview" className="kpi-grid">
             <KpiCard
@@ -1789,7 +1797,7 @@ function App({
             />
             <KpiCard
               icon={<SunMedium size={20} />}
-              label={t.totalProduction}
+              label={t.totalProductionKpi}
               value={formatMonthlyKpiKwh(totals.production, lang)}
               detail={`${pct((totals.exported / totals.production) * 100)} ${t.exported}`}
               tone="amber"
@@ -1798,7 +1806,7 @@ function App({
             />
             <KpiCard
               icon={<ArrowUpFromLine size={20} />}
-              label={t.totalExport}
+              label={t.totalExportKpi}
               value={formatMonthlyKpiKwh(totals.exported, lang)}
               detail={`${t.latest} ${formatKwh(totals.latest ? exportTotal(totals.latest) : 0, lang)}`}
               tone="mint"
@@ -1807,7 +1815,7 @@ function App({
             />
             <KpiCard
               icon={<ArrowDownToLine size={20} />}
-              label={t.totalImport}
+              label={t.totalImportKpi}
               value={formatMonthlyKpiKwh(totals.imported, lang)}
               detail={`${pct(totals.covered)} ${t.solarCoverage}`}
               tone="blue"
@@ -1816,7 +1824,7 @@ function App({
             />
             <KpiCard
               icon={<WalletCards size={20} />}
-              label={t.totalNetPayment}
+              label={t.totalNetPaymentKpi}
               value={formatDisplayMoney(totals.paymentsDisplay, currency, lang)}
               detail={`${t.savings} ${formatDisplayMoney(totals.savingsDisplay, currency, lang)}`}
               tone={totals.payments >= 0 ? "green" : "rose"}
@@ -1839,10 +1847,11 @@ function App({
           {showPlaceholders ? (
             <>
               <div className="payback-copy">
-                <SkeletonText width="230px" height="24px" />
-                <span className="payback-lines">
-                  <SkeletonText width="min(620px, 100%)" height="16px" />
-                  <SkeletonText width="min(430px, 78%)" height="16px" />
+                <PaybackHeadingSkeleton />
+                <span className="payback-lines payback-lines-skeleton">
+                  <SkeletonText width="min(620px, 100%)" height="1.35em" />
+                  <SkeletonText width="min(560px, 90%)" height="1.35em" />
+                  <SkeletonText width="min(430px, 78%)" height="1.35em" />
                 </span>
               </div>
               <SkeletonBlock className="progress-track skeleton-track" />
@@ -1887,23 +1896,14 @@ function App({
                     ? t.forecast
                     : `${t.forecast}, ${formatMonthYear(forecast.row.date, lang)}`}
                 </span>
-                <button type="button" className="section-info-button" aria-label={t.forecast} onClick={() => setInfoModal("forecast")}>
+                <button type="button" className="section-info-button" aria-label={t.forecast} onClick={() => setInfoModal("forecast")} disabled={showPlaceholders}>
                   <Info size={16} />
                 </button>
               </h2>
             </div>
           </div>
           {showPlaceholders ? (
-            <div className="forecast-grid">
-              {Array.from({ length: 3 }, (_, index) => (
-                <article className="kpi-card" key={index}>
-                  <SkeletonText width="90px" height="12px" />
-                  <SkeletonText width="120px" height="22px" />
-                  <SkeletonText width="110px" height="12px" />
-                  <SkeletonText width="130px" height="12px" />
-                </article>
-              ))}
-            </div>
+            <ForecastKpiSkeletonGrid t={t} />
           ) : forecast ? (
             <div className="forecast-grid">
               <KpiCard
@@ -2489,7 +2489,7 @@ function DashboardToolbar({
         </div>
         {viewMode === "monthly" ? (
           <div className="range-tools" aria-label="Date range" ref={rangeToolsRef}>
-            <div className="segmented">
+            <div className="segmented range-segmented">
               <button
                 className={range === "all" ? "selected" : ""}
                 onClick={() => {
@@ -2578,13 +2578,17 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
           isRefreshing
           isLoading
         />
-        <KpiSkeletonGrid />
+        <KpiSkeletonGrid
+          labels={[t.latestRoi, t.totalProductionKpi, t.totalExportKpi, t.totalImportKpi, t.totalNetPaymentKpi, t.plantWorks]}
+          showInfoIcons
+        />
         <section className="payback-band">
           <div className="payback-copy">
-            <SkeletonText width="230px" height="24px" />
-            <span className="payback-lines">
-              <SkeletonText width="min(620px, 100%)" height="16px" />
-              <SkeletonText width="min(430px, 78%)" height="16px" />
+            <PaybackHeadingSkeleton />
+            <span className="payback-lines payback-lines-skeleton">
+              <SkeletonText width="min(620px, 100%)" height="1.35em" />
+              <SkeletonText width="min(560px, 90%)" height="1.35em" />
+              <SkeletonText width="min(430px, 78%)" height="1.35em" />
             </span>
           </div>
           <SkeletonBlock className="progress-track skeleton-track" />
@@ -2594,18 +2598,12 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
             <div>
               <h2 className="heading-with-info">
                 <SkeletonText width="124px" height="18px" />
+                <DisabledInfoIcon className="section-info-button" />
               </h2>
             </div>
           </div>
           <div className="forecast-grid">
-            {Array.from({ length: 3 }, (_, index) => (
-              <article className="kpi-card" key={index}>
-                <SkeletonText width="90px" height="12px" />
-                <SkeletonText width="120px" height="22px" />
-                <SkeletonText width="110px" height="12px" />
-                <SkeletonText width="130px" height="12px" />
-              </article>
-            ))}
+            <ForecastKpiSkeletonGrid t={t} standalone={false} />
           </div>
         </section>
         <MonthlyPageSkeletonTail />
@@ -2626,7 +2624,7 @@ function MonthlyPageSkeletonTail() {
         <ChartPanelSkeleton />
       </section>
       <section className="chart-grid chart-grid-single">
-        <ChartPanelSkeleton />
+        <ChartPanelSkeleton hasInfo />
       </section>
       <section id="data" className="data-section">
         <div className="section-heading">
@@ -2644,12 +2642,95 @@ function MonthlyPageSkeletonTail() {
   );
 }
 
-function ChartPanelSkeleton() {
+function PaybackHeadingSkeleton() {
+  return (
+    <h2 className="heading-with-info payback-heading-skeleton">
+      <SkeletonText width="230px" height="22px" />
+      <DisabledInfoIcon className="section-info-button" />
+    </h2>
+  );
+}
+
+function ForecastKpiSkeletonGrid({ t, standalone = true }: { readonly t: Record<string, string>; readonly standalone?: boolean }) {
+  const labels = [t.expectedProduction, t.expectedRoi, t.expectedIncome];
+  const icons = [
+    <SunMedium size={20} />,
+    <CircleDollarSign size={20} />,
+    <WalletCards size={20} />,
+  ];
+  const cards = Array.from({ length: 3 }, (_, index) => (
+    <article className="kpi-card kpi-card-loading" key={index}>
+      <div className="kpi-icon">{icons[index]}</div>
+      <span>{labels[index]}</span>
+      <SkeletonText width="120px" height="22px" />
+      <SkeletonText width="110px" height="15px" />
+      <SkeletonText width="130px" height="15px" />
+    </article>
+  ));
+
+  return standalone ? <div className="forecast-grid">{cards}</div> : <>{cards}</>;
+}
+
+function DailyPageSkeleton({ t }: { readonly t: Record<string, string> }) {
+  return (
+    <>
+      <KpiSkeletonGrid
+        count={4}
+        className="daily-kpi-grid"
+        labels={[t.production, t.export, t.import, t.latestRoi]}
+      />
+      <section id="energy" className="chart-grid">
+        <ChartPanelSkeleton />
+        <ChartPanelSkeleton />
+      </section>
+      <section id="finance" className="chart-grid">
+        <ChartPanelSkeleton />
+        <ChartPanelSkeleton />
+      </section>
+      <section id="data" className="data-section">
+        <div className="section-heading">
+          <div>
+            <SkeletonText width="96px" height="18px" />
+          </div>
+          <div className="filter-controls">
+            <SkeletonText width="132px" height="40px" />
+          </div>
+        </div>
+        <DataTableSkeleton />
+      </section>
+    </>
+  );
+}
+
+function PlantComparisonPageSkeleton() {
+  return (
+    <section className="plant-comparison-section" aria-busy="true">
+      <div className="section-heading">
+        <div>
+          <SkeletonText width="168px" height="22px" />
+          <SkeletonText width="min(440px, 100%)" height="16px" />
+        </div>
+        <SkeletonText width="190px" height="42px" />
+      </div>
+      <div className="plant-comparison-controls">
+        <SkeletonText width="100%" height="62px" />
+        <SkeletonText width="100%" height="62px" />
+        <SkeletonText width="100%" height="62px" />
+        <SkeletonText width="116px" height="42px" />
+      </div>
+    </section>
+  );
+}
+
+function ChartPanelSkeleton({ hasInfo = false }: { readonly hasInfo?: boolean }) {
   return (
     <article className="chart-panel" aria-busy="true">
       <div className="chart-head">
         <div>
-          <SkeletonText width="128px" height="18px" />
+          <h2 className={hasInfo ? "heading-with-info" : undefined}>
+            <SkeletonText width="128px" height="18px" />
+            {hasInfo ? <DisabledInfoIcon className="section-info-button" /> : null}
+          </h2>
         </div>
         <div className="legend">
           <SkeletonText width="72px" height="14px" />
@@ -2915,14 +2996,40 @@ function SkeletonText({ width = "100%", height = "1em" }: { width?: string; heig
   return <SkeletonBlock className="skeleton-text" style={{ "--skeleton-width": width, "--skeleton-height": height } as React.CSSProperties} />;
 }
 
-function KpiSkeletonGrid() {
+function DisabledInfoIcon({ className, size = 16 }: { readonly className: string; readonly size?: number }) {
   return (
-    <section id="overview" className="kpi-grid" aria-busy="true">
-      {Array.from({ length: 6 }).map((_, index) => (
-        <article className="kpi-card" key={index}>
-          <SkeletonText width="74px" height="13px" />
+    <button type="button" className={className} disabled aria-hidden="true" tabIndex={-1}>
+      <Info size={size} />
+    </button>
+  );
+}
+
+interface KpiSkeletonGridProps {
+  readonly count?: number;
+  readonly className?: string;
+  readonly labels?: readonly string[];
+  readonly showInfoIcons?: boolean;
+}
+
+function KpiSkeletonGrid({ count = 6, className = "", labels = [], showInfoIcons = false }: KpiSkeletonGridProps) {
+  const icons = [
+    <CircleDollarSign size={20} />,
+    <SunMedium size={20} />,
+    <ArrowUpFromLine size={20} />,
+    <ArrowDownToLine size={20} />,
+    <WalletCards size={20} />,
+    <CalendarClock size={20} />,
+  ];
+
+  return (
+    <section id="overview" className={`kpi-grid${className ? ` ${className}` : ""}`} aria-busy="true">
+      {Array.from({ length: count }).map((_, index) => (
+        <article className="kpi-card kpi-card-loading" key={index}>
+          {showInfoIcons ? <DisabledInfoIcon className="kpi-info-button" /> : null}
+          <div className="kpi-icon">{icons[index % icons.length]}</div>
+          {labels[index] ? <span>{labels[index]}</span> : <SkeletonText width="74px" height="22px" />}
           <SkeletonText width="112px" height="22px" />
-          <SkeletonText width="138px" height="14px" />
+          <SkeletonText width="138px" height="17px" />
         </article>
       ))}
     </section>
@@ -2942,7 +3049,11 @@ function ChartSkeleton() {
   );
 }
 
-function DataTableSkeleton() {
+interface DataTableSkeletonProps {
+  readonly rowCount?: number;
+}
+
+function DataTableSkeleton({ rowCount = 12 }: DataTableSkeletonProps) {
   return (
     <div className="table-wrap" aria-busy="true">
       <table>
@@ -2950,13 +3061,16 @@ function DataTableSkeleton() {
           <tr>
             {Array.from({ length: 12 }).map((_, index) => (
               <th key={index}>
-                <SkeletonText width={index === 0 ? "54px" : "82px"} height="12px" />
+                <span className={index >= 7 && index <= 10 ? "table-heading" : undefined}>
+                  <SkeletonText width={index === 0 ? "54px" : "82px"} height="12px" />
+                  {index >= 7 && index <= 10 ? <DisabledInfoIcon className="table-info-button" /> : null}
+                </span>
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {Array.from({ length: 5 }).map((_, rowIndex) => (
+          {Array.from({ length: rowCount }).map((_, rowIndex) => (
             <tr key={rowIndex}>
               {Array.from({ length: 12 }).map((_, cellIndex) =>
                 cellIndex === 0 ? (
@@ -2995,8 +3109,7 @@ function ForecastDetail({
       <span>{current}</span>
       {label ? (
         <span className={deltaTone(delta)}>
-          {formattedDelta}
-          {formatDeltaPct(delta, base)} {label}
+          {`${formattedDelta} ${formatDeltaPct(delta, base)} ${label}`.replaceAll(" ", "\u00a0")}
         </span>
       ) : null}
     </span>

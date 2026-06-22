@@ -95,11 +95,16 @@ export async function loadPlantGranularity(plantId: string, granularity: string)
 
   const { plant, records, tariffs, projection } = await fetchDashboardData(plantId, granularity)
   const isDayGranularity = /^\d{4}-\d{2}-\d{2}$/.test(granularity)
+  const days = isDayGranularity
+    ? records as readonly DayRecord[]
+    : /^\d{4}$/.test(granularity)
+      ? (await fetchDashboardData(plantId)).days
+      : []
 
   return toLoadedPlant({
     plant,
     months: isDayGranularity ? [] : records as readonly MonthRecord[],
-    days: isDayGranularity ? records as readonly DayRecord[] : [],
+    days,
     tariffs,
     projection,
   })
