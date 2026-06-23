@@ -18,6 +18,14 @@ class DtekConfig:
     cookies: dict[str, str]
 
     @cached_property
+    def enabled(self) -> bool:
+        return (
+            self.password != ""
+            and self.phone != "+380970000000"
+            and self.accountId != "120001234567"
+        )
+
+    @cached_property
     def url(self) -> str:
         return f"https://ok.dtek-{self.department}.com.ua/api"
 

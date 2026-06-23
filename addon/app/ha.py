@@ -1,7 +1,9 @@
 from os import environ
-from typing import Any
+from typing import Any, Callable, TypeAlias
 
 from requests import request, Response, utils as requests_utils
+
+CallService: TypeAlias = Callable[[str, dict[str, Any]], None]
 
 
 class HomeAssistantError(RuntimeError):

@@ -1,9 +1,10 @@
 import base64
 import json
 import time
+from abc import ABC
 from collections import defaultdict
 from dataclasses import dataclass, asdict
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Final
@@ -33,7 +34,7 @@ class MonthReading:
     export_night: Decimal
 
 
-class DtekFetchError(RuntimeError):
+class UtilityMeterFetchError(RuntimeError):
     def __init__(self, message: str | None, failure_count: int, last_success_at: float | None) -> None:
         super().__init__(message)
         self.message = message
@@ -229,10 +230,8 @@ def sanitize_error(error: Exception, config: DtekConfig) -> str:
     return text[:220]
 
 
-class Dtek:
-    def __init__(self, config: DtekConfig, storage: Path = STATE_PATH) -> None:
-        self._config: Final[DtekConfig] = config
-        self._state_storage: Final[Storage] = Storage(State, storage)
+class UtilityMeter(ABC):
+    def __init__(self) -> None:
         self._recovered_from_failure = False
 
     @property
@@ -240,8 +239,18 @@ class Dtek:
         return self._recovered_from_failure
 
     def get_values(self) -> dict[str, Any] | None:
-        # if not self._should_check():
-        #     return None
+        raise NotImplementedError
+
+
+class Dtek(UtilityMeter):
+    def __init__(self, config: DtekConfig, storage: Path = STATE_PATH) -> None:
+        super().__init__()
+        self._config: Final[DtekConfig] = config
+        self._state_storage: Final[Storage] = Storage(State, storage)
+
+    def get_values(self) -> dict[str, Any] | None:
+        if not self._config.enabled:
+            return None
 
         self._recovered_from_failure = False
         state = self._state_storage.load()
@@ -254,29 +263,22 @@ class Dtek:
                 state.lastFailureAt = None
                 state.lastSuccessAt = time.time()
                 state.lastError = None
+                self._state_storage.save(state)
             except Exception as error:
                 state.failureCount += 1
                 state.lastFailureAt = time.time()
                 state.lastError = sanitize_error(error, self._config)
                 self._state_storage.save(state)
-                raise DtekFetchError(state.lastError, state.failureCount, state.lastSuccessAt) from error
-
-            self._state_storage.save(state)
+                raise UtilityMeterFetchError(state.lastError, state.failureCount, state.lastSuccessAt) from error
 
         if state.failureCount > 0:
             return None
 
         return state.payload if is_complete_payload(state.payload) else None
 
-    @staticmethod
-    def _should_check(today: date | None = None) -> bool:
-        current = today or date.today()
-        first_next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
-        days_before_end = (first_next_month - current).days
-        return current.day <= CHECK_DAYS_AFTER_MONTH_START or days_before_end <= CHECK_DAYS_BEFORE_MONTH_END
-
 
 __all__ = [
     "Dtek",
-    "DtekFetchError",
+    "UtilityMeterFetchError",
+    "UtilityMeter",
 ]

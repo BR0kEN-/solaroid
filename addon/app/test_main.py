@@ -5,8 +5,8 @@ from datetime import datetime
 from pathlib import Path
 
 from config import DtekConfig, NotificationsConfig, SolaroidConfig, load_config
-from main import DTEK_FAILURE_NOTIFICATION_ID, daily_ingest_slots, next_ingest_slot, run_once
-from utility import DtekFetchError
+from main import UTILITY_METER_FAILURE_NOTIFICATION_ID, daily_ingest_slots, next_ingest_slot, run_once
+from utility import UtilityMeterFetchError, UtilityMeter
 
 
 def config() -> SolaroidConfig:
@@ -26,20 +26,21 @@ def config() -> SolaroidConfig:
             intervalMinutes=60,
             cookies={},
         ),
-        notifications=NotificationsConfig(mobileServices=["notify.notify_admins", "notify.mobile_app_phone"]),
+        notifications=NotificationsConfig(mobileServices=("notify.notify_admins", "notify.mobile_app_phone")),
     )
 
 
-class FakeDtek:
+class FakeDtek(UtilityMeter):
     def __init__(
         self,
         result: dict[str, object] | None = None,
-        error: DtekFetchError | None = None,
+        error: UtilityMeterFetchError | None = None,
         recovered_from_failure: bool = False,
     ) -> None:
+        super().__init__()
         self._result = result
         self._error = error
-        self.recovered_from_failure = recovered_from_failure
+        self._recovered_from_failure = recovered_from_failure
 
     def get_values(self) -> dict[str, object] | None:
         if self._error:
@@ -58,7 +59,7 @@ class MainNotificationTest(unittest.TestCase):
             return {"ok": True}
 
         run_once(
-            FakeDtek(error=DtekFetchError("HTTPError: HTTP 403", 1, None)),  # type: ignore[arg-type]
+            FakeDtek(error=UtilityMeterFetchError("HTTPError: HTTP 403", 1, None)),
             config(),
             read_state=lambda _entity_id: 10,
             post=post,
@@ -70,14 +71,14 @@ class MainNotificationTest(unittest.TestCase):
             "notify.notify_admins",
             "notify.mobile_app_phone",
         ])
-        self.assertEqual(service_calls[0][1]["notification_id"], DTEK_FAILURE_NOTIFICATION_ID)
+        self.assertEqual(service_calls[0][1]["notification_id"], UTILITY_METER_FAILURE_NOTIFICATION_ID)
         self.assertNotIn("utility", posts[0]["thisMonth"])  # type: ignore[operator]
 
     def test_repeated_failure_updates_persistent_notification_only(self) -> None:
         service_calls: list[tuple[str, dict[str, object]]] = []
 
         run_once(
-            FakeDtek(error=DtekFetchError("HTTPError: HTTP 403", 2, 100)),  # type: ignore[arg-type]
+            FakeDtek(error=UtilityMeterFetchError("HTTPError: HTTP 403", 2, 100)),
             config(),
             read_state=lambda _entity_id: 10,
             post=lambda _url, _token, _payload: {"ok": True},
@@ -93,20 +94,20 @@ class MainNotificationTest(unittest.TestCase):
             FakeDtek(
                 result={"month": "2026-07", "import": {"day": 1, "night": 2}, "export": {"day": 3, "night": 4}},
                 recovered_from_failure=True,
-            ),  # type: ignore[arg-type]
+            ),
             config(),
             read_state=lambda _entity_id: 10,
             post=lambda _url, _token, _payload: {"ok": True},
             service_call=lambda service, data: service_calls.append((service, data)),
         )
 
-        self.assertEqual(service_calls, [("persistent_notification.dismiss", {"notification_id": DTEK_FAILURE_NOTIFICATION_ID})])
+        self.assertEqual(service_calls, [("persistent_notification.dismiss", {"notification_id": UTILITY_METER_FAILURE_NOTIFICATION_ID})])
 
     def test_cached_success_does_not_dismiss_persistent_notification(self) -> None:
         service_calls: list[tuple[str, dict[str, object]]] = []
 
         run_once(
-            FakeDtek(result={"month": "2026-07", "import": {"day": 1, "night": 2}, "export": {"day": 3, "night": 4}}),  # type: ignore[arg-type]
+            FakeDtek(result={"month": "2026-07", "import": {"day": 1, "night": 2}, "export": {"day": 3, "night": 4}}),
             config(),
             read_state=lambda _entity_id: 10,
             post=lambda _url, _token, _payload: {"ok": True},
@@ -114,6 +115,19 @@ class MainNotificationTest(unittest.TestCase):
         )
 
         self.assertEqual(service_calls, [])
+
+    def test_disabled_utility_meter_dismisses_persistent_notification(self) -> None:
+        service_calls: list[tuple[str, dict[str, object]]] = []
+
+        run_once(
+            FakeDtek(recovered_from_failure=True),
+            config(),
+            read_state=lambda _entity_id: 10,
+            post=lambda _url, _token, _payload: {"ok": True},
+            service_call=lambda service, data: service_calls.append((service, data)),
+        )
+
+        self.assertEqual(service_calls, [("persistent_notification.dismiss", {"notification_id": UTILITY_METER_FAILURE_NOTIFICATION_ID})])
 
 
 class IngestScheduleTest(unittest.TestCase):
