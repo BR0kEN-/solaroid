@@ -49,7 +49,7 @@ type InfoModal =
   | "plantWorks"
   | "pvgis"
   | {
-    readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "exportPrice" | "netPayment" | "utilityMeter";
+    readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "exportPrice" | "netPayment" | "roiCalc" | "utilityMeter";
     readonly row: MonthRow;
   };
 
@@ -201,7 +201,8 @@ const i18n = {
     electricityCostWithoutSolar: "Electricity cost without solar",
     formulaInputs: "Inputs",
     importPrices: "Import prices",
-    exportPriceInput: "Export price",
+    exportPriceInput: "Export prices",
+    after: "After",
     usdRate: "USD/UAH rate",
     taxes: "Taxes",
     dayCost: "Day cost",
@@ -288,7 +289,7 @@ const i18n = {
     grossExportPrice: "Before taxes",
     netExportPrice: "After taxes",
     vat: "VAT",
-    militaryTax: "Military tax",
+    militaryTax: "Military",
     importDay: "Import/day",
     importNight: "Import/night",
     consumedDay: "Consumed/day",
@@ -372,7 +373,8 @@ const i18n = {
     electricityCostWithoutSolar: "Вартість електрики без сонця",
     formulaInputs: "Вхідні дані",
     importPrices: "Ціни імпорту",
-    exportPriceInput: "Ціна експорту",
+    exportPriceInput: "Ціни експорту",
+    after: "Після",
     usdRate: "Курс USD/UAH",
     taxes: "Податки",
     dayCost: "Вартість дня",
@@ -1418,9 +1420,10 @@ function App({
         body: (
           <ExportPriceInfo
             t={t}
-            dayNightLabel={`${t.day}/${t.night}`}
-            gross={`${formatDisplayMoney(grossDayPrice, currency, lang)} / ${formatDisplayMoney(grossNightPrice, currency, lang)}`}
-            net={`${formatDisplayMoney(netDayPrice, currency, lang)} / ${formatDisplayMoney(netNightPrice, currency, lang)}`}
+            grossDay={formatDisplayMoney(grossDayPrice, currency, lang)}
+            grossNight={formatDisplayMoney(grossNightPrice, currency, lang)}
+            netDay={formatDisplayMoney(netDayPrice, currency, lang)}
+            netNight={formatDisplayMoney(netNightPrice, currency, lang)}
             vat={`${formatNumber(row.exportVat, 2, 2)}%`}
             military={`${formatNumber(row.exportMilitary, 2, 2)}%`}
           />
@@ -1441,6 +1444,13 @@ function App({
             lang={lang}
           />
         ),
+      };
+    }
+    if (typeof infoModal === "object" && infoModal?.kind === "roiCalc") {
+      const row = infoModal.row;
+      return {
+        title: `${t.roi} · ${row.month}`,
+        body: <RoiInfo row={row} t={t} currency={currency} lang={lang} />,
       };
     }
     if (typeof infoModal === "object" && infoModal?.kind === "utilityMeter") {
@@ -1742,6 +1752,7 @@ function App({
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
+              onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
             />
           )
         ) : viewMode === "comparison" ? (
@@ -2044,6 +2055,7 @@ function App({
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
+              onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
               onUtilityMeterInfo={(row) => setInfoModal({ kind: "utilityMeter", row })}
             />
           )}
@@ -4485,6 +4497,7 @@ function DailyDashboard({
   onConsumedSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
+  onRoiValueInfo,
 }: {
   readonly rows: readonly MonthRow[];
   readonly allRows: readonly MonthRow[];
@@ -4506,6 +4519,7 @@ function DailyDashboard({
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
+  readonly onRoiValueInfo: (row: MonthRow) => void;
 }) {
   const monthOptions = useMemo(
     () => [...new Map(allRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
@@ -4700,6 +4714,7 @@ function DailyDashboard({
           onConsumedSplitInfo={onConsumedSplitInfo}
           onExportPriceInfo={onExportPriceInfo}
           onNetPaymentInfo={onNetPaymentInfo}
+          onRoiValueInfo={onRoiValueInfo}
         />
       </section>
     </>
@@ -4840,6 +4855,7 @@ function DataTable({
   onConsumedSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
+  onRoiValueInfo,
   onUtilityMeterInfo,
 }: {
   readonly rows: readonly MonthRow[];
@@ -4856,6 +4872,7 @@ function DataTable({
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
+  readonly onRoiValueInfo: (row: MonthRow) => void;
   readonly onUtilityMeterInfo?: (row: MonthRow) => void;
 }) {
   const newestFirst = [...rows].sort((a, b) => b.date.getTime() - a.date.getTime());
@@ -4941,7 +4958,13 @@ function DataTable({
                   onInfo={() => onNetPaymentInfo(row)}
                 />
               </td>
-              <td className="positive">{formatTableMoney(rowRoiMoney(row, currency), currency, lang)}</td>
+              <td className="positive">
+                <TableValueInfo
+                  value={formatTableMoney(rowRoiMoney(row, currency), currency, lang)}
+                  label={t.roi}
+                  onInfo={() => onRoiValueInfo(row)}
+                />
+              </td>
               <td>{formatNumber(row.usdRate, 2, 2)}</td>
             </tr>
           ))}
@@ -5047,53 +5070,40 @@ function DayNightInfo({
 
 function ExportPriceInfo({
   t,
-  dayNightLabel,
-  gross,
-  net,
+  grossDay,
+  grossNight,
+  netDay,
+  netNight,
   vat,
   military,
 }: {
   readonly t: Record<string, string>;
-  readonly dayNightLabel: string;
-  readonly gross: string;
-  readonly net: string;
+  readonly grossDay: string;
+  readonly grossNight: string;
+  readonly netDay: string;
+  readonly netNight: string;
   readonly vat: string;
   readonly military: string;
 }) {
   return (
-    <div className="info-stack">
-      <section className="price-tax-block">
-        <h3>{t.taxes}</h3>
-        <dl>
-          <div>
-            <dt>{t.vat}</dt>
-            <dd>{vat}</dd>
-          </div>
-          <div>
-            <dt>{t.militaryTax}</dt>
-            <dd>{military}</dd>
-          </div>
-        </dl>
-      </section>
-      <table className="price-comparison-table">
-        <thead>
-          <tr>
-            <th aria-label={t.exportPrice} />
-            <th>{dayNightLabel}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th>{t.grossExportPrice}</th>
-            <td>{gross}</td>
-          </tr>
-          <tr>
-            <th>{t.netExportPrice}</th>
-            <td>{net}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <StackedValues
+      rows={[
+        { label: t.day, value: grossDay, tone: "day" as const },
+        { label: t.night, value: grossNight, tone: "night" as const },
+        {
+          label: t.taxes,
+          value: (
+            <span className="tax-inline-values">
+              <span>{vat} {t.vat}</span>
+              {", "}
+              <span>{military} {t.militaryTax}</span>
+            </span>
+          ),
+        },
+        { label: t.day, value: netDay, tone: "day" as const },
+        { label: t.night, value: netNight, tone: "night" as const },
+      ]}
+    />
   );
 }
 
@@ -5190,6 +5200,86 @@ function UtilitySplitTable({
   );
 }
 
+function RoiInfo({
+  row,
+  t,
+  currency,
+  lang,
+}: {
+  readonly row: MonthRow;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}) {
+  const displayMoney = (value: number) => formatDisplayMoney(moneyFromUah(value, currency, row.usdRate), currency, lang);
+  const costWithoutSolar = moneyFromUah(row.consumedPayment, currency, row.usdRate);
+  const netPayment = moneyFromUah(row.electricityPayment, currency, row.usdRate);
+  const roi = rowRoiMoney(row, currency);
+  const tariff = tariffFromRow(row);
+  const breakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
+  const costRows: StackedValueRow[] = [];
+  const costParts: number[] = [];
+  const pushCostRow = (label: string, kwh: number, price: number, tone?: "day" | "night", showZero = false) => {
+    if (kwh <= 0 && !showZero) return;
+    const cost = kwh * price;
+    costParts.push(cost);
+    costRows.push({
+      label,
+      tone,
+      value: (
+        <>
+          {displayMoney(cost)} = {displayMoney(price)} × {formatKwh(kwh, lang)}
+        </>
+      ),
+    });
+  };
+
+  if (row.electricHeatingThresholdKwh) {
+    pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day", true);
+    pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night", true);
+    costRows.push({ label: t.after, value: formatKwh(row.electricHeatingThresholdKwh, lang) });
+    pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day", true);
+    pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night", true);
+  } else {
+    pushCostRow(t.day, breakdown.regularDay, row.importPriceDay, "day");
+    pushCostRow(t.night, breakdown.regularNight, row.importPriceNight, "night");
+  }
+
+  costRows.push({
+    label: t.total,
+    value: costParts.length > 1 ? (
+      <>
+        {displayMoney(row.consumedPayment)} = {costParts.map((part, index) => (
+          <React.Fragment key={index}>
+            {index > 0 ? " + " : ""}
+            {displayMoney(part)}
+          </React.Fragment>
+        ))}
+      </>
+    ) : (
+      displayMoney(row.consumedPayment)
+    ),
+  });
+
+  return (
+    <MathInfo
+      rows={[
+        { label: t.electricityCostWithoutSolar, value: <StackedValues rows={costRows} /> },
+        { label: t.netPayment, value: displayMoney(row.electricityPayment) },
+        {
+          label: t.roi,
+          value: (
+            <>
+              <FormulaResult>{formatDisplayMoney(roi, currency, lang)}</FormulaResult> = {formatDisplayMoney(costWithoutSolar, currency, lang)} + {formatDisplayMoney(netPayment, currency, lang)}
+            </>
+          ),
+        },
+      ]}
+      className="net-payment-math"
+    />
+  );
+}
+
 function NetPaymentInfo({
   row,
   commercialDate,
@@ -5220,26 +5310,36 @@ function NetPaymentInfo({
     breakdown: ImportCostBreakdown,
     { totalLabel = t.total, totalMultiplier = 1 }: { readonly totalLabel?: string; readonly totalMultiplier?: number } = {},
   ) => {
-    const rows: Array<{ label: string; value: React.ReactNode }> = [];
+    const rows: StackedValueRow[] = [];
     const costParts: number[] = [];
-    const pushCostRow = (label: string, kwh: number, price: number) => {
-      if (kwh <= 0) return;
+    const displayCostPart = (value: number) => formatDisplayMoney(moneyFromUah(value, currency, row.usdRate), currency, lang, value === 0);
+    const pushCostRow = (label: string, kwh: number, price: number, tone?: "day" | "night", showZero = false) => {
+      if (kwh <= 0 && !showZero) return;
       const cost = kwh * price;
       costParts.push(cost);
       rows.push({
         label,
+        tone,
         value: (
           <>
-            {displayMoneyMath(cost)} = {formatKwh(kwh, lang)} × {displayMoney(price)}
+            {displayMoneyMath(cost)} = {displayMoney(price)} × {formatKwh(kwh, lang)}
           </>
         ),
       });
     };
 
-    pushCostRow(row.electricHeatingThresholdKwh ? `${t.electricHeatingTier} ${t.day}` : t.day, breakdown.discountedDay, row.importPriceDay);
-    pushCostRow(row.electricHeatingThresholdKwh ? `${t.electricHeatingTier} ${t.night}` : t.night, breakdown.discountedNight, row.importPriceNight);
-    pushCostRow(row.electricHeatingThresholdKwh ? `${t.regularTier} ${t.day}` : t.day, breakdown.regularDay, regularImportDayPrice(tariff));
-    pushCostRow(row.electricHeatingThresholdKwh ? `${t.regularTier} ${t.night}` : t.night, breakdown.regularNight, regularImportNightPrice(tariff));
+    if (row.electricHeatingThresholdKwh) {
+      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day", true);
+      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night", true);
+      rows.push({ label: t.after, value: formatKwh(row.electricHeatingThresholdKwh, lang) });
+      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day", true);
+      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night", true);
+    } else {
+      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day");
+      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night");
+      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day");
+      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night");
+    }
 
     rows.push({
       label: totalLabel,
@@ -5248,7 +5348,7 @@ function NetPaymentInfo({
           {displayMoneyMath(breakdown.total * totalMultiplier)} = {costParts.map((part, index) => (
             <React.Fragment key={index}>
               {index > 0 ? " + " : ""}
-              {displayMoney(part)}
+              {displayCostPart(part)}
             </React.Fragment>
           ))}
         </>
@@ -5262,7 +5362,12 @@ function NetPaymentInfo({
         label: totalLabel,
         value: (
           <>
-            {displayMoneyMath(breakdown.total * totalMultiplier)} = -({displayMoney(breakdown.total)})
+            {displayMoneyMath(breakdown.total * totalMultiplier)} = -({costParts.length > 1 ? costParts.map((part, index) => (
+              <React.Fragment key={index}>
+                {index > 0 ? " + " : ""}
+                {displayCostPart(part)}
+              </React.Fragment>
+            )) : displayMoney(breakdown.total)})
           </>
         ),
       };
@@ -5270,30 +5375,25 @@ function NetPaymentInfo({
     return rows;
   };
   const importTotalValue = Math.max(row.importTotal, 0);
-  const consumedBreakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
   const transitionRows = commercialTransitionRows(row, commercialDate, dailyRows);
-  const splitRows = (total: number, day: number, night: number) => [
-    { label: t.total, value: formatKwh(total, lang) },
-    { label: t.day, value: formatKwh(day, lang) },
-    { label: t.night, value: formatKwh(night, lang) },
-  ];
   const inputRows: MathInfoRow[] = [
     {
       label: t.formulaInputs,
       value: (
-        <StackedValues
+        <InputValues
           rows={[
+            { label: t.import, total: row.importTotal, day: row.importDay, night: row.importNight },
+            { label: t.export, total: exportTotal(row), day: row.exportDay, night: row.exportNight },
             {
-              label: t.import,
-              value: <StackedValues rows={splitRows(row.importTotal, row.importDay, row.importNight)} />,
+              label: t.balance,
+              value: (
+                <span className={row.balance < 0 ? "positive" : row.balance > 0 ? "negative" : "muted"}>
+                  {formatKwh(row.balance, lang)}
+                </span>
+              ),
             },
-            {
-              label: t.export,
-              value: <StackedValues rows={splitRows(exportTotal(row), row.exportDay, row.exportNight)} />,
-            },
-            { label: t.balance, value: formatKwh(row.balance, lang) },
-            { label: t.consumed, value: `${formatKwh(row.consumedTotal, lang)} (${formatKwh(row.consumedDay, lang)} / ${formatKwh(row.consumedNight, lang)})` },
           ]}
+          lang={lang}
         />
       ),
     },
@@ -5302,14 +5402,12 @@ function NetPaymentInfo({
       value: (
         <StackedValues
           rows={[
-            { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
-            { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
+            { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}`, tone: "day" as const },
+            { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}`, tone: "night" as const },
             ...(row.electricHeatingThresholdKwh ? [
-              { label: t.electricHeatingThreshold, value: formatKwh(row.electricHeatingThresholdKwh, lang) },
-              { label: `${t.electricHeatingTier} ${t.day}`, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
-              { label: `${t.electricHeatingTier} ${t.night}`, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
-              { label: `${t.regularTier} ${t.day}`, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}` },
-              { label: `${t.regularTier} ${t.night}`, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}` },
+              { label: t.after, value: formatKwh(row.electricHeatingThresholdKwh, lang) },
+              { label: t.day, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}`, tone: "day" as const },
+              { label: t.night, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}`, tone: "night" as const },
             ] : []),
           ]}
         />
@@ -5320,26 +5418,17 @@ function NetPaymentInfo({
       value: (
         <ExportPriceInfo
           t={t}
-          dayNightLabel={`${t.day}/${t.night}`}
-          gross={`${displayMoney(row.exportPriceDay)} / ${displayMoney(row.exportPriceNight)}`}
-          net={`${displayMoney(netExportPrice(row))} / ${displayMoney(netExportNightPrice(row))}`}
+          grossDay={displayMoney(row.exportPriceDay)}
+          grossNight={displayMoney(row.exportPriceNight)}
+          netDay={displayMoney(netExportPrice(row))}
+          netNight={displayMoney(netExportNightPrice(row))}
           vat={`${formatNumber(row.exportVat, 2, 2)}%`}
           military={`${formatNumber(row.exportMilitary, 2, 2)}%`}
         />
       ),
     },
   ];
-  const rows: MathInfoRow[] = [
-    ...inputRows,
-    {
-      label: t.electricityCostWithoutSolar,
-      value: (
-        <StackedValues
-          rows={importCostRows(consumedBreakdown)}
-        />
-      ),
-    },
-  ];
+  const rows: MathInfoRow[] = [...inputRows];
 
   if (transitionRows) {
     const beforeExport = transitionRows.before.reduce((sum, current) => sum + exportTotal(current), 0);
@@ -5429,7 +5518,6 @@ function NetPaymentInfo({
     const nightShare = row.importNight / importTotalValue;
     const coveredDay = exportTotal(row) * dayShare;
     const coveredNight = exportTotal(row) * nightShare;
-    const coveredTotal = coveredDay + coveredNight;
     const remainingDay = row.importDay - coveredDay;
     const remainingNight = row.importNight - coveredNight;
     const remainingTotal = remainingDay + remainingNight;
@@ -5452,14 +5540,6 @@ function NetPaymentInfo({
                 value: (
                   <>
                     <FormulaResult>{formatKwh(coveredNight, lang)}</FormulaResult> = {formatKwh(exportTotal(row), lang)} × {formatNumber(nightShare * 100, 2, 2)}% ({formatKwh(row.importNight, lang)} / {formatKwh(row.importTotal, lang)})
-                  </>
-                ),
-              },
-              {
-                label: t.total,
-                value: (
-                  <>
-                    <FormulaResult>{formatKwh(coveredTotal, lang)}</FormulaResult> = {formatKwh(coveredDay, lang)} + {formatKwh(coveredNight, lang)}
                   </>
                 ),
               },
@@ -5509,7 +5589,7 @@ function NetPaymentInfo({
     );
   }
 
-  return <MathInfo rows={rows} />;
+  return <MathInfo rows={rows} className="net-payment-math" />;
 }
 
 function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefined, dailyRows: readonly MonthRow[]) {
@@ -5527,11 +5607,13 @@ function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefine
 
 function MathInfo({
   rows,
+  className,
 }: {
   readonly rows: readonly MathInfoRow[];
+  readonly className?: string;
 }) {
   return (
-    <dl className="math-info">
+    <dl className={["math-info", className ?? ""].filter(Boolean).join(" ")}>
       {rows.map((row) => (
         <div key={row.label}>
           <dt>{row.label}</dt>
@@ -5550,17 +5632,66 @@ interface MathInfoRow {
 function StackedValues({
   rows,
 }: {
-  readonly rows: readonly {
-    readonly label: string;
-    readonly value: React.ReactNode;
-  }[];
+  readonly rows: readonly StackedValueRow[];
 }) {
   return (
     <span className="stacked-values">
       {rows.map((row) => (
+        <span key={row.label} className={row.wide ? "stacked-values-wide" : undefined}>
+          {row.wide ? (
+            <>
+              <b aria-hidden="true" />
+              <span>{row.value ?? row.label}</span>
+            </>
+          ) : (
+            <>
+              <b>{row.label}</b>
+              <span className={row.tone ? `stacked-values-${row.tone}` : undefined}>{row.value}</span>
+            </>
+          )}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+interface StackedValueRow {
+  readonly label: string
+  readonly value?: React.ReactNode
+  readonly tone?: "day" | "night"
+  readonly wide?: boolean
+}
+
+interface InputValueRow {
+  readonly label: string
+  readonly total?: number
+  readonly day?: number
+  readonly night?: number
+  readonly value?: React.ReactNode
+}
+
+interface InputValuesProps {
+  readonly rows: readonly InputValueRow[]
+  readonly lang: Lang
+}
+
+function InputValues({ rows, lang }: InputValuesProps) {
+  return (
+    <span className="input-values">
+      {rows.map((row) => (
         <span key={row.label}>
-          <b>{row.label}</b>
-          <span>{row.value}</span>
+          <b>{row.label}:</b>
+          <span>
+            {row.value ?? (
+              <>
+                <FormulaResult>{formatKwh(row.total ?? 0, lang)}</FormulaResult>
+                {" = "}
+                <span className="input-values-day">{formatKwh(row.day ?? 0, lang)}</span>
+                {" + "}
+                <span className="input-values-night">{formatKwh(row.night ?? 0, lang)}</span>
+              </>
+            )}
+          </span>
         </span>
       ))}
     </span>
