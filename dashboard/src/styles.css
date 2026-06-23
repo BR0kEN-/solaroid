@@ -2250,7 +2250,7 @@ h2 {
 }
 
 .net-payment-math .stacked-values > span {
-  grid-template-columns: minmax(78px, auto) minmax(0, 1fr);
+  grid-template-columns: 130px minmax(0, 1fr);
 }
 
 .stacked-values > span > b {
@@ -2304,7 +2304,7 @@ h2 {
 }
 
 .net-payment-math .input-values > span {
-  grid-template-columns: minmax(78px, auto) minmax(0, 1fr);
+  grid-template-columns: 130px minmax(0, 1fr);
 }
 
 .input-values b {

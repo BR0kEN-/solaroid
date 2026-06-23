@@ -5433,16 +5433,68 @@ function NetPaymentInfo({
   if (transitionRows) {
     const beforeExport = transitionRows.before.reduce((sum, current) => sum + exportTotal(current), 0);
     const afterExport = transitionRows.after.reduce((sum, current) => sum + exportTotal(current), 0);
+    const beforeImportDay = transitionRows.before.reduce((sum, current) => sum + current.importDay, 0);
+    const beforeImportNight = transitionRows.before.reduce((sum, current) => sum + current.importNight, 0);
     const beforePayment = transitionRows.before.reduce((sum, current) => sum + current.electricityPayment, 0);
     const afterPayment = transitionRows.after.reduce((sum, current) => sum + current.electricityPayment, 0);
+    const beforeImportCostBreakdown = importCostBreakdown(beforeImportDay, beforeImportNight, tariff);
+    const beforeImportCost = beforeImportCostBreakdown.total;
+    const beforeImportCostParts = row.electricHeatingThresholdKwh ? [
+      beforeImportCostBreakdown.discountedDay * row.importPriceDay,
+      beforeImportCostBreakdown.discountedNight * row.importPriceNight,
+      beforeImportCostBreakdown.regularDay * regularImportDayPrice(tariff),
+      beforeImportCostBreakdown.regularNight * regularImportNightPrice(tariff),
+    ] : [
+      beforeImportCostBreakdown.regularDay * row.importPriceDay,
+      beforeImportCostBreakdown.regularNight * row.importPriceNight,
+    ];
+    const displayCostPart = (value: number) => formatDisplayMoney(moneyFromUah(value, currency, row.usdRate), currency, lang, value === 0);
+    const afterPaidExport = transitionRows.after.reduce(
+      (sum, current) => {
+        const paid = exportPayoutSplit(current);
+        return { day: sum.day + paid.day, night: sum.night + paid.night };
+      },
+      { day: 0, night: 0 },
+    );
+    const afterPaidExportTotal = afterPaidExport.day + afterPaidExport.night;
     rows.push(
       {
         label: t.exportedOffset,
         value: (
           <StackedValues
             rows={[
-              { label: t.beforeCommercialDate, value: `${t.exportUnpaid}: ${formatKwh(beforeExport, lang)} → ${displayMoney(0)}` },
-              { label: t.fromCommercialDate, value: `${formatKwh(afterExport, lang)} → ${displayMoney(afterPayment)}` },
+              {
+                label: t.beforeCommercialDate,
+                value: (
+                  <>
+                    {displayMoney(0)} = {formatKwh(beforeExport, lang)} × {displayMoney(0)} ({t.exportUnpaid})
+                  </>
+                ),
+              },
+              {
+                label: t.fromCommercialDate,
+                value: hasSplitExportPrice(row) ? (
+                  <StackedValues
+                    rows={[
+                      {
+                        label: t.day,
+                        value: `${displayMoney(afterPaidExport.day * netExportPrice(row))} = ${formatKwh(afterPaidExport.day, lang)} × ${displayMoney(netExportPrice(row))}`,
+                        tone: "day" as const,
+                      },
+                      {
+                        label: t.night,
+                        value: `${displayMoney(afterPaidExport.night * netExportNightPrice(row))} = ${formatKwh(afterPaidExport.night, lang)} × ${displayMoney(netExportNightPrice(row))}`,
+                        tone: "night" as const,
+                      },
+                      { label: t.total, value: displayMoneyMath(afterPayment) },
+                    ]}
+                  />
+                ) : (
+                  <>
+                    {displayMoneyMath(afterPayment)} = {formatKwh(afterPaidExportTotal, lang)} × {displayMoney(netExportPrice(row))}
+                  </>
+                ),
+              },
             ]}
           />
         ),
@@ -5452,9 +5504,28 @@ function NetPaymentInfo({
         value: (
           <StackedValues
             rows={[
-              { label: t.beforeCommercialDate, value: displayMoneyMath(beforePayment) },
+              {
+                label: t.beforeCommercialDate,
+                value: (
+                  <>
+                    {displayMoneyMath(beforePayment)} = -({beforeImportCostParts.map((part, index) => (
+                      <React.Fragment key={index}>
+                        {index > 0 ? " + " : ""}
+                        {displayCostPart(part)}
+                      </React.Fragment>
+                    ))})
+                  </>
+                ),
+              },
               { label: t.fromCommercialDate, value: displayMoneyMath(afterPayment) },
-              { label: t.total, value: displayMoneyMath(row.electricityPayment) },
+              {
+                label: t.total,
+                value: (
+                  <>
+                    {displayMoneyMath(row.electricityPayment)} = {displayMoney(beforePayment)} + {displayMoney(afterPayment)}
+                  </>
+                ),
+              },
             ]}
           />
         ),
