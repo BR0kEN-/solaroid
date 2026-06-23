@@ -12,6 +12,7 @@ from utility import Dtek, UtilityMeterFetchError, UtilityMeter
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 UTILITY_METER_FAILURE_NOTIFICATION_ID = "solaroid_utility_meter_fetch_failed"
+DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 INGEST_INTERVAL_SECONDS = 20 * 60
 INGEST_ANCHOR_HOUR = 23
 INGEST_ANCHOR_MINUTE = 59
@@ -20,7 +21,7 @@ INGEST_SLOTS_PER_DAY = 24 * 60 * 60 // INGEST_INTERVAL_SECONDS
 
 
 def utility_meter_failure_message(error: UtilityMeterFetchError) -> dict[str, str]:
-    last_success = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(error.last_success_at)) if error.last_success_at else "never"
+    last_success = time.strftime(DATETIME_FORMAT, time.localtime(error.last_success_at)) if error.last_success_at else "never"
 
     return {
         "title": "Solaroid: Utility Meter fetch failed",
@@ -65,6 +66,25 @@ def utility_meter_dismiss_failure_notification(service_call: CallService = call_
         )
     except HomeAssistantError:
         logging.warning("Utility Meter: Failure notification dismiss failed")
+
+
+def ingest_failure_message(error: Exception) -> dict[str, str]:
+    return {
+        "title": "Solaroid: Ingest failed",
+        "message": f"{error.__class__.__name__}: {error}",
+    }
+
+
+def notify_ingest_failure(
+    error: Exception,
+    config: SolaroidConfig,
+    service_call: CallService = call_service,
+) -> None:
+    try:
+        for service in config.notifications.mobileServices:
+            service_call(service, ingest_failure_message(error))
+    except HomeAssistantError:
+        logging.exception("Ingest failure notification failed")
 
 
 def ingest_anchor(day: datetime) -> datetime:
@@ -113,23 +133,35 @@ def run_once(
     logging.info("Posted payload: %s (%s)", result, payload)
 
 
+def run_with_ingest_failure_notification(
+    um: UtilityMeter,
+    config: SolaroidConfig,
+    read_state: Callable[[str], float] = get_entity_state,
+    post: Callable[[str, str, dict[str, Any]], dict[str, Any]] = post_payload,
+    service_call: CallService = call_service,
+) -> bool:
+    try:
+        run_once(um, config, read_state, post, service_call)
+        return True
+    except Exception as error:
+        logging.exception("Sync failed")
+        notify_ingest_failure(error, config, service_call)
+        return False
+
+
 def main() -> None:
     config = load_config()
     um = Dtek(config.dtek)
+    slot = datetime.now()
 
     while True:
-        slot = next_ingest_slot(datetime.now())
-        sleep_seconds = max(0, (slot - datetime.now()).total_seconds())
-        logging.info("Next ingest shot planned at %s", slot.strftime("%Y-%m-%d %H:%M:%S"))
-        time.sleep(sleep_seconds)
         shot_at = datetime.now()
-        logging.info("Ingest shot at %s (drift %.3fs)", shot_at.strftime("%Y-%m-%d %H:%M:%S"), (shot_at - slot).total_seconds())
+        logging.info("Ingest shot at %s (drift %.3fs)", shot_at.strftime(DATETIME_FORMAT), (shot_at - slot).total_seconds())
+        run_with_ingest_failure_notification(um, config)
 
-        # noinspection PyBroadException
-        try:
-            run_once(um, config)
-        except:
-            logging.exception("Sync failed")
+        slot = next_ingest_slot(datetime.now())
+        logging.info("Next ingest shot planned at %s", slot.strftime(DATETIME_FORMAT))
+        time.sleep(max(0, (slot - datetime.now()).total_seconds()))
 
 
 if __name__ == "__main__":

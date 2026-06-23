@@ -5,7 +5,13 @@ from datetime import datetime
 from pathlib import Path
 
 from config import DtekConfig, NotificationsConfig, SolaroidConfig, load_config
-from main import UTILITY_METER_FAILURE_NOTIFICATION_ID, daily_ingest_slots, next_ingest_slot, run_once
+from main import (
+    UTILITY_METER_FAILURE_NOTIFICATION_ID,
+    daily_ingest_slots,
+    next_ingest_slot,
+    run_once,
+    run_with_ingest_failure_notification,
+)
 from utility import UtilityMeterFetchError, UtilityMeter
 
 
@@ -102,6 +108,38 @@ class MainNotificationTest(unittest.TestCase):
         )
 
         self.assertEqual(service_calls, [("persistent_notification.dismiss", {"notification_id": UTILITY_METER_FAILURE_NOTIFICATION_ID})])
+
+    def test_ingest_failure_notifies_and_returns_false(self) -> None:
+        service_calls: list[tuple[str, dict[str, object]]] = []
+
+        result = run_with_ingest_failure_notification(
+            FakeDtek(),
+            config(),
+            read_state=lambda _entity_id: 10,
+            post=lambda _url, _token, _payload: (_ for _ in ()).throw(RuntimeError("backend down")),
+            service_call=lambda service, data: service_calls.append((service, data)),
+        )
+
+        self.assertFalse(result)
+        self.assertEqual([service for service, _data in service_calls], [
+            "notify.notify_admins",
+            "notify.mobile_app_phone",
+        ])
+        self.assertEqual(service_calls[0][1]["title"], "Solaroid: Ingest failed")
+
+    def test_ingest_success_does_not_notify(self) -> None:
+        service_calls: list[tuple[str, dict[str, object]]] = []
+
+        result = run_with_ingest_failure_notification(
+            FakeDtek(),
+            config(),
+            read_state=lambda _entity_id: 10,
+            post=lambda _url, _token, _payload: {"ok": True},
+            service_call=lambda service, data: service_calls.append((service, data)),
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(service_calls, [])
 
     def test_cached_success_does_not_dismiss_persistent_notification(self) -> None:
         service_calls: list[tuple[str, dict[str, object]]] = []
