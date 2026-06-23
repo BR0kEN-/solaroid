@@ -27,6 +27,8 @@
   --skeleton-highlight: #f3f7f4;
   --formula-result-bg: #e8f4ff;
   --formula-result-text: #155f93;
+  --input-day-text: #a96500;
+  --input-night-text: #3158c7;
   --modal-shadow: 0 14px 14px rgba(26, 38, 31, 0.18);
   --portal-header-height: 48px;
   color: var(--text);
@@ -68,6 +70,8 @@
     --skeleton-highlight: #3a414c;
     --formula-result-bg: #163246;
     --formula-result-text: #9bd5ff;
+    --input-day-text: #ffc45a;
+    --input-night-text: #9bb7ff;
     --modal-shadow: 0 14px 14px rgba(0, 0, 0, 0.44);
   }
 }
@@ -2110,21 +2114,21 @@ h2 {
   margin: 0;
 }
 
-.math-info div {
+.math-info > div {
   display: grid;
   gap: 5px;
   padding: 11px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
 }
 
-.math-info div:last-child {
+.math-info > div:last-child {
   border-bottom: 0;
 }
 
 .math-info > div > dt {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--text), var(--muted) 24%);
   font-size: 0.78rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .math-info > div > dd {
@@ -2133,6 +2137,17 @@ h2 {
   font-weight: 500;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.net-payment-math dd,
+.net-payment-math .stacked-values > span > span,
+.net-payment-math .input-values > span,
+.net-payment-math .formula-result,
+.net-payment-math .tax-inline-values,
+.net-payment-math .positive,
+.net-payment-math .negative,
+.net-payment-math .muted {
+  font-weight: 500;
 }
 
 .math-note-stack {
@@ -2146,44 +2161,8 @@ h2 {
   font-weight: 500;
 }
 
-.price-tax-block {
-  display: grid;
-  gap: 8px;
-}
-
-.price-tax-block h3 {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.price-tax-block dl {
-  display: grid;
-  gap: 5px;
-  margin: 0;
-}
-
-.price-tax-block div {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.price-tax-block dt {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.price-tax-block dd {
-  margin: 0;
-  color: var(--text);
-  font-size: 0.92rem;
-  font-weight: 700;
-  line-height: 1.45;
+.tax-inline-values {
+  display: inline;
 }
 
 .price-comparison-table {
@@ -2204,6 +2183,8 @@ h2 {
 
 .price-comparison-table thead th {
   position: static;
+  padding-top: 0;
+  border-bottom: 0;
   color: var(--muted);
   background: transparent;
   font-size: 0.78rem;
@@ -2251,6 +2232,11 @@ h2 {
   border-bottom: 0;
 }
 
+.export-price-table th,
+.export-price-table td {
+  border-bottom: 0;
+}
+
 .stacked-values {
   display: grid;
   gap: 4px;
@@ -2263,7 +2249,11 @@ h2 {
   align-items: baseline;
 }
 
-.stacked-values b {
+.net-payment-math .stacked-values > span {
+  grid-template-columns: minmax(78px, auto) minmax(0, 1fr);
+}
+
+.stacked-values > span > b {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
@@ -2275,6 +2265,84 @@ h2 {
   font-size: 0.92rem;
   font-weight: 700;
   line-height: 1.45;
+}
+
+.stacked-values > .stacked-values-wide {
+  padding-top: 2px;
+}
+
+.stacked-values > .stacked-values-wide > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.stacked-values-day {
+  color: var(--input-day-text) !important;
+}
+
+.stacked-values-night {
+  color: var(--input-night-text) !important;
+}
+
+.input-values {
+  display: grid;
+  gap: 5px;
+}
+
+.input-values > span {
+  display: grid;
+  grid-template-columns: minmax(118px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.net-payment-math .input-values > span {
+  grid-template-columns: minmax(78px, auto) minmax(0, 1fr);
+}
+
+.input-values b {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.input-values > span > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.input-values-day,
+.input-values-night {
+  font-weight: 800;
+}
+
+.input-values-day {
+  color: var(--input-day-text);
+}
+
+.input-values-night {
+  color: var(--input-night-text);
+}
+
+.net-payment-math dd,
+.net-payment-math .stacked-values > span > span,
+.net-payment-math .input-values > span,
+.net-payment-math .formula-result,
+.net-payment-math .tax-inline-values,
+.net-payment-math .positive,
+.net-payment-math .negative,
+.net-payment-math .muted,
+.net-payment-math .input-values-day,
+.net-payment-math .input-values-night {
+  font-weight: 500;
 }
 
 .formula-result {
