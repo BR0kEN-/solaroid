@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from config import DtekConfig
-from utility import Dtek, DtekFetchError, utility_payload
+from utility import Dtek, UtilityMeterFetchError, utility_payload
 
 
 def item(date: str, energy_code: str, scale: str, value: float) -> dict[str, object]:
@@ -42,9 +42,9 @@ class UtilityPayloadTest(unittest.TestCase):
 
     def test_failed_fetch_updates_failure_state_without_clearing_cached_payload(self) -> None:
         config = DtekConfig(
-            phone="+380970000000",
+            phone="+380971234567",
             password="secret",
-            accountId="120001234567",
+            accountId="120001234568",
             department="dnem",
             intervalMinutes=0,
             cookies={"incap": "cookie-secret"},
@@ -56,9 +56,9 @@ class UtilityPayloadTest(unittest.TestCase):
             path.write_text(json.dumps({"checkedAt": 0, "payload": cached_payload}), encoding="utf-8")
 
             with patch("utility.fetch_history", side_effect=RuntimeError("blocked secret cookie-secret")):
-                with self.assertRaises(DtekFetchError) as first:
+                with self.assertRaises(UtilityMeterFetchError) as first:
                     Dtek(config, path).get_values()
-                with self.assertRaises(DtekFetchError) as second:
+                with self.assertRaises(UtilityMeterFetchError) as second:
                     Dtek(config, path).get_values()
 
             state = json.loads(path.read_text(encoding="utf-8"))
@@ -72,9 +72,9 @@ class UtilityPayloadTest(unittest.TestCase):
 
     def test_success_resets_failure_state(self) -> None:
         config = DtekConfig(
-            phone="+380970000000",
+            phone="+380971234567",
             password="secret",
-            accountId="120001234567",
+            accountId="120001234568",
             department="dnem",
             intervalMinutes=0,
             cookies={},
