@@ -739,6 +739,42 @@ function comparisonDeltaTone(value: number, higherIsBetter: boolean) {
   return value > 0 ? "negative" : "positive";
 }
 
+interface PvFieldPair {
+  readonly first?: PvMetadata;
+  readonly second?: PvMetadata;
+}
+
+function azimuthDistance(first: number, second: number) {
+  const diff = Math.abs(first - second) % 360;
+  return Math.min(diff, 360 - diff);
+}
+
+function pairPvFieldsByAzimuth(firstFields: readonly PvMetadata[], secondFields: readonly PvMetadata[]): readonly PvFieldPair[] {
+  const firstSorted = [...firstFields].sort((a, b) => a.azimuth - b.azimuth);
+  const remainingSecond = [...secondFields].sort((a, b) => a.azimuth - b.azimuth);
+  const pairs: PvFieldPair[] = [];
+
+  for (const first of firstSorted) {
+    let matchIndex = -1;
+    let matchDistance = Number.POSITIVE_INFINITY;
+
+    remainingSecond.forEach((second, index) => {
+      const distance = azimuthDistance(first.azimuth, second.azimuth);
+      if (distance < matchDistance) {
+        matchDistance = distance;
+        matchIndex = index;
+      }
+    });
+
+    const second = matchIndex >= 0 ? remainingSecond.splice(matchIndex, 1)[0] : undefined;
+    pairs.push({ first, second });
+  }
+
+  remainingSecond.forEach((second) => pairs.push({ second }));
+
+  return pairs.sort((a, b) => (a.first?.azimuth ?? a.second?.azimuth ?? 0) - (b.first?.azimuth ?? b.second?.azimuth ?? 0));
+}
+
 function averageCoordinate(fields: readonly PvMetadata[]) {
   const valid = fields.filter((field) => Number.isFinite(field.lat) && Number.isFinite(field.lng));
   if (!valid.length) return undefined;
@@ -840,8 +876,8 @@ function ProductionCapacityInfo({
     : "The real advantage beyond capacity alone.";
   const firstFields = firstMetadata?.pvs ?? [];
   const secondFields = secondMetadata?.pvs ?? [];
-  const setupCount = Math.max(firstFields.length, secondFields.length);
-  const setupDistance = setupCount ? formatPvDistance(firstFields, secondFields) : undefined;
+  const setupPairs = pairPvFieldsByAzimuth(firstFields, secondFields);
+  const setupDistance = setupPairs.length ? formatPvDistance(firstFields, secondFields) : undefined;
   const setupRows = [
     [lang === "uk" ? "Потужність" : "Capacity", "power"],
     [lang === "uk" ? "Монтаж" : "Mounting", "mounting"],
@@ -923,11 +959,11 @@ function ProductionCapacityInfo({
           </div>
         </section>
       </div>
-      {setupCount > 0 && (
+      {setupPairs.length > 0 && (
         <section className="production-setup">
           <strong>{lang === "uk" ? "Налаштування масивів" : "Array setup"}</strong>
           <div className="production-setup-scroller">
-            {Array.from({ length: setupCount }, (_, index) => (
+            {setupPairs.map((pair, index) => (
               <section className="production-setup-card" key={index}>
                 <table className="price-comparison-table production-setup-table">
                   <thead>
@@ -941,8 +977,8 @@ function ProductionCapacityInfo({
                     {setupRows.map(([label, row]) => (
                       <tr key={row}>
                         <th>{label}</th>
-                        <td>{formatPvFieldValue(firstFields[index], row, lang)}</td>
-                        <td>{formatPvFieldValue(secondFields[index], row, lang)}</td>
+                        <td>{formatPvFieldValue(pair.first, row, lang)}</td>
+                        <td>{formatPvFieldValue(pair.second, row, lang)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -2778,6 +2814,9 @@ function DashboardToolbar({
 
   return (
     <header className="topbar">
+      <div className="dashboard-logo" aria-label="Solaroid">
+        <img src={`${import.meta.env.BASE_URL}logo-mark.svg`} alt="Solaroid" />
+      </div>
       <div className="toolbar">
         <div className="investment-pill" aria-label={`${t.investment} USD`}>
           <span>{t.investment}</span>

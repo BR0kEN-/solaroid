@@ -540,10 +540,31 @@ button {
 .topbar {
   position: relative;
   z-index: 4;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 8px 0 12px;
   margin: -8px 0 10px;
   background: transparent;
+}
+
+.dashboard-logo {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  min-width: 46px;
+  height: 46px;
+}
+
+.dashboard-logo img {
+  display: block;
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dashboard-logo img {
+    filter: brightness(0) invert(1);
+  }
 }
 
 .eyebrow {
@@ -2767,6 +2788,10 @@ tbody tr:hover {
   .topbar {
     margin: -10px -10px 10px;
     padding: 10px;
+  }
+
+  .dashboard-logo {
+    display: none;
   }
 
   .toolbar {
