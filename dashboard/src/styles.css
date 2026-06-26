@@ -2056,6 +2056,15 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.pv-location-link {
+  color: var(--indigo);
+  text-decoration: none;
+}
+
+.pv-location-link:hover {
+  text-decoration: underline;
+}
+
 .modal-heading {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2307,6 +2316,89 @@ h2 {
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.35;
+}
+
+.production-setup {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.production-setup > strong {
+  color: var(--text);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.production-setup-scroller {
+  display: grid;
+  gap: 10px;
+}
+
+.production-setup-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.production-setup-card > strong {
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.production-setup-table {
+  table-layout: fixed;
+}
+
+.production-setup-table thead th:first-child,
+.production-setup-table tbody th:first-child {
+  width: 30%;
+}
+
+.production-setup-table thead th:not(:first-child),
+.production-setup-table tbody td {
+  width: 35%;
+}
+
+.production-setup-table thead th {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.production-setup-table tbody th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.production-setup-table tbody td {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.production-setup-map-link {
+  display: inline-grid;
+  gap: 1px;
+  color: var(--indigo);
+  text-decoration: none;
+}
+
+.production-setup-map-link:hover {
+  text-decoration: underline;
+}
+
+.production-setup-distance {
+  padding-top: 2px;
 }
 
 .production-capacity-cards {

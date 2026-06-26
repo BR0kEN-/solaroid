@@ -617,12 +617,12 @@ function formatKwh(value: number, lang: Lang = DEFAULT_LANG) {
   return `${formatNumber(value, 2, 2)} ${lang === "uk" ? "кВт·г" : "kWh"}`;
 }
 
-function formatKwp(value: number) {
-  return `${formatNumber(value, 2, 2)} kWp`;
+function formatKwp(value: number, lang: Lang = DEFAULT_LANG) {
+  return `${formatNumber(value, 2, 2)} ${lang === "uk" ? "кВт·п" : "kWp"}`;
 }
 
 function formatYieldKwhPerKwp(value: number, lang: Lang = DEFAULT_LANG) {
-  return `${formatNumber(value, 2, 0)} ${lang === "uk" ? "кВт·г/кВтп" : "kWh/kWp"}`;
+  return `${formatNumber(value, 2, 0)} ${lang === "uk" ? "кВт·г/кВт·п" : "kWh/kWp"}`;
 }
 
 function formatSignedPercent(value: number) {
@@ -739,6 +739,57 @@ function comparisonDeltaTone(value: number, higherIsBetter: boolean) {
   return value > 0 ? "negative" : "positive";
 }
 
+function averageCoordinate(fields: readonly PvMetadata[]) {
+  const valid = fields.filter((field) => Number.isFinite(field.lat) && Number.isFinite(field.lng));
+  if (!valid.length) return undefined;
+  return {
+    lat: valid.reduce((sum, field) => sum + field.lat, 0) / valid.length,
+    lng: valid.reduce((sum, field) => sum + field.lng, 0) / valid.length,
+  };
+}
+
+function distanceKm(
+  first?: { readonly lat: number; readonly lng: number },
+  second?: { readonly lat: number; readonly lng: number },
+) {
+  if (!first || !second) return undefined;
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const earthKm = 6371;
+  const dLat = toRad(second.lat - first.lat);
+  const dLng = toRad(second.lng - first.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(first.lat)) * Math.cos(toRad(second.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthKm * Math.asin(Math.sqrt(a));
+}
+
+function formatPvDistance(firstFields: readonly PvMetadata[], secondFields: readonly PvMetadata[]) {
+  const km = distanceKm(averageCoordinate(firstFields), averageCoordinate(secondFields));
+  if (km === undefined) return undefined;
+  if (km < 1) return `${formatNumber(km * 1000, 0, 0)} m`;
+  return `${formatNumber(km, 1, 1)} km`;
+}
+
+function formatPvFieldValue(field: PvMetadata | undefined, row: "power" | "mounting" | "azimuth" | "slope" | "location" | "elevation", lang: Lang) {
+  if (!field) return "—";
+  if (row === "power") return formatKwp(field.power / 1000, lang);
+  if (row === "mounting") return formatMounting(field.mounting, lang);
+  if (row === "azimuth") return `${formatNumber(field.azimuth, 0, 0)}°`;
+  if (row === "slope") return `${formatNumber(field.slope, 0, 0)}°`;
+  if (row === "location") {
+    return (
+      <a
+        className="production-setup-map-link"
+        href={`https://www.google.com/maps?q=${field.lat},${field.lng}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        <span>{formatNumber(field.lat, 6, 4)}</span>
+        <span>{formatNumber(field.lng, 6, 4)}</span>
+      </a>
+    );
+  }
+  return `${formatNumber(field.elevation, 0, 0)} m`;
+}
+
 function ProductionCapacityInfo({
   firstLabel,
   secondLabel,
@@ -746,6 +797,8 @@ function ProductionCapacityInfo({
   secondProduction,
   firstCapacity,
   secondCapacity,
+  firstMetadata,
+  secondMetadata,
   lang,
 }: {
   readonly firstLabel: string;
@@ -754,6 +807,8 @@ function ProductionCapacityInfo({
   readonly secondProduction: number;
   readonly firstCapacity?: number;
   readonly secondCapacity?: number;
+  readonly firstMetadata?: PlantMetadata | null;
+  readonly secondMetadata?: PlantMetadata | null;
   readonly lang: Lang;
 }) {
   if (!firstCapacity || !secondCapacity) {
@@ -783,6 +838,18 @@ function ProductionCapacityInfo({
   const surplusNote = lang === "uk"
     ? "Реальна перевага понад саму різницю в потужності."
     : "The real advantage beyond capacity alone.";
+  const firstFields = firstMetadata?.pvs ?? [];
+  const secondFields = secondMetadata?.pvs ?? [];
+  const setupCount = Math.max(firstFields.length, secondFields.length);
+  const setupDistance = setupCount ? formatPvDistance(firstFields, secondFields) : undefined;
+  const setupRows = [
+    [lang === "uk" ? "Потужність" : "Capacity", "power"],
+    [lang === "uk" ? "Монтаж" : "Mounting", "mounting"],
+    [lang === "uk" ? "Азимут" : "Azimuth", "azimuth"],
+    [lang === "uk" ? "Нахил" : "Tilt", "slope"],
+    [lang === "uk" ? "Висота" : "Elevation", "elevation"],
+    [lang === "uk" ? "Локація" : "Location", "location"],
+  ] as const;
 
   return (
     <div className="info-stack">
@@ -856,6 +923,41 @@ function ProductionCapacityInfo({
           </div>
         </section>
       </div>
+      {setupCount > 0 && (
+        <section className="production-setup">
+          <strong>{lang === "uk" ? "Налаштування масивів" : "Array setup"}</strong>
+          <div className="production-setup-scroller">
+            {Array.from({ length: setupCount }, (_, index) => (
+              <section className="production-setup-card" key={index}>
+                <table className="price-comparison-table production-setup-table">
+                  <thead>
+                    <tr>
+                      <th>{lang === "uk" ? `Масив ${index + 1}` : `Array ${index + 1}`}</th>
+                      <th>{firstLabel}</th>
+                      <th>{secondLabel}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {setupRows.map(([label, row]) => (
+                      <tr key={row}>
+                        <th>{label}</th>
+                        <td>{formatPvFieldValue(firstFields[index], row, lang)}</td>
+                        <td>{formatPvFieldValue(secondFields[index], row, lang)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            ))}
+          </div>
+          {setupDistance && (
+            <div className="production-capacity-card-row production-setup-distance">
+              <span>{lang === "uk" ? "Відстань між станціями" : "Plant distance"}</span>
+              <b>{setupDistance}</b>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -923,6 +1025,10 @@ function chartBand(innerWidth: number, count: number, maxBand = 72) {
   return Math.min(innerWidth / Math.max(count, 1), maxBand);
 }
 
+function pairedChartBarWidth(band: number, minWidth: number, ratio: number) {
+  return Math.max(2, Math.min(Math.max(minWidth, band * ratio), band * 0.38));
+}
+
 function projectedProduction(row: MonthRow, projection?: ProductionProjection | null) {
   if (!projection) return undefined;
 
@@ -954,8 +1060,8 @@ function titleCase(value: string) {
 
 function monthShort(month: string) {
   if (month.includes("-")) {
-    const [, m, d] = month.split("-");
-    return `${d}.${m}`;
+    const [, , d] = month.split("-");
+    return d;
   }
   const [m, y] = month.split(".");
   return `${m}.${y.slice(2)}`;
@@ -3672,6 +3778,8 @@ function PlantPeriodLineChart({
                 secondProduction={value(secondRow)}
                 firstCapacity={capacityByPlant.get(firstPlant.plantId)}
                 secondCapacity={capacityByPlant.get(secondPlant.plantId)}
+                firstMetadata={firstPlant.metadata}
+                secondMetadata={secondPlant.metadata}
                 lang={lang}
               />
             )
@@ -4043,13 +4151,23 @@ function PvSpecList({
   readonly lang: Lang;
 }) {
   const rows = [
-    [t.power, `${formatNumber(field.power / 1000, 2, 2)} kWp`],
+    [t.power, formatKwp(field.power / 1000, lang)],
     [t.azimuth, `${formatNumber(field.azimuth, 0, 0)}°`],
     [t.slope, `${formatNumber(field.slope, 0, 0)}°`],
     [t.loss, `${formatNumber(field.loss, 2, 0)}%`],
     [t.mounting, formatMounting(field.mounting, lang)],
-    [t.location, `${formatNumber(field.lat, 6, 4)}, ${formatNumber(field.lng, 6, 4)}`],
     [t.elevation, `${formatNumber(field.elevation, 0, 0)} m`],
+    [
+      t.location,
+      <a
+        className="pv-location-link"
+        href={`https://www.google.com/maps?q=${field.lat},${field.lng}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {formatNumber(field.lat, 6, 4)}, {formatNumber(field.lng, 6, 4)}
+      </a>,
+    ],
   ] as const;
 
   return (
@@ -4253,7 +4371,7 @@ function ProductionExportChart({
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
   const max = axisMax(displayRows.flatMap((row) => [row.production, exportTotal(row), expectedByMonth.get(row.month) ?? 0]));
   const band = chartBand(innerW, displayRows.length);
-  const bar = Math.max(14, band * 0.24);
+  const bar = pairedChartBarWidth(band, 14, 0.24);
   const y = (value: number) => pad.top + innerH - (value / max) * innerH;
   const expectedPoints = displayRows
     .map((row, index) => {
@@ -4274,7 +4392,7 @@ function ProductionExportChart({
             return (
               <g key={row.month}>
                 <rect
-                  x={x - bar - 3}
+                  x={x - bar}
                   y={y(row.production)}
                   width={bar}
                   height={innerH - (y(row.production) - pad.top)}
@@ -4282,7 +4400,7 @@ function ProductionExportChart({
                   fill={colors.amber}
                 />
                 <rect
-                  x={x + 3}
+                  x={x}
                   y={y(exportTotal(row))}
                   width={bar}
                   height={innerH - (y(exportTotal(row)) - pad.top)}
@@ -4510,7 +4628,7 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
   const min = minValue < 0 ? -axisMax(values.filter((value) => value < 0).map(Math.abs)) : 0;
   const max = maxValue > 0 ? axisMax(values.filter((value) => value > 0)) : 1;
   const band = chartBand(innerW, displayRows.length);
-  const bar = Math.max(13, band * 0.24);
+  const bar = pairedChartBarWidth(band, 13, 0.24);
   const y = (value: number) => pad.top + ((max - value) / (max - min || 1)) * innerH;
   const zeroY = y(0);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => min + (max - min) * tick);
@@ -4540,7 +4658,7 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
             return (
               <g key={row.month}>
                 <rect
-                  x={x - bar - 3}
+                  x={x - bar}
                   y={Math.min(savingsY, zeroY)}
                   width={bar}
                   height={Math.abs(zeroY - savingsY)}
@@ -4548,7 +4666,7 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
                   fill={colors.mint}
                 />
                 <rect
-                  x={x + 3}
+                  x={x}
                   y={Math.min(paymentY, zeroY)}
                   width={bar}
                   height={Math.abs(zeroY - paymentY)}
