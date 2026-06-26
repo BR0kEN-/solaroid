@@ -55,9 +55,9 @@ Canonical tables:
 - `days`: daily cumulative snapshots and daily currency rates.
 - `months`: monthly cumulative snapshots and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
-- `access_tokens`: one token owns read/write access to its `plant_id`.
-- `access_token_read_scopes`: extra read-only plant access for a token, with optional scopes.
-- `user_plant_access`: Supabase Auth users mapped to readable plants, with optional scopes for non-primary reads.
+- `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
+- `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
+- `user_plant_access`: Supabase Auth users mapped to readable plants, with scopes for each assigned plant.
 
 Important auth model:
 
@@ -66,7 +66,10 @@ Important auth model:
 - Raw access tokens are still used for Home Assistant ingestion.
 - Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
 - Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
-- `reads` is an object shaped as `{ [plantId]: scopes[] }` and lists extra readable plants only, not the token's own/current plant.
+- `reads` is an object shaped as `{ [plantId]: scopes[] }`.
+- For raw ingest tokens, `reads` lists extra readable plants only. It does not need to include the token's own plant because own-plant access is full.
+- For Supabase Auth tokens, `reads` includes every assigned readable plant, including the current/main plant. Scopes on the current plant matter for external users.
+- The only current scope is `loc`. Without `loc`, plant coordinates are not disclosed.
 - Writes must only affect the token's own plant.
 - Reads can target the token plant or plants listed in read scopes.
 - Tokens are stored as SHA-256 hashes, not raw strings.
@@ -92,6 +95,13 @@ Example plant assignment for a confirmed Supabase Auth user:
 ```sql
 insert into public.user_plant_access (user_id, plant_id, scopes)
 values ('AUTH_USER_ID', 'PLANT_ID', '["loc"]'::jsonb);
+```
+
+Omit `loc` to let a user read plant energy and finance data without seeing panel coordinates:
+
+```sql
+insert into public.user_plant_access (user_id, plant_id, scopes)
+values ('AUTH_USER_ID', 'PLANT_ID', '[]'::jsonb);
 ```
 
 Example plant domain:
@@ -169,11 +179,14 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026
 
 Current read behavior:
 
-- No `plant`: defaults to token's own/current plant and treats it as full access.
+- No `plant`: defaults to the token's current plant.
 - `plant`: allowed only for token's own plant or a read-scoped plant.
 - Supabase Auth JWT reads require a confirmed user and a `user_plant_access` row.
 - Supabase Auth JWT writes are forbidden.
-- No `granularity`: returns full plant data plus `reads` as `{ [plantId]: scopes[] }` for other readable plants.
+- No `granularity`: returns full plant data plus `reads` as `{ [plantId]: scopes[] }`.
+- Raw ingest tokens have full access to their own plant even though own plant is not listed in `reads`.
+- Supabase Auth tokens use `reads[plantId]` for every assigned plant, including the current plant.
+- If `reads[plantId]` does not include `loc`, `plant.metadata.pvs[*].lat` and `lng` are set to `0` right before the response. PVGIS projection still uses the real stored coordinates before redaction.
 - `granularity=YYYY-MM-DD`: returns daily row for that date.
 - `granularity=YYYY-MM`: intended for range-oriented reads. Check `client.ts` before relying on this, because this behavior has changed during comparison work.
 - `granularity=YYYY`: returns yearly range data.
@@ -185,6 +198,16 @@ Dashboard modes:
 - Monthly: ROI, finance, production, import, consumption, forecast, monthly data table.
 - Daily: daily KPIs, daily charts, daily data table with month selector.
 - Comparison: compares two readable plants for a selected date.
+
+Dashboard access behavior:
+
+- HA URLs with `#token=...` are treated as raw ingest-token access. The selected own plant has full location access.
+- Portal/Auth URLs use Supabase Auth access tokens. The dashboard uses `reads[plantId]` scopes from the Edge Function, including for the selected/current plant.
+- If a plant lacks `loc`, location links are hidden. Redacted `0,0` coordinates are not shown as map links.
+- In the production comparison popup, the location row is shown when at least one compared plant has `loc`. A plant without `loc` shows `—` in its location cell. Distance between plants is shown only when both plants have `loc`.
+- In the monthly PVGIS popup, panel location is shown only when the current plant has `loc`.
+- Production comparison also uses capacity-aware context: total capacity comes from `metadata.pvs[*].power`, yield is `kWh/kWp`, and the popup explains expected production by size plus surplus above/below that expected value.
+- Comparison deltas are first plant minus second plant. For production, export, ROI, and net payment, higher is better. For import and consumed energy, lower is better but the displayed sign stays mathematical. For balance, lower/negative is better and the displayed sign is inverted so a better balance reads as positive.
 
 Dashboard config:
 
@@ -242,8 +265,9 @@ Manual approval flow:
 
 - User signs up in the portal.
 - Admin confirms the user in Supabase Auth.
-- Admin inserts one or more rows into `user_plant_access`.
+- Admin inserts one or more rows into `user_plant_access`, with scopes for each plant.
 - The first assigned plant returned by the Edge Function is treated as the main plant. Other assigned plants stay available for comparison.
+- Scopes still apply to the main plant for portal users. If the main plant row does not include `loc`, the dashboard hides its panel locations too.
 
 ## Formulas
 
@@ -322,6 +346,10 @@ Edge Function:
 cd supabase/functions/ingest
 rtk deno check index.ts
 ```
+
+Agent/LLM rule: do not edit Supabase Edge Function files unless the user explicitly permits it after the agent explains why the edit is necessary. Reading, reviewing, and running `rtk deno check index.ts` are allowed when relevant.
+
+Agent/LLM verification rule: do not run `rtk deno check index.ts` for docs-only or dashboard-style-only changes. Do not run `rtk npm run build` for docs-only changes. For CSS/style-only dashboard changes, prefer browser/visual inspection when useful instead of a full build.
 
 Supabase CLI login and project linking:
 
