@@ -1,4 +1,4 @@
-const CACHE_NAME = 'solaroid-shell-v8'
+const CACHE_NAME = 'solaroid-shell-v9'
 const SHELL_URLS = ['./', './manifest.webmanifest', './icon.svg', './icon-maskable.svg']
 
 self.addEventListener('install', (event) => {
