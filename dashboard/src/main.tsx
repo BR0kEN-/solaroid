@@ -20,7 +20,19 @@ import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
-import { exportPayout as splitExportPayout, exportTotal, importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, type ImportCostBreakdown } from "./domain/formulas";
+import {
+  capacityAdjustedProductionSurplus,
+  capacityDeltaPct,
+  exportPayout as splitExportPayout,
+  exportTotal,
+  importCostBreakdown,
+  importEnergyCost,
+  plantCapacityKwp,
+  productionYieldKwhPerKwp,
+  regularImportDayPrice,
+  regularImportNightPrice,
+  type ImportCostBreakdown,
+} from "./domain/formulas";
 import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
 import "./styles.css";
 
@@ -51,6 +63,11 @@ type InfoModal =
   | {
     readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "exportPrice" | "netPayment" | "roiCalc" | "utilityMeter";
     readonly row: MonthRow;
+  }
+  | {
+    readonly kind: "comparisonDelta";
+    readonly title: string;
+    readonly body: React.ReactNode;
   };
 
 interface DashboardDataState extends DataState {
@@ -600,6 +617,24 @@ function formatKwh(value: number, lang: Lang = DEFAULT_LANG) {
   return `${formatNumber(value, 2, 2)} ${lang === "uk" ? "кВт·г" : "kWh"}`;
 }
 
+function formatKwp(value: number) {
+  return `${formatNumber(value, 2, 2)} kWp`;
+}
+
+function formatYieldKwhPerKwp(value: number, lang: Lang = DEFAULT_LANG) {
+  return `${formatNumber(value, 2, 0)} ${lang === "uk" ? "кВт·г/кВтп" : "kWh/kWp"}`;
+}
+
+function formatSignedPercent(value: number) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value)}%`;
+}
+
+function formatSignedPercentFromDelta(delta: number, base: number) {
+  if (base) return formatSignedPercent((delta / Math.abs(base)) * 100);
+  return delta === 0 ? "0%" : "—";
+}
+
 function formatMonthlyKpiKwh(value: number, lang: Lang = DEFAULT_LANG) {
   if (Math.abs(value) <= 10_000) return formatKwh(value, lang);
   return `${formatNumber(value / 1000, 2, 2)} ${lang === "uk" ? "МВт·г" : "MWh"}`;
@@ -667,10 +702,24 @@ function formatSignedMoney(value: number, currency: Currency, lang: Lang) {
   return `${sign}${formatDisplayMoney(value, currency, lang)}`;
 }
 
+function formatSignedValue(value: number, format: (value: number) => string) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${format(value)}`;
+}
+
+function formatSignedNumber(value: number, maximumFractionDigits = 2, minimumFractionDigits = 2) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value, maximumFractionDigits, minimumFractionDigits)}`;
+}
+
 function formatDeltaPct(delta: number, base: number) {
   if (!base) return "";
   const sign = delta > 0 ? "+" : "";
   return ` (${sign}${formatNumber((delta / Math.abs(base)) * 100)}%)`;
+}
+
+function formatDeltaPctComma(delta: number, base: number) {
+  return `, ${formatSignedPercentFromDelta(delta, base)}`;
 }
 
 function chartLevel(value: number, max: number, minVisible = 3) {
@@ -682,6 +731,133 @@ function deltaTone(value: number) {
   if (value > 0) return "positive";
   if (value < 0) return "negative";
   return "muted";
+}
+
+function comparisonDeltaTone(value: number, higherIsBetter: boolean) {
+  if (value === 0) return "muted";
+  if (higherIsBetter) return value > 0 ? "positive" : "negative";
+  return value > 0 ? "negative" : "positive";
+}
+
+function ProductionCapacityInfo({
+  firstLabel,
+  secondLabel,
+  firstProduction,
+  secondProduction,
+  firstCapacity,
+  secondCapacity,
+  lang,
+}: {
+  readonly firstLabel: string;
+  readonly secondLabel: string;
+  readonly firstProduction: number;
+  readonly secondProduction: number;
+  readonly firstCapacity?: number;
+  readonly secondCapacity?: number;
+  readonly lang: Lang;
+}) {
+  if (!firstCapacity || !secondCapacity) {
+    return (
+      <div className="info-stack">
+        <p>{lang === "uk" ? "Деталі за потужністю недоступні: для однієї зі станцій не задана сумарна потужність панелей." : "Capacity details are unavailable because one plant has no total panel capacity."}</p>
+      </div>
+    );
+  }
+
+  const capacityPct = capacityDeltaPct(firstCapacity, secondCapacity);
+  const firstYield = productionYieldKwhPerKwp(firstProduction, firstCapacity);
+  const secondYield = productionYieldKwhPerKwp(secondProduction, secondCapacity);
+  const surplus = capacityAdjustedProductionSurplus(firstProduction, secondProduction, firstCapacity, secondCapacity);
+  const expected = secondProduction * (firstCapacity / secondCapacity);
+  const productionDelta = firstProduction - secondProduction;
+  const yieldDelta = (firstYield ?? 0) - (secondYield ?? 0);
+  const productionLabel = lang === "uk" ? "Генерація · кВт·г" : "Production · kWh";
+  const capacityLabel = lang === "uk" ? "Потужність · кВт·п" : "Capacity · kWp";
+  const yieldLabel = lang === "uk" ? "кВт·г / кВт·п" : "kWh / kWp";
+  const yieldNote = lang === "uk"
+    ? "кВт·г / кВт·п показує, скільки енергії дала кожна одиниця встановленої потужності."
+    : "kWh / kWp shows how much energy each installed unit of capacity produced.";
+  const expectedNote = lang === "uk"
+    ? "Скільки мала б дати перша станція, якби працювала з ефективністю другої."
+    : "What the first plant would produce if it worked with the second plant's efficiency.";
+  const surplusNote = lang === "uk"
+    ? "Реальна перевага понад саму різницю в потужності."
+    : "The real advantage beyond capacity alone.";
+
+  return (
+    <div className="info-stack">
+      <table className="price-comparison-table production-capacity-table">
+        <thead>
+          <tr>
+            <th />
+            <th>{firstLabel}</th>
+            <th>{secondLabel}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>{productionLabel}</th>
+            <td><span className="production-capacity-value">{formatNumber(firstProduction, 2, 2)}</span></td>
+            <td><span className="production-capacity-value">{formatNumber(secondProduction, 2, 2)}</span></td>
+          </tr>
+          <tr>
+            <th>{capacityLabel}</th>
+            <td><span className="production-capacity-value">{formatNumber(firstCapacity, 2, 2)}</span></td>
+            <td><span className="production-capacity-value">{formatNumber(secondCapacity, 2, 2)}</span></td>
+          </tr>
+          <tr>
+            <th>{yieldLabel}</th>
+            <td><span className="production-capacity-value">{formatNumber(firstYield ?? 0, 2, 0)}</span></td>
+            <td><span className="production-capacity-value">{formatNumber(secondYield ?? 0, 2, 0)}</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="production-capacity-note production-capacity-note-below">{yieldNote}</p>
+      <div className="production-capacity-cards">
+        <section className="production-capacity-card">
+          <strong>{lang === "uk" ? "Різниця" : "Difference"}</strong>
+          <div className="production-capacity-card-row">
+            <span>{productionLabel}</span>
+            <b className={comparisonDeltaTone(productionDelta, true)}>
+              <span className="production-capacity-value">
+                <span>{formatSignedNumber(productionDelta)}</span>
+                <span className="production-capacity-subdelta">, {formatSignedPercentFromDelta(productionDelta, secondProduction)}</span>
+              </span>
+            </b>
+          </div>
+          <div className="production-capacity-card-row">
+            <span>{capacityLabel}</span>
+            <b className={deltaTone(capacityPct ?? 0)}>{formatSignedPercent(capacityPct ?? 0)}</b>
+          </div>
+          <div className="production-capacity-card-row">
+            <span>{yieldLabel}</span>
+            <b className={comparisonDeltaTone(yieldDelta, true)}>{formatSignedPercentFromDelta(yieldDelta, secondYield ?? 0)}</b>
+          </div>
+        </section>
+        <section className="production-capacity-card">
+          <strong>{lang === "uk" ? "Очікувано від розміру" : "Expected by size"}</strong>
+          <span className="production-capacity-note">{expectedNote}</span>
+          <div className="production-capacity-card-row">
+            <span>{productionLabel}</span>
+            <b>{formatNumber(expected, 2, 2)}</b>
+          </div>
+        </section>
+        <section className="production-capacity-card">
+          <strong>{lang === "uk" ? "Понад очікування" : "Above expected"}</strong>
+          <span className="production-capacity-note">{surplusNote}</span>
+          <div className="production-capacity-card-row">
+            <span>{productionLabel}</span>
+            <b className={comparisonDeltaTone(surplus ?? 0, true)}>
+              <span className="production-capacity-value">
+                <span>{formatSignedNumber(surplus ?? 0)}</span>
+                <span className="production-capacity-subdelta">, {formatSignedPercentFromDelta(surplus ?? 0, expected)}</span>
+              </span>
+            </b>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
 }
 
 function importCostUah(row: MonthRow) {
@@ -800,6 +976,12 @@ function formatDayMonthLabel(date: Date, lang: Lang) {
   }).format(date);
 }
 
+function formatDayOnlyLabel(date: Date, lang: Lang) {
+  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+    day: "numeric",
+  }).format(date);
+}
+
 function formatDateTimeLabel(date: Date, lang: Lang) {
   return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
     day: "numeric",
@@ -819,6 +1001,12 @@ function formatMonthYear(date: Date, lang: Lang) {
 function formatMonthOnly(date: Date, lang: Lang) {
   return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
     month: "long",
+  }).format(date);
+}
+
+function formatMonthShortOnly(date: Date, lang: Lang) {
+  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+    month: "short",
   }).format(date);
 }
 
@@ -1461,6 +1649,12 @@ function App({
         body: <UtilityMeterInfo row={row} t={t} lang={lang} />,
       };
     }
+    if (typeof infoModal === "object" && infoModal?.kind === "comparisonDelta") {
+      return {
+        title: infoModal.title,
+        body: infoModal.body,
+      };
+    }
     if (infoModal === "latestRoi") return { title: t.latestRoi, body: t.latestRoiInfo };
     if (infoModal === "netPayment") return { title: t.netPayment, body: t.netPaymentLogic };
     if (infoModal === "usdRate") return { title: "USD/UAH", body: t.usdRateInfo };
@@ -1781,6 +1975,7 @@ function App({
               t={t}
               currency={currency}
               lang={lang}
+              onDeltaInfo={(title, body) => setInfoModal({ kind: "comparisonDelta", title, body })}
             />
           ) : (
             <div className="notice">
@@ -3150,6 +3345,7 @@ function PlantComparisonSection({
   t,
   currency,
   lang,
+  onDeltaInfo,
 }: {
   readonly activePlantId: string;
   readonly availablePlantIds: readonly string[];
@@ -3172,6 +3368,7 @@ function PlantComparisonSection({
   readonly t: Record<string, string>;
   readonly currency: Currency;
   readonly lang: Lang;
+  readonly onDeltaInfo: (title: string, body: React.ReactNode) => void;
 }) {
   const displayedResult = result?.mode === plantComparisonMode ? result : null;
   const compareDisabled =
@@ -3258,6 +3455,7 @@ function PlantComparisonSection({
         t={t}
         currency={currency}
         lang={lang}
+        onDeltaInfo={onDeltaInfo}
       />
     </section>
   );
@@ -3271,6 +3469,7 @@ function PlantPeriodComparisonCharts({
   t,
   currency,
   lang,
+  onDeltaInfo,
 }: {
   readonly plants: readonly PlantComparison[];
   readonly activePlantId: string;
@@ -3279,11 +3478,13 @@ function PlantPeriodComparisonCharts({
   readonly t: Record<string, string>;
   readonly currency: Currency;
   readonly lang: Lang;
+  readonly onDeltaInfo: (title: string, body: React.ReactNode) => void;
 }) {
   if (!plants.length || !period) return null;
 
   const periodPlants = plants.map((plant) => ({
     plantId: plant.plantId,
+    metadata: plant.metadata,
     rows:
       mode === "monthly"
         ? plant.rows.filter((row) => String(row.date.getFullYear()) === period)
@@ -3298,42 +3499,50 @@ function PlantPeriodComparisonCharts({
       value: (row: MonthRow) => row.production,
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
+      higherIsBetter: true,
+      capacityContext: true,
     },
     {
       title: t.export,
       value: (row: MonthRow) => exportTotal(row),
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
+      higherIsBetter: true,
     },
     {
       title: t.import,
       value: (row: MonthRow) => row.importTotal,
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
+      higherIsBetter: false,
     },
     {
       title: t.consumed,
       value: (row: MonthRow) => row.consumedTotal,
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
+      higherIsBetter: false,
     },
     {
       title: t.balance,
       value: (row: MonthRow) => row.balance,
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
+      higherIsBetter: true,
     },
     {
       title: t.roi,
       value: (row: MonthRow) => rowRoiMoney(row, currency),
       format: (value: number) => formatDisplayMoney(value, currency, lang),
       unit: currencyUnit(currency),
+      higherIsBetter: true,
     },
     {
       title: t.netPayment,
       value: (row: MonthRow) => moneyFromUah(row.electricityPayment, currency, row.usdRate),
       format: (value: number) => formatDisplayMoney(value, currency, lang),
       unit: currencyUnit(currency),
+      higherIsBetter: true,
     },
   ];
 
@@ -3358,7 +3567,11 @@ function PlantPeriodComparisonCharts({
             value={item.value}
             format={item.format}
             unit={item.unit}
+            higherIsBetter={item.higherIsBetter}
+            capacityContext={item.capacityContext}
+            metricTitle={item.title}
             lang={lang}
+            onDeltaInfo={onDeltaInfo}
           />
         </article>
       ))}
@@ -3374,14 +3587,22 @@ function PlantPeriodLineChart({
   value,
   format,
   unit,
+  higherIsBetter,
+  capacityContext,
+  metricTitle,
   lang,
+  onDeltaInfo,
 }: {
-  readonly plants: readonly { readonly plantId: string; readonly rows: readonly MonthRow[] }[];
+  readonly plants: readonly { readonly plantId: string; readonly rows: readonly MonthRow[]; readonly metadata?: PlantMetadata | null }[];
   readonly mode: PlantComparisonMode;
   readonly value: (row: MonthRow) => number;
   readonly format: (value: number) => string;
   readonly unit: string;
+  readonly higherIsBetter: boolean;
+  readonly capacityContext?: boolean;
+  readonly metricTitle: string;
   readonly lang: Lang;
+  readonly onDeltaInfo: (title: string, body: React.ReactNode) => void;
 }) {
   const isMobile = useMediaQuery("(max-width: 820px)");
   const width = 900;
@@ -3412,18 +3633,59 @@ function PlantPeriodLineChart({
           plant.plantId,
           new Map(plant.rows.map((row) => [dateKey(row.date), row])),
         ]),
-      ),
+    ),
     [plants],
+  );
+  const capacityByPlant = useMemo(
+    () => new Map(plants.map((plant) => [plant.plantId, plantCapacityKwp(plant.metadata)])),
+    [plants],
+  );
+  const deltaByPeriod = useMemo(
+    () =>
+      new Map(
+        periodKeys.map((periodKey) => {
+          const [firstPlant, secondPlant] = plants;
+          const firstRow = firstPlant ? rowByPlantAndDay.get(firstPlant.plantId)?.get(periodKey) : undefined;
+          const secondRow = secondPlant ? rowByPlantAndDay.get(secondPlant.plantId)?.get(periodKey) : undefined;
+          if (!firstRow || !secondRow) return [periodKey, null] as const;
+
+          return [periodKey, value(firstRow) - value(secondRow)] as const;
+        }),
+    ),
+    [periodKeys, plants, rowByPlantAndDay, value],
   );
   const inspectors = useMemo(
     () =>
       new Map(
         periodKeys.map((periodKey) => {
           const date = new Date(`${periodKey}T00:00:00`);
+          const delta = deltaByPeriod.get(periodKey);
+          const [firstPlant, secondPlant] = plants;
+          const firstRow = firstPlant ? rowByPlantAndDay.get(firstPlant.plantId)?.get(periodKey) : undefined;
+          const secondRow = secondPlant ? rowByPlantAndDay.get(secondPlant.plantId)?.get(periodKey) : undefined;
+          const deltaInfo = capacityContext && typeof delta === "number" && Number.isFinite(delta) && firstPlant && secondPlant && firstRow && secondRow
+            ? (
+              <ProductionCapacityInfo
+                firstLabel={firstPlant.plantId}
+                secondLabel={secondPlant.plantId}
+                firstProduction={value(firstRow)}
+                secondProduction={value(secondRow)}
+                firstCapacity={capacityByPlant.get(firstPlant.plantId)}
+                secondCapacity={capacityByPlant.get(secondPlant.plantId)}
+                lang={lang}
+              />
+            )
+            : undefined;
           return [
             periodKey,
             {
               month: mode === "monthly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang),
+              delta: typeof delta === "number" && Number.isFinite(delta)
+                ? `Δ ${formatSignedValue(delta, format)}${secondRow ? formatDeltaPctComma(delta, value(secondRow)) : ""}`
+                : undefined,
+              deltaTone: typeof delta === "number" && Number.isFinite(delta) ? comparisonDeltaTone(delta, higherIsBetter) : undefined,
+              deltaInfoTitle: deltaInfo ? `${metricTitle} · ${mode === "monthly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang)}` : undefined,
+              deltaInfo,
               items: plants.map((plant, index) => {
                 const row = rowByPlantAndDay.get(plant.plantId)?.get(periodKey);
                 return {
@@ -3436,7 +3698,7 @@ function PlantPeriodLineChart({
           ];
         }),
       ),
-    [format, lang, mode, periodKeys, plants, rowByPlantAndDay, value],
+    [capacityByPlant, capacityContext, deltaByPeriod, format, higherIsBetter, lang, metricTitle, mode, periodKeys, plants, rowByPlantAndDay, value],
   );
   const latestPeriod = [...periodKeys].sort().at(-1);
   const { selection, target } = useChartInspector(latestPeriod ? inspectors.get(latestPeriod) ?? null : null);
@@ -3506,7 +3768,7 @@ function PlantPeriodLineChart({
                   />
                 )}
                 <text className="plant-line-day-label" x={xPosition} y={height - 14} textAnchor="middle">
-                  {mode === "monthly" ? formatMonthOnly(date, lang) : formatDayMonthLabel(date, lang)}
+                  {mode === "monthly" ? formatMonthShortOnly(date, lang) : formatDayOnlyLabel(date, lang)}
                 </text>
               </g>
             );
@@ -3516,7 +3778,11 @@ function PlantPeriodLineChart({
           </text>
         </svg>
       </div>
-      <ChartInspector selection={selection} hint={i18n[lang].tapBarOrDot} />
+      <ChartInspector
+        selection={selection}
+        hint={i18n[lang].tapBarOrDot}
+        onDeltaInfo={capacityContext ? onDeltaInfo : undefined}
+      />
     </>
   );
 }
@@ -3816,13 +4082,28 @@ interface ChartInspectorItem {
 
 interface ChartInspectorSelection {
   readonly month: string;
+  readonly delta?: string;
+  readonly deltaTone?: string;
+  readonly deltaInfoTitle?: string;
+  readonly deltaInfo?: React.ReactNode;
   readonly items: readonly ChartInspectorItem[];
 }
 
 function useChartInspector(initialSelection: ChartInspectorSelection | null) {
   const [selection, setSelection] = useState<ChartInspectorSelection | null>(initialSelection);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  useEffect(() => setSelection(initialSelection), [initialSelection]);
+  const previousInitialMonth = useRef(initialSelection?.month ?? null);
+  useEffect(() => {
+    const initialMonth = initialSelection?.month ?? null;
+    setSelection((current) => {
+      if (previousInitialMonth.current !== initialMonth) {
+        previousInitialMonth.current = initialMonth;
+        return initialSelection;
+      }
+
+      return current ?? initialSelection;
+    });
+  }, [initialSelection]);
   const target = (nextSelection: ChartInspectorSelection) => ({
     role: "button",
     tabIndex: 0,
@@ -3881,11 +4162,32 @@ function MonthTarget({
   );
 }
 
-function ChartInspector({ selection, hint }: { selection: ChartInspectorSelection | null; hint: string }) {
+function ChartInspector({
+  selection,
+  hint,
+  onDeltaInfo,
+}: {
+  selection: ChartInspectorSelection | null;
+  hint: string;
+  onDeltaInfo?: (title: string, body: React.ReactNode) => void;
+}) {
   if (!selection) return <div className="chart-inspector chart-inspector-empty">{hint}</div>;
   return (
-    <div className="chart-inspector">
-      <strong>{selection.month}</strong>
+    <div className={`chart-inspector${selection.deltaInfo && onDeltaInfo ? " has-delta-info" : ""}`}>
+      <strong className="chart-inspector-period">
+        <span>{selection.month}</span>
+        {selection.delta ? <em className={selection.deltaTone}>{selection.delta}</em> : null}
+        {selection.deltaInfo && onDeltaInfo ? (
+          <button
+            type="button"
+            className="table-info-button chart-inspector-info"
+            aria-label="Delta details"
+            onClick={() => onDeltaInfo(selection.deltaInfoTitle ?? selection.month, selection.deltaInfo)}
+          >
+            <Info size={12} />
+          </button>
+        ) : null}
+      </strong>
       <div className="chart-inspector-items">
         {selection.items.map((item) => (
           <React.Fragment key={`${item.label}-${item.color}`}>
