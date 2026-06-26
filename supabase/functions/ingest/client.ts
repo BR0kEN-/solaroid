@@ -4,6 +4,19 @@ import { Pvgis } from './pvgis.ts'
 import { hash } from './utils/crypto.ts'
 import { dateUtil } from './utils/date.ts'
 
+function toReads(
+  input: readonly { readonly plant_id: Solaroid.Supabase.Plant.Id, scopes: Solaroid.Supabase.Access.Scope[] }[],
+): Solaroid.Supabase.Access.Reads {
+  return input.reduce(
+    (accumulator, plant) => {
+      accumulator[plant.plant_id] = plant.scopes || []
+
+      return accumulator
+    },
+    {} as Solaroid.Supabase.Access.Reads,
+  )
+}
+
 export class SupabaseClient {
   protected readonly client
 
@@ -21,21 +34,19 @@ export class SupabaseClient {
   }
 
   async getAccessToken(bearer: string): Promise<Solaroid.Supabase.Access.Token | undefined> {
-    const { data, error } = await this.client
+    const { data: token, error } = await this.client
       .from('access_tokens')
-      .select(`id,plant_id,reads:access_token_read_scopes(plant_id)`)
+      .select(`id,plant_id,reads:access_token_read_scopes(plant_id,scopes)`)
       .eq('token_hash', await hash(bearer))
-      .limit(1)
+      .maybeSingle()
 
     if (error) throw new Error('access token lookup failed', { cause: error })
-
-    const token = data?.[0]
 
     if (token) {
       return {
         ...token,
         kind: 'ingest',
-        reads: token.reads.map((scope) => scope.plant_id),
+        reads: toReads(token.reads),
       }
     }
 
@@ -43,28 +54,28 @@ export class SupabaseClient {
 
     if (authError || !user?.confirmed_at) return undefined
 
-    const plantIds = await this.#getUserPlantIds(user.id)
+    const plants = await this.#getUserPlants(user.id)
 
-    if (plantIds.length === 0) return undefined
+    if (plants.length === 0) return undefined
 
     return {
       id: user.id,
       kind: 'auth',
-      plant_id: plantIds[0],
-      reads: plantIds.slice(1),
+      plant_id: plants[0].plant_id,
+      reads: toReads(plants),
     }
   }
 
-  async #getUserPlantIds(userId: string): Promise<readonly Solaroid.Supabase.Plant.Id[]> {
+  async #getUserPlants(userId: string) {
     const { data: access, error: accessError } = await this.client
       .from('user_plant_access')
-      .select('plant_id')
+      .select('plant_id,scopes')
       .eq('user_id', userId)
       .order('plant_id', { ascending: true })
 
     if (accessError) throw new Error('user plant access lookup failed', { cause: accessError })
 
-    return access.map((row) => row.plant_id)
+    return access
   }
 
   async getPlantsMetadata(
@@ -109,7 +120,7 @@ export class SupabaseClient {
     if (error) throw new Error(`update failed on ${table}`, { cause: error })
   }
 
-  async getPlant(plantId: Solaroid.Supabase.Plant.Id): Promise<Solaroid.Supabase.Json> {
+  async getPlant(plantId: Solaroid.Supabase.Plant.Id) {
     const plant = await this.#getPlantMetadata(plantId)
     const [days, months, tariffs] = await Promise.all(
       ['days', 'months', 'month_tariffs'].map((table) => this.#getPlantRows(plantId, table)),

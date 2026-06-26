@@ -56,16 +56,17 @@ Canonical tables:
 - `months`: monthly cumulative snapshots and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
 - `access_tokens`: one token owns read/write access to its `plant_id`.
-- `access_token_read_scopes`: extra read-only plant access for a token.
-- `user_plant_access`: Supabase Auth users mapped to readable plants.
+- `access_token_read_scopes`: extra read-only plant access for a token, with optional scopes.
+- `user_plant_access`: Supabase Auth users mapped to readable plants, with optional scopes for non-primary reads.
 
 Important auth model:
 
 - Supabase Auth users can read assigned plants only.
 - Supabase Auth users can never write ingestion data.
 - Raw access tokens are still used for Home Assistant ingestion.
-- Each raw access token belongs to one plant and can write that plant.
-- Extra readable plants are attached through `access_token_read_scopes`.
+- Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
+- Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
+- `reads` is an object shaped as `{ [plantId]: scopes[] }` and lists extra readable plants only, not the token's own/current plant.
 - Writes must only affect the token's own plant.
 - Reads can target the token plant or plants listed in read scopes.
 - Tokens are stored as SHA-256 hashes, not raw strings.
@@ -80,8 +81,8 @@ values ('bondas', encode(extensions.digest('RAW_TOKEN_VALUE', 'sha256'), 'hex'))
 Example read scope:
 
 ```sql
-insert into public.access_token_read_scopes (token_id, plant_id)
-select id, 'bondas'
+insert into public.access_token_read_scopes (token_id, plant_id, scopes)
+select id, 'bondas', '["loc"]'::jsonb
 from public.access_tokens
 where plant_id = 'levched';
 ```
@@ -89,8 +90,8 @@ where plant_id = 'levched';
 Example plant assignment for a confirmed Supabase Auth user:
 
 ```sql
-insert into public.user_plant_access (user_id, plant_id)
-values ('AUTH_USER_ID', 'PLANT_ID');
+insert into public.user_plant_access (user_id, plant_id, scopes)
+values ('AUTH_USER_ID', 'PLANT_ID', '["loc"]'::jsonb);
 ```
 
 Example plant domain:
@@ -168,11 +169,11 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026
 
 Current read behavior:
 
-- No `plant`: defaults to token's own plant.
+- No `plant`: defaults to token's own/current plant and treats it as full access.
 - `plant`: allowed only for token's own plant or a read-scoped plant.
 - Supabase Auth JWT reads require a confirmed user and a `user_plant_access` row.
 - Supabase Auth JWT writes are forbidden.
-- No `granularity`: returns full plant data plus `reads`.
+- No `granularity`: returns full plant data plus `reads` as `{ [plantId]: scopes[] }` for other readable plants.
 - `granularity=YYYY-MM-DD`: returns daily row for that date.
 - `granularity=YYYY-MM`: intended for range-oriented reads. Check `client.ts` before relying on this, because this behavior has changed during comparison work.
 - `granularity=YYYY`: returns yearly range data.

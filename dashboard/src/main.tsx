@@ -739,6 +739,10 @@ function comparisonDeltaTone(value: number, higherIsBetter: boolean) {
   return value > 0 ? "negative" : "positive";
 }
 
+function comparisonDisplayDelta(value: number, invertSign?: boolean) {
+  return invertSign ? -value : value;
+}
+
 interface PvFieldPair {
   readonly first?: PvMetadata;
   readonly second?: PvMetadata;
@@ -804,13 +808,15 @@ function formatPvDistance(firstFields: readonly PvMetadata[], secondFields: read
   return `${formatNumber(km, 1, 1)} km`;
 }
 
-function formatPvFieldValue(field: PvMetadata | undefined, row: "power" | "mounting" | "azimuth" | "slope" | "location" | "elevation", lang: Lang) {
+function formatPvFieldValue(field: PvMetadata | undefined, row: "power" | "mounting" | "azimuth" | "slope" | "location" | "elevation", lang: Lang, allowLocation = true) {
   if (!field) return "—";
   if (row === "power") return formatKwp(field.power / 1000, lang);
   if (row === "mounting") return formatMounting(field.mounting, lang);
   if (row === "azimuth") return `${formatNumber(field.azimuth, 0, 0)}°`;
   if (row === "slope") return `${formatNumber(field.slope, 0, 0)}°`;
   if (row === "location") {
+    if (!allowLocation) return "—";
+
     return (
       <a
         className="production-setup-map-link"
@@ -826,6 +832,10 @@ function formatPvFieldValue(field: PvMetadata | undefined, row: "power" | "mount
   return `${formatNumber(field.elevation, 0, 0)} m`;
 }
 
+function hasLocationScope(scopes: readonly string[] | undefined) {
+  return scopes?.includes("loc") ?? false;
+}
+
 function ProductionCapacityInfo({
   firstLabel,
   secondLabel,
@@ -835,6 +845,8 @@ function ProductionCapacityInfo({
   secondCapacity,
   firstMetadata,
   secondMetadata,
+  firstScopes,
+  secondScopes,
   lang,
 }: {
   readonly firstLabel: string;
@@ -845,6 +857,8 @@ function ProductionCapacityInfo({
   readonly secondCapacity?: number;
   readonly firstMetadata?: PlantMetadata | null;
   readonly secondMetadata?: PlantMetadata | null;
+  readonly firstScopes?: readonly string[];
+  readonly secondScopes?: readonly string[];
   readonly lang: Lang;
 }) {
   if (!firstCapacity || !secondCapacity) {
@@ -877,15 +891,17 @@ function ProductionCapacityInfo({
   const firstFields = firstMetadata?.pvs ?? [];
   const secondFields = secondMetadata?.pvs ?? [];
   const setupPairs = pairPvFieldsByAzimuth(firstFields, secondFields);
-  const setupDistance = setupPairs.length ? formatPvDistance(firstFields, secondFields) : undefined;
-  const setupRows = [
+  const canShowFirstLocation = hasLocationScope(firstScopes);
+  const canShowSecondLocation = hasLocationScope(secondScopes);
+  const setupDistance = canShowFirstLocation && canShowSecondLocation && setupPairs.length ? formatPvDistance(firstFields, secondFields) : undefined;
+  const setupRows: readonly (readonly [string, Parameters<typeof formatPvFieldValue>[1]])[] = [
     [lang === "uk" ? "Потужність" : "Capacity", "power"],
     [lang === "uk" ? "Монтаж" : "Mounting", "mounting"],
     [lang === "uk" ? "Азимут" : "Azimuth", "azimuth"],
     [lang === "uk" ? "Нахил" : "Tilt", "slope"],
     [lang === "uk" ? "Висота" : "Elevation", "elevation"],
-    [lang === "uk" ? "Локація" : "Location", "location"],
-  ] as const;
+    ...(canShowFirstLocation || canShowSecondLocation ? [[lang === "uk" ? "Локація" : "Location", "location"] as const] : []),
+  ];
 
   return (
     <div className="info-stack">
@@ -977,8 +993,8 @@ function ProductionCapacityInfo({
                     {setupRows.map(([label, row]) => (
                       <tr key={row}>
                         <th>{label}</th>
-                        <td>{formatPvFieldValue(pair.first, row, lang)}</td>
-                        <td>{formatPvFieldValue(pair.second, row, lang)}</td>
+                        <td>{formatPvFieldValue(pair.first, row, lang, row !== "location" || canShowFirstLocation)}</td>
+                        <td>{formatPvFieldValue(pair.second, row, lang, row !== "location" || canShowSecondLocation)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1353,6 +1369,8 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
     rows: initialData?.rows ?? [],
     dailyRows: initialData?.dailyRows ?? [],
     readablePlantIds: initialData?.readablePlantIds ?? [],
+    readablePlantScopes: initialData?.readablePlantScopes ?? {},
+    scopes: initialData?.scopes ?? [],
     plantId: initialData?.plantId ?? "",
     investmentUsd: initialData?.investmentUsd ?? 0,
     launchDate: initialData?.launchDate,
@@ -1488,6 +1506,7 @@ function App({
     plantId: dataState.plantId,
     rows: dataState.rows,
     dailyRows: dataState.dailyRows,
+    scopes: dataState.scopes,
     investmentUsd: dataState.investmentUsd,
     launchDate: dataState.launchDate,
     commercialDate: dataState.commercialDate,
@@ -1503,6 +1522,7 @@ function App({
     dataState.plantId,
     dataState.projection,
     dataState.rows,
+    dataState.scopes,
     dataState.sheetUpdatedAt,
   ]);
 
@@ -1519,11 +1539,15 @@ function App({
     if (comparisonPlantCache[cacheKey]) return comparisonPlantCache[cacheKey];
 
     const plant = granularity === "all" ? await loadPlantData(plantId) : await loadPlantGranularity(plantId, granularity);
+    const plantWithScopes = {
+      ...plant,
+      scopes: dataState.readablePlantScopes[plantId] ?? [],
+    };
     setComparisonPlantCache((current) => ({
       ...current,
-      [cacheKey]: plant,
+      [cacheKey]: plantWithScopes,
     }));
-    return plant;
+    return plantWithScopes;
   };
 
   useEffect(() => {
@@ -1819,7 +1843,7 @@ function App({
                 {fields.map((field, index) => (
                   <section className="pv-field" key={`${field.azimuth}-${field.power}-${index}`}>
                     <h3>{lang === "uk" ? `Поле ${index + 1}` : `Field ${index + 1}`}</h3>
-                    <PvSpecList field={field} t={t} lang={lang} />
+                    <PvSpecList field={field} t={t} lang={lang} showLocation={hasLocationScope(dataState.scopes)} />
                   </section>
                 ))}
               </div>
@@ -3205,6 +3229,7 @@ async function preloadPortalDashboard(apiUrl: string, plantId: string, token: st
     apiUrl,
     plantId,
     token,
+    tokenKind: "auth",
   });
 
   return loadDashboardData();
@@ -3630,6 +3655,7 @@ function PlantPeriodComparisonCharts({
   const periodPlants = plants.map((plant) => ({
     plantId: plant.plantId,
     metadata: plant.metadata,
+    scopes: plant.scopes,
     rows:
       mode === "monthly"
         ? plant.rows.filter((row) => String(row.date.getFullYear()) === period)
@@ -3673,7 +3699,8 @@ function PlantPeriodComparisonCharts({
       value: (row: MonthRow) => row.balance,
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
-      higherIsBetter: true,
+      higherIsBetter: false,
+      invertDeltaSign: true,
     },
     {
       title: t.roi,
@@ -3713,6 +3740,7 @@ function PlantPeriodComparisonCharts({
             format={item.format}
             unit={item.unit}
             higherIsBetter={item.higherIsBetter}
+            invertDeltaSign={item.invertDeltaSign}
             capacityContext={item.capacityContext}
             metricTitle={item.title}
             lang={lang}
@@ -3733,17 +3761,19 @@ function PlantPeriodLineChart({
   format,
   unit,
   higherIsBetter,
+  invertDeltaSign,
   capacityContext,
   metricTitle,
   lang,
   onDeltaInfo,
 }: {
-  readonly plants: readonly { readonly plantId: string; readonly rows: readonly MonthRow[]; readonly metadata?: PlantMetadata | null }[];
+  readonly plants: readonly { readonly plantId: string; readonly rows: readonly MonthRow[]; readonly scopes: readonly string[]; readonly metadata?: PlantMetadata | null }[];
   readonly mode: PlantComparisonMode;
   readonly value: (row: MonthRow) => number;
   readonly format: (value: number) => string;
   readonly unit: string;
   readonly higherIsBetter: boolean;
+  readonly invertDeltaSign?: boolean;
   readonly capacityContext?: boolean;
   readonly metricTitle: string;
   readonly lang: Lang;
@@ -3808,6 +3838,7 @@ function PlantPeriodLineChart({
           const [firstPlant, secondPlant] = plants;
           const firstRow = firstPlant ? rowByPlantAndDay.get(firstPlant.plantId)?.get(periodKey) : undefined;
           const secondRow = secondPlant ? rowByPlantAndDay.get(secondPlant.plantId)?.get(periodKey) : undefined;
+          const displayDelta = typeof delta === "number" && Number.isFinite(delta) ? comparisonDisplayDelta(delta, invertDeltaSign) : undefined;
           const deltaInfo = capacityContext && typeof delta === "number" && Number.isFinite(delta) && firstPlant && secondPlant && firstRow && secondRow
             ? (
               <ProductionCapacityInfo
@@ -3819,6 +3850,8 @@ function PlantPeriodLineChart({
                 secondCapacity={capacityByPlant.get(secondPlant.plantId)}
                 firstMetadata={firstPlant.metadata}
                 secondMetadata={secondPlant.metadata}
+                firstScopes={firstPlant.scopes}
+                secondScopes={secondPlant.scopes}
                 lang={lang}
               />
             )
@@ -3827,8 +3860,8 @@ function PlantPeriodLineChart({
             periodKey,
             {
               month: mode === "monthly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang),
-              delta: typeof delta === "number" && Number.isFinite(delta)
-                ? `Δ ${formatSignedValue(delta, format)}${secondRow ? formatDeltaPctComma(delta, value(secondRow)) : ""}`
+              delta: typeof displayDelta === "number"
+                ? `Δ ${formatSignedValue(displayDelta, format)}${secondRow ? formatDeltaPctComma(displayDelta, value(secondRow)) : ""}`
                 : undefined,
               deltaTone: typeof delta === "number" && Number.isFinite(delta) ? comparisonDeltaTone(delta, higherIsBetter) : undefined,
               deltaInfoTitle: deltaInfo ? `${metricTitle} · ${mode === "monthly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang)}` : undefined,
@@ -3845,7 +3878,7 @@ function PlantPeriodLineChart({
           ];
         }),
       ),
-    [capacityByPlant, capacityContext, deltaByPeriod, format, higherIsBetter, lang, metricTitle, mode, periodKeys, plants, rowByPlantAndDay, value],
+    [capacityByPlant, capacityContext, deltaByPeriod, format, higherIsBetter, invertDeltaSign, lang, metricTitle, mode, periodKeys, plants, rowByPlantAndDay, value],
   );
   const latestPeriod = [...periodKeys].sort().at(-1);
   const { selection, target } = useChartInspector(latestPeriod ? inspectors.get(latestPeriod) ?? null : null);
@@ -4184,10 +4217,12 @@ function PvSpecList({
   field,
   t,
   lang,
+  showLocation,
 }: {
   readonly field: PvMetadata;
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly showLocation: boolean;
 }) {
   const rows = [
     [t.power, formatKwp(field.power / 1000, lang)],
@@ -4196,7 +4231,7 @@ function PvSpecList({
     [t.loss, `${formatNumber(field.loss, 2, 0)}%`],
     [t.mounting, formatMounting(field.mounting, lang)],
     [t.elevation, `${formatNumber(field.elevation, 0, 0)} m`],
-    [
+    ...(showLocation ? [[
       t.location,
       <a
         className="pv-location-link"
@@ -4206,7 +4241,7 @@ function PvSpecList({
       >
         {formatNumber(field.lat, 6, 4)}, {formatNumber(field.lng, 6, 4)}
       </a>,
-    ],
+    ] as const] : []),
   ] as const;
 
   return (
