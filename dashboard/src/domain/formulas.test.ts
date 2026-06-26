@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   balance,
+  capacityAdjustedProductionSurplus,
+  capacityDeltaPct,
   commercialBalance,
   consumedPrice,
   consumedTotal,
@@ -11,6 +13,8 @@ import {
   netExportPrice,
   netExportNightPrice,
   payment,
+  plantCapacityKwp,
+  productionYieldKwhPerKwp,
   savings,
   selfConsumed,
   selfConsumptionSavings,
@@ -53,6 +57,37 @@ describe('energy totals', () => {
     expect(balance(row)).toBe(0)
     expect(commercialBalance(row, true)).toBe(0)
     expect(commercialBalance(row, false)).toBe(30)
+  })
+})
+
+describe('plant production capacity', () => {
+  it('sums PV field power as kWp', () => {
+    expect(plantCapacityKwp({
+      pvs: [
+        { azimuth: 0, power: 11160, slope: 30, elevation: 120, lat: 0, lng: 0, loss: 14, mounting: 'building' },
+        { azimuth: 90, power: 8680, slope: 30, elevation: 120, lat: 0, lng: 0, loss: 14, mounting: 'building' },
+      ],
+    })).toBeCloseTo(19.84)
+  })
+
+  it('calculates capacity percent from first plant vs second plant', () => {
+    expect(capacityDeltaPct(19.84, 14.88)).toBeCloseTo(33.3333)
+  })
+
+  it('normalizes production by capacity', () => {
+    expect(productionYieldKwhPerKwp(12_400, 19.84)).toBeCloseTo(625)
+  })
+
+  it('calculates capacity-adjusted production surplus', () => {
+    expect(capacityAdjustedProductionSurplus(12_400, 9_000, 19.84, 14.88)).toBeCloseTo(400)
+  })
+
+  it('returns undefined for missing or zero capacity inputs', () => {
+    expect(plantCapacityKwp(null)).toBeUndefined()
+    expect(plantCapacityKwp({ pvs: [] })).toBeUndefined()
+    expect(productionYieldKwhPerKwp(100, 0)).toBeUndefined()
+    expect(capacityDeltaPct(10, 0)).toBeUndefined()
+    expect(capacityAdjustedProductionSurplus(100, 80, 10, 0)).toBeUndefined()
   })
 })
 

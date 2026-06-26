@@ -1571,6 +1571,7 @@ h2 {
 }
 
 .chart-inspector {
+  position: relative;
   display: grid;
   gap: 8px;
   min-height: 44px;
@@ -1584,8 +1585,33 @@ h2 {
   box-shadow: inset 0 1px 0 var(--panel-highlight);
 }
 
+.chart-inspector.has-delta-info {
+  padding-right: 32px;
+}
+
 .chart-inspector strong {
   line-height: 1.1;
+}
+
+.chart-inspector-period {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.chart-inspector-period em {
+  font-style: normal;
+}
+
+.chart-inspector-info {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  vertical-align: 0;
 }
 
 .chart-inspector-empty {
@@ -2200,10 +2226,10 @@ h2 {
 }
 
 .price-comparison-table tbody th {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.35;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
   text-align: left;
 }
 
@@ -2230,6 +2256,112 @@ h2 {
 .price-comparison-table tr:last-child th,
 .price-comparison-table tr:last-child td {
   border-bottom: 0;
+}
+
+.production-capacity-table {
+  table-layout: fixed;
+}
+
+.production-capacity-table thead th:first-child,
+.production-capacity-table tbody th:first-child {
+  width: 34%;
+}
+
+.production-capacity-table thead th:not(:first-child),
+.production-capacity-table tbody td {
+  width: 33%;
+}
+
+.production-capacity-table thead th {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.production-capacity-table tbody th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.production-capacity-value {
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.production-capacity-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.production-capacity-note-below {
+  margin: 8px 0 0;
+}
+
+.info-modal-body .production-capacity-note-below {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.production-capacity-cards {
+  display: grid;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.production-capacity-card {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.production-capacity-card strong {
+  color: var(--text);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.production-capacity-card-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(min-content, auto);
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.production-capacity-card-row b {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.production-capacity-card-row b.positive {
+  color: var(--green);
+}
+
+.production-capacity-card-row b.negative {
+  color: var(--rose);
+}
+
+.production-capacity-card-row b.muted {
+  color: var(--muted);
+}
+
+.production-capacity-subdelta {
+  display: inline;
+  margin-top: 0;
 }
 
 .export-price-table th,
@@ -2683,6 +2815,16 @@ tbody tr:hover {
 }
 
 @media (max-width: 520px) {
+  .chart-inspector-period {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .chart-inspector-period em {
+    display: block;
+  }
+
   .segmented {
     grid-template-columns: repeat(5, 42px);
     flex: 0 0 auto;

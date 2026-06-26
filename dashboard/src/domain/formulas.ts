@@ -1,4 +1,4 @@
-import type { EnergySnapshot, Tariff } from './types'
+import type { EnergySnapshot, PlantMetadata, Tariff } from './types'
 
 export const PERCENT_DIVISOR = 100
 export const ELECTRIC_HEATING_REGULAR_PRICE_MULTIPLIER = 4.32 / 2.64
@@ -13,6 +13,33 @@ export function importTotal(row: EnergySnapshot) {
 
 export function exportTotal(row: EnergySnapshot) {
   return row.exportDay + row.exportNight
+}
+
+export function plantCapacityKwp(metadata?: PlantMetadata | null) {
+  const watts = metadata?.pvs?.reduce((sum, field) => sum + field.power, 0) ?? 0
+  return watts > 0 ? watts / 1000 : undefined
+}
+
+export function productionYieldKwhPerKwp(production: number, capacityKwp?: number) {
+  if (!capacityKwp || capacityKwp <= 0) return undefined
+  return production / capacityKwp
+}
+
+export function capacityDeltaPct(firstCapacityKwp?: number, secondCapacityKwp?: number) {
+  if (!firstCapacityKwp || !secondCapacityKwp || secondCapacityKwp <= 0) return undefined
+  return ((firstCapacityKwp - secondCapacityKwp) / secondCapacityKwp) * 100
+}
+
+export function capacityAdjustedProductionSurplus(
+  firstProduction: number,
+  secondProduction: number,
+  firstCapacityKwp?: number,
+  secondCapacityKwp?: number,
+) {
+  if (!firstCapacityKwp || !secondCapacityKwp || secondCapacityKwp <= 0) return undefined
+
+  const expectedFirstProduction = secondProduction * (firstCapacityKwp / secondCapacityKwp)
+  return firstProduction - expectedFirstProduction
 }
 
 export function balance(row: EnergySnapshot) {
