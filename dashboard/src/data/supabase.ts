@@ -53,7 +53,7 @@ interface ApiResponse {
   readonly days?: readonly DayRecord[]
   readonly months?: readonly MonthRecord[]
   readonly tariffs?: readonly TariffRecord[]
-  readonly reads?: readonly string[]
+  readonly reads?: Readonly<Record<string, readonly string[]>> | readonly string[]
   readonly records?: readonly DayRecord[] | readonly MonthRecord[]
   readonly projection?: ProductionProjection | null
 }
@@ -62,9 +62,13 @@ interface DashboardAccess {
   readonly apiUrl?: string
   readonly plantId?: string
   readonly token?: string
+  readonly tokenKind?: AccessTokenKind
 }
 
+type AccessTokenKind = 'ingest' | 'auth'
+
 let dashboardAccess: DashboardAccess = {}
+const FULL_ACCESS_SCOPES = ['loc'] as const
 
 export function configureDashboardAccess(next: DashboardAccess) {
   dashboardAccess = next
@@ -74,11 +78,14 @@ export async function loadDashboardData(): Promise<LoadedData> {
   assertConfig()
 
   const { plant, months, days, tariffs, reads, projection } = await fetchDashboardData()
+  const readablePlantScopes = normalizeReadablePlantScopes(reads)
   const loaded = toLoadedPlant({ plant, months, days, tariffs, projection })
 
   return {
     ...loaded,
-    readablePlantIds: reads,
+    readablePlantIds: readablePlantIds(readablePlantScopes, plant.id),
+    readablePlantScopes,
+    scopes: currentPlantScopes(readablePlantScopes, plant.id),
   }
 }
 
@@ -144,6 +151,7 @@ export function toLoadedPlant({
     plantId: plant.id,
     rows,
     dailyRows,
+    scopes: [],
     investmentUsd: plant.investment_usd,
     launchDate: parseDate(plant.launch_date),
     commercialDate,
@@ -194,9 +202,25 @@ async function fetchDashboardData(
     months: data.months ?? [],
     records: data.records ?? [],
     tariffs: data.tariffs ?? [],
-    reads: data.reads ?? [],
+    reads: data.reads ?? {},
     projection: data.projection ?? null,
   }
+}
+
+function normalizeReadablePlantScopes(reads: Readonly<Record<string, readonly string[]>> | readonly string[]): Readonly<Record<string, readonly string[]>> {
+  if (Array.isArray(reads)) {
+    return Object.fromEntries(reads.map((plantId) => [plantId, []])) as Readonly<Record<string, readonly string[]>>
+  }
+
+  return reads as Readonly<Record<string, readonly string[]>>
+}
+
+function readablePlantIds(reads: Readonly<Record<string, readonly string[]>>, activePlantId: string) {
+  return Object.keys(reads).filter((plantId) => plantId !== activePlantId)
+}
+
+function currentPlantScopes(reads: Readonly<Record<string, readonly string[]>>, activePlantId: string) {
+  return accessTokenKind() === 'ingest' ? FULL_ACCESS_SCOPES : reads[activePlantId] ?? []
 }
 
 function plantId() {
@@ -215,11 +239,22 @@ function apiUrl() {
   return dashboardAccess.apiUrl ?? API_URL
 }
 
+function accessTokenKind(): AccessTokenKind {
+  if (dashboardAccess.tokenKind) return dashboardAccess.tokenKind
+
+  return hashParam('token') ? 'ingest' : 'auth'
+}
+
 function tokenFromHash() {
   if (typeof window === 'undefined') return ''
 
-  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-  return params.get('access_token') ?? params.get('token') ?? ''
+  return hashParam('access_token') || hashParam('token')
+}
+
+function hashParam(name: string) {
+  if (typeof window === 'undefined') return ''
+
+  return new URLSearchParams(window.location.hash.replace(/^#/, '')).get(name) ?? ''
 }
 
 function queryParam(name: string) {

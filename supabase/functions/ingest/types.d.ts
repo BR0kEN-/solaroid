@@ -82,12 +82,14 @@ declare global {
 
     namespace Access {
       type Kind = 'ingest' | 'auth'
+      type Scope = 'loc'
+      type Reads = Record<Plant.Id, readonly Scope[]>
 
       interface Token {
         readonly id: string
         readonly kind: Kind
         readonly plant_id: Plant.Id
-        readonly reads: readonly Plant.Id[]
+        readonly reads: Reads
       }
     }
 

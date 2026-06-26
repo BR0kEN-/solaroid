@@ -48,6 +48,8 @@ export interface DataState {
   readonly rows: readonly MonthRow[]
   readonly dailyRows: readonly MonthRow[]
   readonly readablePlantIds: readonly string[]
+  readonly readablePlantScopes: Readonly<Record<string, readonly string[]>>
+  readonly scopes: readonly string[]
   readonly investmentUsd: number
   readonly launchDate?: Date
   readonly commercialDate?: Date
@@ -65,6 +67,7 @@ export interface PlantComparison {
   readonly plantId: string
   readonly rows: readonly MonthRow[]
   readonly dailyRows: readonly MonthRow[]
+  readonly scopes: readonly string[]
   readonly investmentUsd: number
   readonly launchDate?: Date
   readonly commercialDate?: Date
