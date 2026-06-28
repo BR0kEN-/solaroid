@@ -72,7 +72,7 @@ type InfoModal =
 
 interface DashboardDataState extends DataState {
   readonly isRefreshing: boolean;
-  readonly refresh: () => void;
+  readonly refresh: () => Promise<LoadedData | undefined>;
 }
 
 type DashboardDataHookState = Omit<DashboardDataState, "refresh">;
@@ -1389,6 +1389,7 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
       const data: LoadedData = await loadDashboardData();
       const refreshedAt = new Date();
       setState({ ...data, isLoading: false, isRefreshing: false, updatedAt: refreshedAt });
+      return data;
     } catch (error) {
       setState((current) => ({
         ...current,
@@ -1397,6 +1398,7 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
         updatedAt: new Date(),
         error: error instanceof Error ? error.message : "Could not load Supabase data",
       }));
+      return undefined;
     }
   };
 
@@ -1408,10 +1410,41 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
 
   return {
     ...state,
-    refresh: () => {
-      void refresh();
-    },
+    refresh,
   };
+}
+
+interface PlantComparisonSource {
+  readonly plantId: string;
+  readonly rows: readonly MonthRow[];
+  readonly dailyRows: readonly MonthRow[];
+  readonly scopes: readonly string[];
+  readonly investmentUsd: number;
+  readonly launchDate?: Date;
+  readonly commercialDate?: Date;
+  readonly metadata?: PlantMetadata | null;
+  readonly projection?: ProductionProjection | null;
+  readonly sheetUpdatedAt?: Date;
+}
+
+function toPlantComparison(source: PlantComparisonSource): PlantComparison {
+  return {
+    plantId: source.plantId,
+    rows: source.rows,
+    dailyRows: source.dailyRows,
+    scopes: source.scopes,
+    investmentUsd: source.investmentUsd,
+    launchDate: source.launchDate,
+    commercialDate: source.commercialDate,
+    metadata: source.metadata,
+    projection: source.projection,
+    sheetUpdatedAt: source.sheetUpdatedAt,
+  };
+}
+
+interface RunPlantComparisonOptions {
+  readonly forceReload?: boolean;
+  readonly activePlant?: PlantComparison;
 }
 
 function useMediaQuery(query: string) {
@@ -1502,29 +1535,7 @@ function App({
   );
   const viewOptions = ["monthly", "daily", "comparison"] as const;
 
-  const activePlantComparison = useMemo<PlantComparison>(() => ({
-    plantId: dataState.plantId,
-    rows: dataState.rows,
-    dailyRows: dataState.dailyRows,
-    scopes: dataState.scopes,
-    investmentUsd: dataState.investmentUsd,
-    launchDate: dataState.launchDate,
-    commercialDate: dataState.commercialDate,
-    metadata: dataState.metadata,
-    projection: dataState.projection,
-    sheetUpdatedAt: dataState.sheetUpdatedAt,
-  }), [
-    dataState.commercialDate,
-    dataState.dailyRows,
-    dataState.investmentUsd,
-    dataState.launchDate,
-    dataState.metadata,
-    dataState.plantId,
-    dataState.projection,
-    dataState.rows,
-    dataState.scopes,
-    dataState.sheetUpdatedAt,
-  ]);
+  const activePlantComparison = useMemo<PlantComparison>(() => toPlantComparison(dataState), [dataState]);
 
   useEffect(() => {
     if (!readablePlantOptions.length) return;
@@ -1532,12 +1543,8 @@ function App({
     if (!secondPlantId) setSecondPlantId(readablePlantOptions.find((plantId) => plantId !== (dataState.plantId || readablePlantOptions[0])) ?? readablePlantOptions[0]);
   }, [dataState.plantId, firstPlantId, readablePlantOptions, secondPlantId]);
 
-  const ensureComparisonPlant = async (plantId: string, granularity: string) => {
-    if (!plantId) return undefined;
-    if (plantId === dataState.plantId) return activePlantComparison;
+  const loadComparisonPlant = async (plantId: string, granularity: string) => {
     const cacheKey = `${plantId}:${granularity}`;
-    if (comparisonPlantCache[cacheKey]) return comparisonPlantCache[cacheKey];
-
     const plant = granularity === "all" ? await loadPlantData(plantId) : await loadPlantGranularity(plantId, granularity);
     const plantWithScopes = {
       ...plant,
@@ -1548,6 +1555,20 @@ function App({
       [cacheKey]: plantWithScopes,
     }));
     return plantWithScopes;
+  };
+
+  const ensureComparisonPlant = async (
+    plantId: string,
+    granularity: string,
+    forceReload = false,
+    activePlant = activePlantComparison,
+  ) => {
+    if (!plantId) return undefined;
+    if (plantId === activePlant.plantId) return activePlant;
+    const cacheKey = `${plantId}:${granularity}`;
+    if (!forceReload && comparisonPlantCache[cacheKey]) return comparisonPlantCache[cacheKey];
+
+    return loadComparisonPlant(plantId, granularity);
   };
 
   useEffect(() => {
@@ -1583,7 +1604,7 @@ function App({
     [dataState.rows],
   );
 
-  const runPlantComparison = async () => {
+  const runPlantComparison = async ({ forceReload = false, activePlant = activePlantComparison }: RunPlantComparisonOptions = {}) => {
     const selectedPlantIds = [firstPlantId, secondPlantId].filter(Boolean);
     const selectedPeriod = plantComparisonMode === "monthly" ? plantComparisonYear : plantComparisonMonth;
     if (selectedPlantIds.length < 2 || !selectedPeriod) return;
@@ -1594,7 +1615,7 @@ function App({
     try {
       const granularity = plantComparisonMode === "monthly" ? plantComparisonYear : "all";
       const loadedPlants = await Promise.all(
-        selectedPlantIds.map((plantId) => ensureComparisonPlant(plantId, granularity)),
+        selectedPlantIds.map((plantId) => ensureComparisonPlant(plantId, granularity, forceReload, activePlant)),
       );
       const plants = loadedPlants.filter((plant): plant is PlantComparison => Boolean(plant));
       const hasSelectedPeriod = plants.every((plant) =>
@@ -1609,6 +1630,70 @@ function App({
             : "Selected month is not available for one of the plants",
         );
       }
+      setComparisonResult({
+        mode: plantComparisonMode,
+        month: plantComparisonMonth,
+        year: plantComparisonYear,
+        plants,
+      });
+    } catch (error) {
+      setComparisonError(error instanceof Error ? error.message : "Could not load plant comparison");
+    } finally {
+      setPlantComparisonLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    const selectedPlantIds = [firstPlantId, secondPlantId].filter(Boolean);
+    const selectedPeriod = plantComparisonMode === "monthly" ? plantComparisonYear : plantComparisonMonth;
+    const resultPeriod = plantComparisonMode === "monthly" ? comparisonResult?.year : comparisonResult?.month;
+    const resultPlantIds = comparisonResult?.plants.map((plant) => plant.plantId) ?? [];
+    const isCurrentComparison =
+      comparisonResult?.mode === plantComparisonMode &&
+      resultPeriod === selectedPeriod &&
+      selectedPlantIds.length === resultPlantIds.length &&
+      selectedPlantIds.every((plantId, index) => resultPlantIds[index] === plantId);
+    const shouldRefreshComparison = viewMode === "comparison" && isCurrentComparison && selectedPlantIds.length >= 2 && Boolean(selectedPeriod);
+
+    const granularity = plantComparisonMode === "monthly" ? plantComparisonYear : "all";
+    if (shouldRefreshComparison) {
+      setPlantComparisonLoading(true);
+      setComparisonPlantCache({});
+      setComparisonError("");
+    }
+
+    const refreshedDataPromise = dataState.refresh();
+    const remotePlantPromises = shouldRefreshComparison
+      ? selectedPlantIds.map((plantId) => plantId === dataState.plantId ? Promise.resolve(undefined) : loadComparisonPlant(plantId, granularity))
+      : [];
+
+    if (!shouldRefreshComparison) {
+      await refreshedDataPromise;
+      return;
+    }
+
+    try {
+      const [refreshedData, remotePlants] = await Promise.all([refreshedDataPromise, Promise.all(remotePlantPromises)]);
+      if (!refreshedData) return;
+
+      const activePlant = toPlantComparison(refreshedData);
+      const remotePlantById = new Map(remotePlants.filter((plant): plant is PlantComparison => Boolean(plant)).map((plant) => [plant.plantId, plant]));
+      const plants = selectedPlantIds
+        .map((plantId) => plantId === activePlant.plantId ? activePlant : remotePlantById.get(plantId))
+        .filter((plant): plant is PlantComparison => Boolean(plant));
+      const hasSelectedPeriod = plants.every((plant) =>
+        plantComparisonMode === "monthly"
+          ? plant.rows.some((row) => String(row.date.getFullYear()) === plantComparisonYear)
+          : plant.dailyRows.some((row) => monthKey(row.date) === plantComparisonMonth),
+      );
+      if (!hasSelectedPeriod) {
+        throw new Error(
+          plantComparisonMode === "monthly"
+            ? "Selected year is not available for one of the plants"
+            : "Selected month is not available for one of the plants",
+        );
+      }
+
       setComparisonResult({
         mode: plantComparisonMode,
         month: plantComparisonMonth,
@@ -2075,8 +2160,8 @@ function App({
             "-"
           )}
           onInvestmentInfo={() => setInfoModal("investment")}
-          isRefreshing={dataState.isRefreshing}
-          refresh={dataState.refresh}
+          isRefreshing={dataState.isRefreshing || isPlantComparisonLoading}
+          refresh={handleRefresh}
           isLoading={showPlaceholders}
         />
 
@@ -3541,6 +3626,9 @@ function PlantComparisonSection({
   readonly onDeltaInfo: (title: string, body: React.ReactNode) => void;
 }) {
   const displayedResult = result?.mode === plantComparisonMode ? result : null;
+  const comparisonUpdated = displayedResult?.plants
+    .map((plant) => `${plant.plantId} ${plant.sheetUpdatedAt ? formatDateTimeLabel(plant.sheetUpdatedAt, lang) : "-"}`)
+    .join(" · ");
   const compareDisabled =
     isLoading ||
     !firstPlantId ||
@@ -3627,6 +3715,7 @@ function PlantComparisonSection({
         lang={lang}
         onDeltaInfo={onDeltaInfo}
       />
+      {comparisonUpdated ? <small className="plant-comparison-updated">{t.updated}: {comparisonUpdated}</small> : null}
     </section>
   );
 }

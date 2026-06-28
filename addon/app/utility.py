@@ -15,7 +15,7 @@ from config import DtekConfig
 
 
 STATE_PATH = Path("/data/solaroid-utility-meter-state.json")
-CHECK_DAYS_BEFORE_MONTH_END = 3
+CHECK_DAYS_BEFORE_MONTH_END = 1
 CHECK_DAYS_AFTER_MONTH_START = 3
 IMPORT_CODE = "01"
 EXPORT_CODE = "03"
