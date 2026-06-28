@@ -1047,6 +1047,15 @@ h2 {
   margin-bottom: 28px;
 }
 
+.plant-comparison-updated {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  text-align: right;
+}
+
 .plant-comparison-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
