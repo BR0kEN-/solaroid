@@ -29,7 +29,7 @@ class DtekConfig:
 
     @cached_property
     def url(self) -> str:
-        return f"{self.endpoint.rstrip('/')}/webhook/um"
+        return f"{self.endpoint.rstrip('/')}/webhook/um?department={self.department}"
 
     @cached_property
     def auth(self) -> str:
