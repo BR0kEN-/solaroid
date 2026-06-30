@@ -6,7 +6,7 @@ from typing import Any, Callable
 from config import load_config, SolaroidConfig
 from ha import call_service, get_entity_state, HomeAssistantError, CallService
 from solaroid import build_payload, post_payload
-from utility import Dtek, UtilityMeterFetchError, UtilityMeter
+from utility import Dtek, UtilityMeterFetchError, UtilityMeterStaleError, UtilityMeter
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -121,9 +121,10 @@ def run_once(
 
     try:
         utility = um.get_values()
-
-        if um.recovered_from_failure:
-            utility_meter_dismiss_failure_notification(service_call)
+        utility_meter_dismiss_recovered_failure(um, service_call)
+    except UtilityMeterStaleError as error:
+        logging.info("Utility meter data not published yet; posting HA values only: %s", error.message)
+        utility_meter_dismiss_recovered_failure(um, service_call)
     except UtilityMeterFetchError as error:
         logging.warning("Utility meter fetch failed; posting HA values only: %s", error.message)
         utility_meter_notify_failure(error, config, service_call)
@@ -131,6 +132,14 @@ def run_once(
     payload = build_payload(config.payload, read_state, utility)
     result = post(config.url, config.token, payload)
     logging.info("Posted payload: %s (%s)", result, payload)
+
+
+def utility_meter_dismiss_recovered_failure(
+    um: UtilityMeter,
+    service_call: CallService = call_service,
+) -> None:
+    if um.recovered_from_failure:
+        utility_meter_dismiss_failure_notification(service_call)
 
 
 def run_with_ingest_failure_notification(

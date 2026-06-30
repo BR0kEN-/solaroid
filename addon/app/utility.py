@@ -3,6 +3,7 @@ import logging
 import time
 from abc import ABC
 from dataclasses import dataclass, asdict
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Final
@@ -13,7 +14,6 @@ from config import DtekConfig
 
 
 STATE_PATH = Path("/data/solaroid-utility-meter-state.json")
-CHECK_DAYS_BEFORE_MONTH_END = 1
 CHECK_DAYS_AFTER_MONTH_START = 3
 
 
@@ -23,6 +23,16 @@ class UtilityMeterFetchError(RuntimeError):
         self.message = message
         self.failure_count = failure_count
         self.last_success_at = last_success_at
+
+
+class UtilityMeterStaleError(RuntimeError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class StaleUtilityDataError(ValueError):
+    pass
 
 
 def fetch_history(config: DtekConfig) -> dict[str, Any]:
@@ -47,7 +57,29 @@ def parse_value(value: Any) -> Decimal:
         raise ValueError(f"Invalid meter value: {value!r}") from error
 
 
-def utility_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def month_key(day: date) -> str:
+    return f"{day.year}-{day.month:02d}"
+
+
+def previous_month_key(day: date) -> str:
+    year = day.year
+    month = day.month - 1
+    if month == 0:
+        year -= 1
+        month = 12
+    return f"{year}-{month:02d}"
+
+
+def expected_utility_month(today: date | None = None) -> str | None:
+    day = today or date.today()
+
+    if day.day <= CHECK_DAYS_AFTER_MONTH_START:
+        return previous_month_key(day)
+
+    return None
+
+
+def utility_payload(payload: dict[str, Any], expected_month: str | None = None) -> dict[str, Any]:
     diff = payload.get("diff")
     samples = payload.get("samples")
 
@@ -57,6 +89,8 @@ def utility_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Utility response missing samples")
 
     month = max(str(key) for key in samples.keys())
+    if expected_month is not None and month != expected_month:
+        raise StaleUtilityDataError(f"Utility response stale: latest {month}, expected {expected_month}")
 
     return {
         "month": month,
@@ -177,13 +211,21 @@ class Dtek(UtilityMeter):
 
         if state.checked_minutes_ago > self._config.intervalMinutes:
             try:
-                state.payload = utility_payload(fetch_history(self._config))
+                state.payload = utility_payload(fetch_history(self._config), expected_utility_month())
                 self._recovered_from_failure = state.failureCount > 0
                 state.failureCount = 0
                 state.lastFailureAt = None
                 state.lastSuccessAt = time.time()
                 state.lastError = None
                 self._state_storage.save(state)
+            except StaleUtilityDataError as error:
+                self._recovered_from_failure = state.failureCount > 0
+                state.failureCount = 0
+                state.lastFailureAt = None
+                state.lastSuccessAt = time.time()
+                state.lastError = None
+                self._state_storage.save(state)
+                raise UtilityMeterStaleError(str(error)) from error
             except Exception as error:
                 state.failureCount += 1
                 state.lastFailureAt = time.time()
@@ -200,5 +242,6 @@ class Dtek(UtilityMeter):
 __all__ = [
     "Dtek",
     "UtilityMeterFetchError",
+    "UtilityMeterStaleError",
     "UtilityMeter",
 ]

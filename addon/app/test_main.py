@@ -4,6 +4,10 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
+from _test_requests import install_requests_stub
+
+install_requests_stub()
+
 from config import DtekConfig, NotificationsConfig, SolaroidConfig, load_config
 from main import (
     UTILITY_METER_FAILURE_NOTIFICATION_ID,
@@ -12,7 +16,7 @@ from main import (
     run_once,
     run_with_ingest_failure_notification,
 )
-from utility import UtilityMeterFetchError, UtilityMeter
+from utility import UtilityMeterFetchError, UtilityMeterStaleError, UtilityMeter
 
 
 def config() -> SolaroidConfig:
@@ -40,7 +44,7 @@ class FakeDtek(UtilityMeter):
     def __init__(
         self,
         result: dict[str, object] | None = None,
-        error: UtilityMeterFetchError | None = None,
+        error: Exception | None = None,
         recovered_from_failure: bool = False,
     ) -> None:
         super().__init__()
@@ -92,6 +96,41 @@ class MainNotificationTest(unittest.TestCase):
         )
 
         self.assertEqual([service for service, _data in service_calls], ["persistent_notification.create"])
+
+    def test_stale_utility_data_posts_without_utility_and_does_not_notify(self) -> None:
+        service_calls: list[tuple[str, dict[str, object]]] = []
+        posts: list[dict[str, object]] = []
+
+        def post(_url: str, _token: str, payload: dict[str, object]) -> dict[str, object]:
+            posts.append(payload)
+            return {"ok": True}
+
+        run_once(
+            FakeDtek(error=UtilityMeterStaleError("Utility response stale: latest 2026-05, expected 2026-06")),
+            config(),
+            read_state=lambda _entity_id: 10,
+            post=post,
+            service_call=lambda service, data: service_calls.append((service, data)),
+        )
+
+        self.assertEqual(service_calls, [])
+        self.assertNotIn("utility", posts[0]["thisMonth"])  # type: ignore[operator]
+
+    def test_stale_utility_data_after_failure_dismisses_persistent_notification(self) -> None:
+        service_calls: list[tuple[str, dict[str, object]]] = []
+
+        run_once(
+            FakeDtek(
+                error=UtilityMeterStaleError("Utility response stale: latest 2026-05, expected 2026-06"),
+                recovered_from_failure=True,
+            ),
+            config(),
+            read_state=lambda _entity_id: 10,
+            post=lambda _url, _token, _payload: {"ok": True},
+            service_call=lambda service, data: service_calls.append((service, data)),
+        )
+
+        self.assertEqual(service_calls, [("persistent_notification.dismiss", {"notification_id": UTILITY_METER_FAILURE_NOTIFICATION_ID})])
 
     def test_success_dismisses_persistent_notification(self) -> None:
         service_calls: list[tuple[str, dict[str, object]]] = []

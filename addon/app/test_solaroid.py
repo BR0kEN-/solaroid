@@ -1,5 +1,9 @@
 import unittest
 
+from _test_requests import install_requests_stub
+
+install_requests_stub()
+
 from solaroid import build_payload
 
 
