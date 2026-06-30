@@ -2,7 +2,7 @@
 url: https://github.com/BR0kEN-/solaroid
 name: Solaroid
 slug: solaroid
-version: 0.1.13
+version: 0.1.14
 description: Push Home Assistant solar telemetry and utility meter readings to Solaroid backend.
 init: false
 arch:
@@ -13,12 +13,12 @@ options:
   api: "https://PROJECT.supabase.co"
   token: ""
   dtek:
+    endpoint: "https://n8n.levko.dog"
     phone: "+380970000000"
     password: ""
-    accountId: "120001234567"
+    accountId: "nest"
     department: dnem
     intervalMinutes: 60
-    cookies: []
   notifications:
     mobileServices:
       - notify.notify_admins
@@ -64,15 +64,13 @@ schema:
   api: "url"
   token: "password"
   dtek:
+    endpoint: "url"
     # Between 20 mins and 3 days (60*24*3).
     intervalMinutes: "int(20,4320)"
     department: "list(dnem|kem|krem|oem)"
-    accountId: "match(^12\\d{10}$)"
+    accountId: "str"
     phone: "match(^\\+380\\d{9}$)"
     password: "password"
-    cookies:
-      - name: str
-        value: str
   notifications:
     mobileServices:
       - "str"

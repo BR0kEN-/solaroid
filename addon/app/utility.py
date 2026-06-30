@@ -1,10 +1,8 @@
-import base64
 import json
+import logging
 import time
 from abc import ABC
-from collections import defaultdict
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Final
@@ -17,21 +15,6 @@ from config import DtekConfig
 STATE_PATH = Path("/data/solaroid-utility-meter-state.json")
 CHECK_DAYS_BEFORE_MONTH_END = 1
 CHECK_DAYS_AFTER_MONTH_START = 3
-IMPORT_CODE = "01"
-EXPORT_CODE = "03"
-DAY_SCALE = "04"
-NIGHT_SCALE = "05"
-USER_TYPE = "person"
-
-
-@dataclass(frozen=True)
-class MonthReading:
-    date: datetime
-    date_text: str
-    import_day: Decimal
-    import_night: Decimal
-    export_day: Decimal
-    export_night: Decimal
 
 
 class UtilityMeterFetchError(RuntimeError):
@@ -42,53 +25,19 @@ class UtilityMeterFetchError(RuntimeError):
         self.last_success_at = last_success_at
 
 
-def post_json(
-    url: str,
-    payload: dict[str, Any],
-    token: str | None = None,
-    cookies: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    headers = {
-        "Content-Type": "application/json",
-    }
-
-    if token is not None:
-        headers["Authorization"] = f"Basic {token}"
-
-    response = requests.post(url, json=payload, headers=headers, cookies=cookies, timeout=45)
-    response.raise_for_status()
-    return response.json()
-
-
 def fetch_history(config: DtekConfig) -> dict[str, Any]:
-    auth = post_json(
-        f"{config.url}/auth/{USER_TYPE}",
-        {
-            "site": config.department,
-            "phone": config.phone,
-            "userType": USER_TYPE,
-            "language": "en-US",
-            "platform": "MacIntel",
+    response = requests.get(
+        config.url,
+        headers={
+            "Authorization": f"Basic {config.auth}",
+            "Accept": "application/json",
         },
-        base64.b64encode(f"{config.phone}:{config.password}".encode("utf-8")).decode("ascii"),
-        config.cookies,
+        timeout=45,
     )
-
-    token = auth.get("user", {}).get("token")
-
-    if not token:
-        raise RuntimeError("Utility auth response missing user.token")
-
-    return post_json(
-        f"{config.url}/get-common",
-        {
-            "url": f"/{USER_TYPE}/cust_data_history",
-            "token": token,
-            "account": config.accountId,
-            "userType": USER_TYPE,
-        },
-        cookies=config.cookies,
-    )
+    response.raise_for_status()
+    payload = response.json()
+    logging.info("Utility meter response: %s", payload)
+    return payload
 
 
 def parse_value(value: Any) -> Decimal:
@@ -98,53 +47,26 @@ def parse_value(value: Any) -> Decimal:
         raise ValueError(f"Invalid meter value: {value!r}") from error
 
 
-def collect_months(items: list[dict[str, Any]]) -> list[MonthReading]:
-    buckets: dict[str, dict[str, dict[str, Decimal]]] = defaultdict(dict)
-    for item in items:
-        if item.get("inactive"):
-            continue
-        date_text = item.get("date")
-        energy_code = str(item.get("energyCode", ""))
-        scale = str(item.get("scale", ""))
-        if not isinstance(date_text, str) or energy_code not in {IMPORT_CODE, EXPORT_CODE}:
-            continue
-        buckets[date_text].setdefault(energy_code, {})[scale] = parse_value(item.get("value"))
-
-    readings: list[MonthReading] = []
-    for date_text, by_code in buckets.items():
-        if IMPORT_CODE not in by_code or EXPORT_CODE not in by_code:
-            continue
-        readings.append(
-            MonthReading(
-                date=datetime.strptime(date_text, "%d.%m.%Y"),
-                date_text=date_text,
-                import_day=by_code[IMPORT_CODE].get(DAY_SCALE, Decimal("0")),
-                import_night=by_code[IMPORT_CODE].get(NIGHT_SCALE, Decimal("0")),
-                export_day=by_code[EXPORT_CODE].get(DAY_SCALE, Decimal("0")),
-                export_night=by_code[EXPORT_CODE].get(NIGHT_SCALE, Decimal("0")),
-            )
-        )
-    return sorted(readings, key=lambda reading: reading.date)
-
-
 def utility_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    items = payload.get("data", {}).get("items")
-    if not isinstance(items, list):
-        raise ValueError("Utility response missing data.items")
-    readings = collect_months([item for item in items if isinstance(item, dict)])
-    if len(readings) < 2:
-        raise ValueError("Need at least two active utility readings")
-    previous = readings[-2]
-    latest = readings[-1]
+    diff = payload.get("diff")
+    samples = payload.get("samples")
+
+    if not isinstance(diff, dict):
+        raise ValueError("Utility response missing diff")
+    if not isinstance(samples, dict) or not samples:
+        raise ValueError("Utility response missing samples")
+
+    month = max(str(key) for key in samples.keys())
+
     return {
-        "month": latest.date.strftime("%Y-%m"),
+        "month": month,
         "import": {
-            "day": float(latest.import_day - previous.import_day),
-            "night": float(latest.import_night - previous.import_night),
+            "day": float(parse_value(diff["import"]["day"])),
+            "night": float(parse_value(diff["import"]["night"])),
         },
         "export": {
-            "day": float(latest.export_day - previous.export_day),
-            "night": float(latest.export_night - previous.export_night),
+            "day": float(parse_value(diff["export"]["day"])),
+            "night": float(parse_value(diff["export"]["night"])),
         },
     }
 
@@ -216,14 +138,12 @@ def sanitize_error(error: Exception, config: DtekConfig) -> str:
     elif str(error):
         text = f"{text}: {error}"
 
-    secrets = [
+    for secret in (
         config.phone,
         config.password,
-        base64.b64encode(f"{config.phone}:{config.password}".encode("utf-8")).decode("ascii"),
-        *config.cookies.values(),
-    ]
-
-    for secret in secrets:
+        config.accountId,
+        config.auth,
+    ):
         if secret:
             text = text.replace(secret, "[redacted]")
 
