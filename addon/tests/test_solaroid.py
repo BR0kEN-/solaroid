@@ -1,4 +1,4 @@
-from solaroid import build_payload
+from solaroid.solaroid import build_payload
 
 
 def test_normalizes_taxes_only() -> None:

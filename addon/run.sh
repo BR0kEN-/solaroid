@@ -2,4 +2,4 @@
 
 set -e
 
-python3 /app/main.py
+python3 -m solaroid.main

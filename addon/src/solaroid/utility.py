@@ -11,7 +11,7 @@ from typing import Any, Final
 
 import requests
 
-from config import DtekConfig
+from .config import DtekConfig
 
 
 STATE_PATH = Path("/data/solaroid-utility-meter-state.json")
