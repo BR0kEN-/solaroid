@@ -248,6 +248,10 @@ describe('Supabase data mapping', () => {
           utility_import_night: 15,
           utility_export_day: 5,
           utility_export_night: 10,
+          utility_record_dates: {
+            current: '2026-03-31 23:59',
+            previous: '2026-02-28 23:59',
+          },
           uah_usd_rate: 40,
         },
       ],
@@ -278,6 +282,10 @@ describe('Supabase data mapping', () => {
         importNight: 15,
         exportDay: 5,
         exportNight: 10,
+      },
+      records: {
+        current: '2026-03-31 23:59',
+        previous: '2026-02-28 23:59',
       },
     })
   })

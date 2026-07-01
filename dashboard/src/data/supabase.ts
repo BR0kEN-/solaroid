@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff } from '../domain/types'
+import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -27,6 +27,7 @@ interface MonthRecord {
   readonly utility_import_night?: number | null
   readonly utility_export_day?: number | null
   readonly utility_export_night?: number | null
+  readonly utility_record_dates?: UtilityMeterRecordDates | null
   readonly updated_at?: string
 }
 
@@ -419,7 +420,17 @@ function toUtilityMeter(row: MonthRecord): MonthRow['utilityMeter'] {
       exportDay: utilityExportDay,
       exportNight: utilityExportNight,
     },
+    records: isUtilityMeterRecordDates(row.utility_record_dates) ? row.utility_record_dates : undefined,
   }
+}
+
+function isUtilityMeterRecordDates(value: unknown): value is UtilityMeterRecordDates {
+  if (!value || typeof value !== 'object') return false
+  const records = value as UtilityMeterRecordDates
+  return (
+    typeof records.current === 'string'
+    && typeof records.previous === 'string'
+  )
 }
 
 function toTariff(row: TariffRecord | undefined, electricHeatingThresholdKwh?: number): Tariff {

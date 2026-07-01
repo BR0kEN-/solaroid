@@ -1981,6 +1981,19 @@ h2 {
   gap: 14px;
 }
 
+.utility-comparison-section {
+  display: grid;
+  gap: 8px;
+}
+
+.utility-comparison-title {
+  margin: 0;
+  color: color-mix(in srgb, var(--text), var(--muted) 24%);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .info-list {
   display: grid;
   gap: 10px;
@@ -2272,6 +2285,20 @@ h2 {
   text-align: left;
 }
 
+.price-comparison-table tfoot th,
+.price-comparison-table tfoot td {
+  background: transparent;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.price-comparison-table tfoot th {
+  text-align: left;
+}
+
 .price-comparison-table tbody td {
   color: var(--text);
   font-size: 0.92rem;
@@ -2280,15 +2307,66 @@ h2 {
   text-align: right;
 }
 
-.price-comparison-table tbody td.positive {
+.utility-comparison-table th,
+.utility-comparison-table td {
+  padding: 7px 0;
+}
+
+.utility-comparison-table thead th {
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.price-comparison-table.utility-comparison-table tbody tr:first-child th,
+.price-comparison-table.utility-comparison-table tbody tr:first-child td {
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.utility-comparison-table tbody th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.utility-comparison-table tbody td,
+.utility-comparison-table tfoot th,
+.utility-comparison-table tfoot td {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.utility-comparison-table tfoot th,
+.utility-comparison-table tfoot td {
+  padding: 7px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.price-comparison-table.utility-comparison-table thead th:first-child,
+.price-comparison-table.utility-comparison-table tfoot th,
+.price-comparison-table.utility-comparison-table tfoot td,
+.price-comparison-table.utility-comparison-table tfoot th:first-child {
+  position: static;
+  background: transparent;
+  box-shadow: none;
+}
+
+.price-comparison-table.utility-comparison-table td.positive,
+.price-comparison-table.utility-comparison-table td.negative,
+.price-comparison-table.utility-comparison-table td.muted {
+  font-weight: 500;
+}
+
+.price-comparison-table td.positive {
   color: var(--green);
 }
 
-.price-comparison-table tbody td.negative {
+.price-comparison-table td.negative {
   color: var(--rose);
 }
 
-.price-comparison-table tbody td.muted {
+.price-comparison-table td.muted {
   color: var(--muted);
 }
 

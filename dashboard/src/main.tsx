@@ -285,8 +285,12 @@ const i18n = {
     importMix: "Import",
     consumptionMix: "Consumption",
     utilityMeter: "Utility meter",
-    dashboardValues: "Dashboard values",
-    meterValues: "Meter values",
+    dashboardValues: "Dashboard",
+    meterValues: "Meter",
+    zone: "Zone",
+    meterRecordDates: "Meter readings used",
+    previousReading: "Previous",
+    currentReading: "Current",
     usedForCalculations: "Meter values are distributed across existing daily rows before monthly calculations. The adjustment is even while no day goes below zero; otherwise it is proportional to the original daily values.",
     electricityPayment: "Electricity payment",
     payment: "Payment",
@@ -458,8 +462,12 @@ const i18n = {
     importMix: "Імпорт",
     consumptionMix: "Споживання",
     utilityMeter: "Покази лічильника",
-    dashboardValues: "Значення дашборда",
-    meterValues: "Значення лічильника",
+    dashboardValues: "Дашборд",
+    meterValues: "Лічильник",
+    zone: "Зона",
+    meterRecordDates: "Покази, використані для розрахунку",
+    previousReading: "Попередній",
+    currentReading: "Поточний",
     usedForCalculations: "Покази лічильника розподіляються по наявних денних рядках перед місячними розрахунками. Корекція рівномірна, доки жоден день не йде нижче нуля; інакше вона пропорційна початковим денним значенням.",
     electricityPayment: "Оплата електрики",
     payment: "Оплата",
@@ -5707,79 +5715,158 @@ function UtilityMeterInfo({
     exportDay: meter.utility.exportDay - meter.ha.exportDay,
     exportNight: meter.utility.exportNight - meter.ha.exportNight,
   };
-  const signedKwh = (value: number) => `${value > 0 ? "+" : ""}${formatKwh(value, lang)}`;
+  const formatMeterNumber = (value: number) => formatNumber(value, 2, 2);
+  const signedMeterNumber = (value: number) => `${value > 0 ? "+" : ""}${formatMeterNumber(value)}`;
 
   return (
     <div className="info-stack">
-      <MathInfo
+      <UtilityComparisonTable
+        title={t.import}
+        t={t}
         rows={[
           {
-            label: t.dashboardValues,
-            value: (
-              <UtilitySplitTable t={t} lang={lang} values={meter.ha} />
-            ),
+            zone: t.day,
+            dashboard: meter.ha.importDay,
+            utility: meter.utility.importDay,
+            delta: diff.importDay,
+            higherIsBetter: false,
           },
           {
-            label: t.meterValues,
-            value: (
-              <UtilitySplitTable t={t} lang={lang} values={meter.utility} />
-            ),
-          },
-          {
-            label: t.delta,
-            value: (
-              <UtilitySplitTable t={t} lang={lang} values={diff} formatValue={signedKwh} colorDeltas />
-            ),
+            zone: t.night,
+            dashboard: meter.ha.importNight,
+            utility: meter.utility.importNight,
+            delta: diff.importNight,
+            higherIsBetter: false,
           },
         ]}
+        formatValue={formatMeterNumber}
+        formatDelta={signedMeterNumber}
       />
+      <UtilityComparisonTable
+        title={t.export}
+        t={t}
+        rows={[
+          {
+            zone: t.day,
+            dashboard: meter.ha.exportDay,
+            utility: meter.utility.exportDay,
+            delta: diff.exportDay,
+            higherIsBetter: true,
+          },
+          {
+            zone: t.night,
+            dashboard: meter.ha.exportNight,
+            utility: meter.utility.exportNight,
+            delta: diff.exportNight,
+            higherIsBetter: true,
+          },
+        ]}
+        formatValue={formatMeterNumber}
+        formatDelta={signedMeterNumber}
+      />
+      {meter.records ? <UtilityRecordDatesTable t={t} records={meter.records} /> : null}
       <p>{t.usedForCalculations}</p>
     </div>
   );
 }
 
-function UtilitySplitTable({
+function UtilityComparisonTable({
+  title,
   t,
-  lang,
-  values,
-  formatValue = (value: number) => formatKwh(value, lang),
-  colorDeltas = false,
+  rows,
+  formatValue,
+  formatDelta,
 }: {
+  readonly title: string;
   readonly t: Record<string, string>;
-  readonly lang: Lang;
-  readonly values: {
-    readonly importDay: number;
-    readonly importNight: number;
-    readonly exportDay: number;
-    readonly exportNight: number;
-  };
-  readonly formatValue?: (value: number) => string;
-  readonly colorDeltas?: boolean;
+  readonly rows: readonly {
+    readonly zone: string;
+    readonly dashboard: number;
+    readonly utility: number;
+    readonly delta: number;
+    readonly higherIsBetter: boolean;
+  }[];
+  readonly formatValue: (value: number) => string;
+  readonly formatDelta: (value: number) => string;
 }) {
-  const deltaClass = (value: number, higherIsBetter: boolean) => colorDeltas ? comparisonDeltaTone(value, higherIsBetter) : undefined;
+  const total = rows.reduce(
+    (accumulator, row) => ({
+      dashboard: accumulator.dashboard + row.dashboard,
+      utility: accumulator.utility + row.utility,
+      delta: accumulator.delta + row.delta,
+    }),
+    { dashboard: 0, utility: 0, delta: 0 },
+  );
+  const higherIsBetter = rows.every((row) => row.higherIsBetter);
 
   return (
-    <table className="price-comparison-table">
-      <thead>
-        <tr>
-          <th aria-label={t.utilityMeter} />
-          <th>{t.day}</th>
-          <th>{t.night}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <th>{t.import}</th>
-          <td className={deltaClass(values.importDay, false)}>{formatValue(values.importDay)}</td>
-          <td className={deltaClass(values.importNight, false)}>{formatValue(values.importNight)}</td>
-        </tr>
-        <tr>
-          <th>{t.export}</th>
-          <td className={deltaClass(values.exportDay, true)}>{formatValue(values.exportDay)}</td>
-          <td className={deltaClass(values.exportNight, true)}>{formatValue(values.exportNight)}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div className="utility-comparison-section">
+      <h3 className="utility-comparison-title">{title}</h3>
+      <table className="price-comparison-table utility-comparison-table">
+        <thead>
+          <tr>
+            <th>{t.zone}</th>
+            <th>{t.dashboardValues}</th>
+            <th>{t.meterValues}</th>
+            <th>{t.delta}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.zone}>
+              <th>{row.zone}</th>
+              <td>{formatValue(row.dashboard)}</td>
+              <td>{formatValue(row.utility)}</td>
+              <td className={comparisonDeltaTone(row.delta, row.higherIsBetter)}>{formatDelta(row.delta)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>{t.total}</th>
+            <td>{formatValue(total.dashboard)}</td>
+            <td>{formatValue(total.utility)}</td>
+            <td className={comparisonDeltaTone(total.delta, higherIsBetter)}>{formatDelta(total.delta)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+function UtilityRecordDatesTable({
+  t,
+  records,
+}: {
+  readonly t: Record<string, string>;
+  readonly records: NonNullable<MonthRow["utilityMeter"]>["records"];
+}) {
+  if (!records) return null;
+  const rows = [
+    { label: t.previousReading, value: records.previous },
+    { label: t.currentReading, value: records.current },
+  ];
+
+  return (
+    <div>
+      <p>{t.meterRecordDates}</p>
+      <table className="price-comparison-table">
+        <thead>
+          <tr>
+            <th>{t.meterRecordDates}</th>
+            <th aria-label={t.meterRecordDates} />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <th>{row.label}</th>
+              <td>{row.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

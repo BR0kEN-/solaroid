@@ -10,6 +10,13 @@ const DayNight = z.object({
   night: Number,
 })
 
+const DateTime = z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+
+const UtilityRecordDates = z.object({
+  current: DateTime,
+  previous: DateTime,
+})
+
 const WithTaxes = {
   taxes: z.array(z.tuple([String, Number])),
 }
@@ -46,6 +53,7 @@ export const Input = z.object({
       month: Month,
       import: DayNight,
       export: DayNight,
+      records: UtilityRecordDates.optional(),
     }).optional(),
   }),
 })

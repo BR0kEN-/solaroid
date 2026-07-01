@@ -41,6 +41,12 @@ export interface UtilityMeterReconciliation {
     readonly exportDay: number
     readonly exportNight: number
   }
+  readonly records?: UtilityMeterRecordDates
+}
+
+export interface UtilityMeterRecordDates {
+  readonly current: string
+  readonly previous: string
 }
 
 export interface DataState {
