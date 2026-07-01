@@ -1,15 +1,15 @@
 import json
 from datetime import datetime
 
-from config import DtekConfig, NotificationsConfig, SolaroidConfig, load_config
-from main import (
+from solaroid.config import DtekConfig, NotificationsConfig, SolaroidConfig, load_config
+from solaroid.main import (
     UTILITY_METER_FAILURE_NOTIFICATION_ID,
     daily_ingest_slots,
     next_ingest_slot,
     run_once,
     run_with_ingest_failure_notification,
 )
-from utility import UtilityMeterFetchError, UtilityMeterStaleError, UtilityMeter
+from solaroid.utility import UtilityMeterFetchError, UtilityMeterStaleError, UtilityMeter
 
 
 def config() -> SolaroidConfig:

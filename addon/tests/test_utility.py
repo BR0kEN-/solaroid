@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from config import DtekConfig
-from utility import Dtek, UtilityMeterFetchError, UtilityMeterStaleError, expected_utility_month, fetch_history, utility_payload
+from solaroid.config import DtekConfig
+from solaroid.utility import Dtek, UtilityMeterFetchError, UtilityMeterStaleError, expected_utility_month, fetch_history, utility_payload
 
 
 FIXTURES = Path(__file__).parent / "__fixtures__"
@@ -113,7 +113,7 @@ def test_fetch_history_calls_n8n_webhook_with_three_part_basic_auth(monkeypatch)
         calls.append({"url": url, "headers": headers, "timeout": timeout})
         return Response()
 
-    monkeypatch.setattr("utility.requests.get", get)
+    monkeypatch.setattr("solaroid.utility.requests.get", get)
 
     payload = fetch_history(config())
 
@@ -154,7 +154,7 @@ def test_fetch_history_adds_department_query_to_base_url(monkeypatch) -> None:
         intervalMinutes=0,
     )
 
-    monkeypatch.setattr("utility.requests.get", get)
+    monkeypatch.setattr("solaroid.utility.requests.get", get)
 
     fetch_history(trailing_slash_config)
 
@@ -169,8 +169,8 @@ def test_failed_fetch_updates_failure_state_without_clearing_cached_payload(tmp_
     def fetch() -> None:
         raise RuntimeError("blocked secret")
 
-    monkeypatch.setattr("utility.expected_utility_month", lambda: None)
-    monkeypatch.setattr("utility.fetch_history", lambda _config: fetch())
+    monkeypatch.setattr("solaroid.utility.expected_utility_month", lambda: None)
+    monkeypatch.setattr("solaroid.utility.fetch_history", lambda _config: fetch())
 
     with pytest.raises(UtilityMeterFetchError) as first:
         Dtek(config(), path).get_values()
@@ -208,8 +208,8 @@ def test_recent_failure_retries_without_waiting_for_interval(tmp_path, monkeypat
         fetch_calls += 1
         return response_payload()
 
-    monkeypatch.setattr("utility.expected_utility_month", lambda: "2026-06")
-    monkeypatch.setattr("utility.fetch_history", fetch)
+    monkeypatch.setattr("solaroid.utility.expected_utility_month", lambda: "2026-06")
+    monkeypatch.setattr("solaroid.utility.fetch_history", fetch)
 
     payload = Dtek(slow_config(), path).get_values()
     state = json.loads(path.read_text(encoding="utf-8"))
@@ -236,8 +236,8 @@ def test_success_resets_failure_state(tmp_path, monkeypatch) -> None:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("utility.expected_utility_month", lambda: "2026-06")
-    monkeypatch.setattr("utility.fetch_history", lambda _config: response_payload())
+    monkeypatch.setattr("solaroid.utility.expected_utility_month", lambda: "2026-06")
+    monkeypatch.setattr("solaroid.utility.fetch_history", lambda _config: response_payload())
 
     dtek = Dtek(config(), path)
     payload = dtek.get_values()
@@ -268,8 +268,8 @@ def test_stale_success_keeps_cached_payload_without_failure_state(tmp_path, monk
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("utility.expected_utility_month", lambda: "2026-06")
-    monkeypatch.setattr("utility.fetch_history", lambda _config: stale_payload())
+    monkeypatch.setattr("solaroid.utility.expected_utility_month", lambda: "2026-06")
+    monkeypatch.setattr("solaroid.utility.fetch_history", lambda _config: stale_payload())
     dtek = Dtek(config(), path)
 
     with pytest.raises(UtilityMeterStaleError) as error:
