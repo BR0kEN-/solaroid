@@ -5756,7 +5756,7 @@ function UtilitySplitTable({
   readonly formatValue?: (value: number) => string;
   readonly colorDeltas?: boolean;
 }) {
-  const deltaClass = (value: number) => colorDeltas ? deltaTone(value) : undefined;
+  const deltaClass = (value: number, higherIsBetter: boolean) => colorDeltas ? comparisonDeltaTone(value, higherIsBetter) : undefined;
 
   return (
     <table className="price-comparison-table">
@@ -5770,13 +5770,13 @@ function UtilitySplitTable({
       <tbody>
         <tr>
           <th>{t.import}</th>
-          <td className={deltaClass(values.importDay)}>{formatValue(values.importDay)}</td>
-          <td className={deltaClass(values.importNight)}>{formatValue(values.importNight)}</td>
+          <td className={deltaClass(values.importDay, false)}>{formatValue(values.importDay)}</td>
+          <td className={deltaClass(values.importNight, false)}>{formatValue(values.importNight)}</td>
         </tr>
         <tr>
           <th>{t.export}</th>
-          <td className={deltaClass(values.exportDay)}>{formatValue(values.exportDay)}</td>
-          <td className={deltaClass(values.exportNight)}>{formatValue(values.exportNight)}</td>
+          <td className={deltaClass(values.exportDay, true)}>{formatValue(values.exportDay)}</td>
+          <td className={deltaClass(values.exportNight, true)}>{formatValue(values.exportNight)}</td>
         </tr>
       </tbody>
     </table>
