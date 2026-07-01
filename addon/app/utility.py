@@ -2,8 +2,9 @@ import json
 import logging
 import time
 from abc import ABC
+from calendar import monthrange
 from dataclasses import dataclass, asdict
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Final
@@ -15,6 +16,15 @@ from config import DtekConfig
 
 STATE_PATH = Path("/data/solaroid-utility-meter-state.json")
 CHECK_DAYS_AFTER_MONTH_START = 3
+# Note: Cyrillic letter!
+AUTOMATED_READING_TYPE = "А"
+IMPORT_ENERGY_CODE = "01"
+EXPORT_ENERGY_CODE = "03"
+TOTAL_SCALE = "00"
+DAY_SCALE = "04"
+NIGHT_SCALE = "05"
+DAY_KEY = "day"
+NIGHT_KEY = "night"
 
 
 class UtilityMeterFetchError(RuntimeError):
@@ -79,28 +89,134 @@ def expected_utility_month(today: date | None = None) -> str | None:
     return None
 
 
+def payload_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    items = payload.get("data", {}).get("items") if isinstance(payload.get("data"), dict) else None
+
+    if not isinstance(items, list):
+        raise ValueError("Utility response missing data.items")
+
+    return [item for item in items if isinstance(item, dict)]
+
+
+def parse_item_date(raw: Any) -> date:
+    if not isinstance(raw, str):
+        raise ValueError(f"Invalid meter date: {raw!r}")
+
+    return datetime.strptime(raw, "%d.%m.%Y").date()
+
+
+def reading_sort_key(item: dict[str, Any]) -> str:
+    item_date = parse_item_date(item.get("date"))
+    item_time = item.get("time") if isinstance(item.get("time"), str) else "00:00"
+
+    return f"{item_date.isoformat()} {item_time}"
+
+
+def item_month(item: dict[str, Any]) -> str:
+    return month_key(parse_item_date(item.get("date")))
+
+
+def is_final_month_reading(item: dict[str, Any]) -> bool:
+    item_date = parse_item_date(item.get("date"))
+    last_day = monthrange(item_date.year, item_date.month)[1]
+
+    return item_date.day > last_day - 2
+
+
+def is_automated_active_reading(item: dict[str, Any]) -> bool:
+    return (
+        not item.get("inactive")
+        and not item.get("blocked")
+        and item.get("type") == AUTOMATED_READING_TYPE
+        and is_final_month_reading(item)
+    )
+
+
+def direction_key(item: dict[str, Any]) -> str | None:
+    if item.get("energyCode") == IMPORT_ENERGY_CODE:
+        return "import"
+    if item.get("energyCode") == EXPORT_ENERGY_CODE:
+        return "export"
+
+    return None
+
+
+def zone_key(item: dict[str, Any]) -> str | None:
+    if item.get("scale") == DAY_SCALE:
+        return DAY_KEY
+    if item.get("scale") == NIGHT_SCALE:
+        return NIGHT_KEY
+
+    return None
+
+
+def month_readings(items: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Decimal]]]:
+    months: dict[str, dict[str, dict[str, Decimal]]] = {}
+    latest: dict[tuple[str, str, str], str] = {}
+
+    for item in items:
+        month = item_month(item)
+        direction = direction_key(item)
+        if direction is None:
+            continue
+
+        scale = item.get("scale")
+        if scale == TOTAL_SCALE:
+            candidates = ((DAY_KEY, parse_value(item.get("value"))), (NIGHT_KEY, Decimal(0)))
+        else:
+            zone = zone_key(item)
+            if zone is None:
+                continue
+            candidates = ((zone, parse_value(item.get("value"))),)
+
+        sort_key = reading_sort_key(item)
+        for zone, value in candidates:
+            key = (month, direction, zone)
+            if sort_key < latest.get(key, ""):
+                continue
+
+            months.setdefault(month, {}).setdefault(direction, {})[zone] = value
+            latest[key] = sort_key
+
+    return months
+
+
+def complete_months(months: dict[str, dict[str, dict[str, Decimal]]]) -> list[str]:
+    return [
+        month
+        for month, readings in months.items()
+        if all(zone in readings.get(direction, {}) for direction in ("import", "export") for zone in (DAY_KEY, NIGHT_KEY))
+    ]
+
+
+def decimal_diff(current: Decimal, previous: Decimal) -> float:
+    return float(current - previous)
+
+
 def utility_payload(payload: dict[str, Any], expected_month: str | None = None) -> dict[str, Any]:
-    diff = payload.get("diff")
-    samples = payload.get("samples")
+    readings = month_readings([item for item in payload_items(payload) if is_automated_active_reading(item)])
+    months = sorted(complete_months(readings), reverse=True)
 
-    if not isinstance(diff, dict):
-        raise ValueError("Utility response missing diff")
-    if not isinstance(samples, dict) or not samples:
-        raise ValueError("Utility response missing samples")
+    if len(months) < 2:
+        raise ValueError("Utility response has fewer than two complete months")
 
-    month = max(str(key) for key in samples.keys())
+    month = months[0]
     if expected_month is not None and month != expected_month:
         raise StaleUtilityDataError(f"Utility response stale: latest {month}, expected {expected_month}")
+
+    previous_month = months[1]
+    current = readings[month]
+    previous = readings[previous_month]
 
     return {
         "month": month,
         "import": {
-            "day": float(parse_value(diff["import"]["day"])),
-            "night": float(parse_value(diff["import"]["night"])),
+            "day": decimal_diff(current["import"][DAY_KEY], previous["import"][DAY_KEY]),
+            "night": decimal_diff(current["import"][NIGHT_KEY], previous["import"][NIGHT_KEY]),
         },
         "export": {
-            "day": float(parse_value(diff["export"]["day"])),
-            "night": float(parse_value(diff["export"]["night"])),
+            "day": decimal_diff(current["export"][DAY_KEY], previous["export"][DAY_KEY]),
+            "night": decimal_diff(current["export"][NIGHT_KEY], previous["export"][NIGHT_KEY]),
         },
     }
 
@@ -209,7 +325,7 @@ class Dtek(UtilityMeter):
         self._recovered_from_failure = False
         state = self._state_storage.load()
 
-        if state.checked_minutes_ago > self._config.intervalMinutes:
+        if state.failureCount > 0 or state.checked_minutes_ago > self._config.intervalMinutes:
             try:
                 state.payload = utility_payload(fetch_history(self._config), expected_utility_month())
                 self._recovered_from_failure = state.failureCount > 0

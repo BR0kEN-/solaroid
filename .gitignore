@@ -4,16 +4,23 @@
 !.git*
 !/.editorconfig
 !/README.md
+!/Makefile
 !/repository.yaml
 
 !/addon/
 /addon/*
 !/addon/config.yaml
 !/addon/Dockerfile
+!/addon/pyproject.toml
 !/addon/run.sh
 !/addon/app/
 !/addon/app/*.py
 /addon/app/__pycache__/
+!/addon/tests/
+!/addon/tests/*.py
+!/addon/tests/__fixtures__/
+!/addon/tests/__fixtures__/*.json
+/addon/tests/__pycache__/
 
 !/dashboard/
 /dashboard/*

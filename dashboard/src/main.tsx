@@ -261,6 +261,7 @@ const i18n = {
     remainingPaybackTime: "Time left",
     productionSource: "Source",
     pvgisSource: "PVGIS, no closed years yet",
+    allTimeDataSource: "all time data",
     closedYearSource: "1 closed year",
     closedYearAverageSource: "closed year average",
     actualFallbackSource: "actual rows fallback",
@@ -433,6 +434,7 @@ const i18n = {
     remainingPaybackTime: "Залишилось",
     productionSource: "Джерело",
     pvgisSource: "PVGIS, ще немає закритих років",
+    allTimeDataSource: "всі дані",
     closedYearSource: "1 закритий рік",
     closedYearAverageSource: "середнє закритих років",
     actualFallbackSource: "резерв з фактичних рядків",
@@ -1942,11 +1944,9 @@ function App({
       const details = commercialEndRecovery?.details;
       const sourceLabel = details?.annualProduction.source === "pvgis"
         ? t.pvgisSource
-        : details?.annualProduction.source === "closed-year"
-          ? t.closedYearSource
-          : details?.annualProduction.source === "closed-year-average"
-            ? `${details.annualProduction.closedYearCount} ${t.closedYearAverageSource}`
-            : t.actualFallbackSource;
+        : details?.annualProduction.source === "all-time-data"
+          ? t.allTimeDataSource
+          : t.actualFallbackSource;
       return {
         title: titleCase(t.investmentRecovered),
         body: (
