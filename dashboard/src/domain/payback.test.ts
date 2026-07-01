@@ -196,7 +196,7 @@ describe('payback', () => {
     expect(result.details?.annualSurplus.kwh).toBeCloseTo(8_000)
   })
 
-  it('uses a closed year as annual production when available', () => {
+  it('uses all time data as annual production when plant is old enough', () => {
     const rows = Array.from({ length: 12 }, (_, index) => ({
       ...month(0, `2026-${String(index + 1).padStart(2, '0')}-01`),
       production: 1_000,
@@ -225,14 +225,54 @@ describe('payback', () => {
       today: new Date('2027-01-01T00:00:00'),
     })
 
-    expect(result.details?.annualProduction).toEqual({
-      kwh: 12_000,
-      source: 'closed-year',
-      closedYearCount: 1,
-    })
+    expect(result.details?.annualProduction.kwh).toBeCloseTo(12_000)
+    expect(result.details?.annualProduction.source).toBe('all-time-data')
+    expect(result.details?.annualProduction.closedYearCount).toBe(0)
     expect(result.details?.annualConsumption.dayKwh).toBe(7_200)
     expect(result.details?.annualConsumption.nightKwh).toBe(4_800)
-    expect(result.details?.annualSurplus.kwh).toBe(0)
+    expect(result.details?.annualSurplus.kwh).toBeCloseTo(0)
+  })
+
+  it('annualizes all time data from the plant launch date', () => {
+    const rows = Array.from({ length: 13 }, (_, index) => {
+      const date = new Date(2025, 5 + index, 1)
+      return {
+        ...month(0, `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`),
+        production: 1_000,
+        consumedDay: 600,
+        consumedNight: 400,
+      }
+    })
+    const payback = calculatePayback({
+      rows,
+      investmentUsd: 10_000,
+      currency: 'UAH',
+      launchUsdRate: 100,
+      launchDate: new Date('2025-06-28T00:00:00'),
+      today: new Date('2026-07-01T00:00:00'),
+    })
+
+    expect(payback).not.toBeNull()
+
+    const result = calculateCommercialEndRecovery({
+      rows,
+      payback: payback!,
+      currency: 'UAH',
+      commercialDate: new Date('2025-09-01T00:00:00'),
+      launchDate: new Date('2025-06-28T00:00:00'),
+      endDate: new Date('2030-01-01T00:00:00'),
+      projection: {
+        monthlyKwh: Array.from({ length: 12 }, () => 3_000),
+        dailyKwh: Array.from({ length: 12 }, () => 1),
+      },
+      today: new Date('2026-07-01T00:00:00'),
+    })
+
+    expect(result.details?.annualProduction.kwh).toBeCloseTo((13_000 / 368) * 365)
+    expect(result.details?.annualProduction.source).toBe('all-time-data')
+    expect(result.details?.annualProduction.closedYearCount).toBe(0)
+    expect(result.details?.annualConsumption.dayKwh).toBeCloseTo((7_800 / 368) * 365)
+    expect(result.details?.annualConsumption.nightKwh).toBeCloseTo((5_200 / 368) * 365)
   })
 
   it('uses self-consumption and zero export payout after the commercial period', () => {

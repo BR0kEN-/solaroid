@@ -26,7 +26,7 @@ export interface CommercialEndRecoveryResult {
 export interface CommercialRecoveryDetails {
   readonly annualProduction: {
     readonly kwh: number
-    readonly source: 'pvgis' | 'closed-year' | 'closed-year-average' | 'actual-fallback'
+    readonly source: 'pvgis' | 'all-time-data' | 'actual-fallback'
     readonly closedYearCount: number
   }
   readonly annualConsumption: {
@@ -222,27 +222,9 @@ function annualProductionBasis(
   projection: ProductionProjection | null | undefined,
   today: Date,
 ): CommercialRecoveryDetails['annualProduction'] {
-  const currentYear = today.getFullYear()
-  const launchYear = launchDate.getFullYear()
-  const closedYearProductions: number[] = []
-
-  for (let year = launchYear; year < currentYear; year += 1) {
-    const yearRows = rows.filter((row) => row.date.getFullYear() === year)
-    if (hasFullYearRows(yearRows)) {
-      closedYearProductions.push(yearRows.reduce((sum, row) => sum + row.production, 0))
-    }
-  }
-
-  if (closedYearProductions.length === 1) {
-    return { kwh: closedYearProductions[0], source: 'closed-year', closedYearCount: 1 }
-  }
-
-  if (closedYearProductions.length > 1) {
-    return {
-      kwh: closedYearProductions.reduce((sum, value) => sum + value, 0) / closedYearProductions.length,
-      source: 'closed-year-average',
-      closedYearCount: closedYearProductions.length,
-    }
+  const allTimeProduction = annualizedAllTimeRows(rows, launchDate, today, (row) => row.production)
+  if (allTimeProduction !== undefined) {
+    return { kwh: allTimeProduction, source: 'all-time-data', closedYearCount: 0 }
   }
 
   const pvgisAnnual = projection?.monthlyKwh.reduce((sum, value) => sum + value, 0) ?? 0
@@ -281,23 +263,9 @@ function annualConsumptionBasis(
   launchDate: Date,
   today: Date,
 ): Pick<CommercialRecoveryDetails['annualConsumption'], 'dayKwh' | 'nightKwh' | 'totalKwh'> {
-  const currentYear = today.getFullYear()
-  const launchYear = launchDate.getFullYear()
-  const closedYearConsumptions: Array<{ readonly day: number; readonly night: number }> = []
-
-  for (let year = launchYear; year < currentYear; year += 1) {
-    const yearRows = rows.filter((row) => row.date.getFullYear() === year)
-    if (hasFullYearRows(yearRows)) {
-      closedYearConsumptions.push({
-        day: yearRows.reduce((sum, row) => sum + row.consumedDay, 0),
-        night: yearRows.reduce((sum, row) => sum + row.consumedNight, 0),
-      })
-    }
-  }
-
-  if (closedYearConsumptions.length) {
-    const dayKwh = closedYearConsumptions.reduce((sum, value) => sum + value.day, 0) / closedYearConsumptions.length
-    const nightKwh = closedYearConsumptions.reduce((sum, value) => sum + value.night, 0) / closedYearConsumptions.length
+  const dayKwh = annualizedAllTimeRows(rows, launchDate, today, (row) => row.consumedDay)
+  const nightKwh = annualizedAllTimeRows(rows, launchDate, today, (row) => row.consumedNight)
+  if (dayKwh !== undefined && nightKwh !== undefined) {
     return { dayKwh, nightKwh, totalKwh: dayKwh + nightKwh }
   }
 
@@ -405,10 +373,19 @@ function tariffRowForMonthIndex(rows: readonly MonthRow[], monthIndex: number) {
     ?? [...rows].reverse().find((row) => row.exportPriceDay > 0)
 }
 
-function hasFullYearRows(rows: readonly MonthRow[]) {
-  return Array.from({ length: 12 }, (_, monthIndex) =>
-    rows.some((row) => row.date.getMonth() === monthIndex),
-  ).every(Boolean)
+function annualizedAllTimeRows(
+  rows: readonly MonthRow[],
+  launchDate: Date,
+  today: Date,
+  value: (row: MonthRow) => number,
+) {
+  const activeDays = daysBetween(launchDate, today)
+  if (activeDays < 365) return undefined
+
+  const total = rows
+    .filter((row) => row.date >= monthStart(launchDate) && row.date <= today)
+    .reduce((sum, row) => sum + value(row), 0)
+  return total > 0 ? (total / activeDays) * 365 : undefined
 }
 
 function monthOverlapShare(month: Date, from: Date, to: Date) {

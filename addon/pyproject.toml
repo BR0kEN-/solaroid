@@ -1,0 +1,23 @@
+[build-system]
+requires = [
+    "setuptools",
+]
+
+[project]
+name = "solaroid"
+version = "0.1.16"
+requires-python = ">= 3.12"
+dependencies = [
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "app",
+]
