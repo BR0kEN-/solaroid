@@ -2337,6 +2337,13 @@ h2 {
   line-height: 1.45;
 }
 
+.utility-comparison-table tfoot th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .utility-comparison-table tfoot th,
 .utility-comparison-table tfoot td {
   padding: 7px 0;

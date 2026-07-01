@@ -288,9 +288,7 @@ const i18n = {
     dashboardValues: "Dashboard",
     meterValues: "Meter",
     zone: "Zone",
-    meterRecordDates: "Meter readings used",
-    previousReading: "Previous",
-    currentReading: "Current",
+    meterWindow: "Import/export deltas are computed from utility meter values in the window between {previous} and {current}.",
     usedForCalculations: "Meter values are distributed across existing daily rows before monthly calculations. The adjustment is even while no day goes below zero; otherwise it is proportional to the original daily values.",
     electricityPayment: "Electricity payment",
     payment: "Payment",
@@ -465,9 +463,7 @@ const i18n = {
     dashboardValues: "Дашборд",
     meterValues: "Лічильник",
     zone: "Зона",
-    meterRecordDates: "Покази, використані для розрахунку",
-    previousReading: "Попередній",
-    currentReading: "Поточний",
+    meterWindow: "Різниця імпорту/експорту рахується з показів лічильника у вікні між {previous} і {current}.",
     usedForCalculations: "Покази лічильника розподіляються по наявних денних рядках перед місячними розрахунками. Корекція рівномірна, доки жоден день не йде нижче нуля; інакше вона пропорційна початковим денним значенням.",
     electricityPayment: "Оплата електрики",
     payment: "Оплата",
@@ -5764,7 +5760,7 @@ function UtilityMeterInfo({
         formatValue={formatMeterNumber}
         formatDelta={signedMeterNumber}
       />
-      {meter.records ? <UtilityRecordDatesTable t={t} records={meter.records} /> : null}
+      {meter.records ? <UtilityMeterWindowNote t={t} lang={lang} records={meter.records} /> : null}
       <p>{t.usedForCalculations}</p>
     </div>
   );
@@ -5834,40 +5830,38 @@ function UtilityComparisonTable({
   );
 }
 
-function UtilityRecordDatesTable({
+function UtilityMeterWindowNote({
   t,
+  lang,
   records,
 }: {
   readonly t: Record<string, string>;
+  readonly lang: Lang;
   readonly records: NonNullable<MonthRow["utilityMeter"]>["records"];
 }) {
   if (!records) return null;
-  const rows = [
-    { label: t.previousReading, value: records.previous },
-    { label: t.currentReading, value: records.current },
-  ];
 
   return (
-    <div>
-      <p>{t.meterRecordDates}</p>
-      <table className="price-comparison-table">
-        <thead>
-          <tr>
-            <th>{t.meterRecordDates}</th>
-            <th aria-label={t.meterRecordDates} />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label}>
-              <th>{row.label}</th>
-              <td>{row.value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <p>
+      {t.meterWindow
+        .replace("{previous}", formatUtilityRecordDate(records.previous, lang))
+        .replace("{current}", formatUtilityRecordDate(records.current, lang))}
+    </p>
   );
+}
+
+function formatUtilityRecordDate(value: string, lang: Lang) {
+  const date = new Date(value.replace(" ", "T"));
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function RoiInfo({
