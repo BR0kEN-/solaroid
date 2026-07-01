@@ -19,9 +19,13 @@ Deno.test('ingest input accepts optional utility meter values', () => {
         export: { day: 6, night: 6, taxes: [['vat', 18], ['mil', 5]] },
       },
       utility: {
-        month: '2026-05-01',
+        month: '2026-05',
         import: { day: 51, night: 62 },
         export: { day: 7, night: 8 },
+        records: {
+          current: '2026-05-31 23:59',
+          previous: '2026-04-30 23:59',
+        },
       },
     },
   })
@@ -29,8 +33,11 @@ Deno.test('ingest input accepts optional utility meter values', () => {
   if (parsed.thisMonth.utility?.export.night !== 8) {
     throw new Error('utility export night not parsed')
   }
-  if (parsed.thisMonth.utility.month !== '2026-05-01') {
+  if (parsed.thisMonth.utility.month !== '2026-05') {
     throw new Error('utility month not parsed')
+  }
+  if (parsed.thisMonth.utility.records?.previous !== '2026-04-30 23:59') {
+    throw new Error('utility record dates not parsed')
   }
 })
 

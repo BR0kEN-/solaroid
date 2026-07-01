@@ -61,6 +61,7 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
         utility_import_night: input.thisMonth.utility.import.night,
         utility_export_day: input.thisMonth.utility.export.day,
         utility_export_night: input.thisMonth.utility.export.night,
+        utility_record_dates: input.thisMonth.utility.records,
       },
   }
 }

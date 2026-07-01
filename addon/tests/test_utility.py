@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 
 from solaroid.config import DtekConfig
-from solaroid.utility import Dtek, UtilityMeterFetchError, UtilityMeterStaleError, expected_utility_month, fetch_history, utility_payload
+from solaroid.utility import (
+    Dtek,
+    UtilityMeterFetchError,
+    UtilityMeterStaleError,
+    expected_utility_month,
+    fetch_history,
+    utility_payload,
+)
 
 
 FIXTURES = Path(__file__).parent / "__fixtures__"
@@ -71,12 +78,37 @@ def slow_config() -> DtekConfig:
     )
 
 
+def expected_two_zone_payload() -> dict[str, object]:
+    return {
+        "month": "2026-06",
+        "import": {"day": 58, "night": 108},
+        "export": {"day": 2432, "night": 22},
+        "records": {
+            "current": "2026-06-30 23:59",
+            "previous": "2026-05-31 23:59",
+        },
+    }
+
+
 def test_uses_previous_reading_month_for_delta() -> None:
     payload = utility_payload(response_payload())
 
-    assert payload["month"] == "2026-06"
-    assert payload["import"] == {"day": 58, "night": 108}
-    assert payload["export"] == {"day": 2432, "night": 22}
+    assert payload == expected_two_zone_payload()
+
+
+def test_record_dates_keep_minute_precision() -> None:
+    payload = response_payload()
+    data = payload["data"]
+    if not isinstance(data, dict):
+        raise AssertionError("fixture data must be an object")
+    items = data["items"]
+    if not isinstance(items, list):
+        raise AssertionError("fixture items must be a list")
+    for item in items:
+        if isinstance(item, dict) and item.get("time") == "23:59":
+            item["time"] = "23:59:50"
+
+    assert utility_payload(payload) == expected_two_zone_payload()
 
 
 def test_supports_total_export_meter_as_day_with_zero_night() -> None:
@@ -85,6 +117,10 @@ def test_supports_total_export_meter_as_day_with_zero_night() -> None:
     assert payload["month"] == "2026-06"
     assert payload["import"] == {"day": 40, "night": 392}
     assert payload["export"] == {"day": 1701, "night": 0}
+    assert payload["records"] == {
+        "current": "2026-06-29 23:57",
+        "previous": "2026-05-31 23:59",
+    }
 
 
 def test_rejects_stale_payload_when_expected_month_missing() -> None:
@@ -215,7 +251,7 @@ def test_recent_failure_retries_without_waiting_for_interval(tmp_path, monkeypat
     state = json.loads(path.read_text(encoding="utf-8"))
 
     assert fetch_calls == 1
-    assert payload == {"month": "2026-06", "import": {"day": 58, "night": 108}, "export": {"day": 2432, "night": 22}}
+    assert payload == expected_two_zone_payload()
     assert state["failureCount"] == 0
     assert state["lastError"] is None
 
@@ -243,7 +279,7 @@ def test_success_resets_failure_state(tmp_path, monkeypatch) -> None:
     payload = dtek.get_values()
     state = json.loads(path.read_text(encoding="utf-8"))
 
-    assert payload == {"month": "2026-06", "import": {"day": 58, "night": 108}, "export": {"day": 2432, "night": 22}}
+    assert payload == expected_two_zone_payload()
     assert dtek.recovered_from_failure is True
     assert state["failureCount"] == 0
     assert state["lastFailureAt"] is None

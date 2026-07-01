@@ -1,5 +1,4 @@
 import json
-import logging
 import time
 from abc import ABC
 from calendar import monthrange
@@ -25,6 +24,12 @@ DAY_SCALE = "04"
 NIGHT_SCALE = "05"
 DAY_KEY = "day"
 NIGHT_KEY = "night"
+
+
+@dataclass(frozen=True)
+class Reading:
+    value: Decimal
+    readAt: str
 
 
 class UtilityMeterFetchError(RuntimeError):
@@ -55,9 +60,7 @@ def fetch_history(config: DtekConfig) -> dict[str, Any]:
         timeout=45,
     )
     response.raise_for_status()
-    payload = response.json()
-    logging.info("Utility meter response: %s", payload)
-    return payload
+    return response.json()
 
 
 def parse_value(value: Any) -> Decimal:
@@ -109,7 +112,7 @@ def reading_sort_key(item: dict[str, Any]) -> str:
     item_date = parse_item_date(item.get("date"))
     item_time = item.get("time") if isinstance(item.get("time"), str) else "00:00"
 
-    return f"{item_date.isoformat()} {item_time}"
+    return f"{item_date.isoformat()} {item_time[:5]}"
 
 
 def item_month(item: dict[str, Any]) -> str:
@@ -150,8 +153,8 @@ def zone_key(item: dict[str, Any]) -> str | None:
     return None
 
 
-def month_readings(items: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Decimal]]]:
-    months: dict[str, dict[str, dict[str, Decimal]]] = {}
+def month_readings(items: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Reading]]]:
+    months: dict[str, dict[str, dict[str, Reading]]] = {}
     latest: dict[tuple[str, str, str], str] = {}
 
     for item in items:
@@ -175,13 +178,13 @@ def month_readings(items: list[dict[str, Any]]) -> dict[str, dict[str, dict[str,
             if sort_key < latest.get(key, ""):
                 continue
 
-            months.setdefault(month, {}).setdefault(direction, {})[zone] = value
+            months.setdefault(month, {}).setdefault(direction, {})[zone] = Reading(value, sort_key)
             latest[key] = sort_key
 
     return months
 
 
-def complete_months(months: dict[str, dict[str, dict[str, Decimal]]]) -> list[str]:
+def complete_months(months: dict[str, dict[str, dict[str, Reading]]]) -> list[str]:
     return [
         month
         for month, readings in months.items()
@@ -189,8 +192,16 @@ def complete_months(months: dict[str, dict[str, dict[str, Decimal]]]) -> list[st
     ]
 
 
-def decimal_diff(current: Decimal, previous: Decimal) -> float:
-    return float(current - previous)
+def reading_diff(current: Reading, previous: Reading) -> float:
+    return float(current.value - previous.value)
+
+
+def record_date(readings: dict[str, dict[str, Reading]]) -> str:
+    return max(
+        readings[direction][zone].readAt
+        for direction in ("import", "export")
+        for zone in (DAY_KEY, NIGHT_KEY)
+    )
 
 
 def utility_payload(payload: dict[str, Any], expected_month: str | None = None) -> dict[str, Any]:
@@ -211,12 +222,16 @@ def utility_payload(payload: dict[str, Any], expected_month: str | None = None) 
     return {
         "month": month,
         "import": {
-            "day": decimal_diff(current["import"][DAY_KEY], previous["import"][DAY_KEY]),
-            "night": decimal_diff(current["import"][NIGHT_KEY], previous["import"][NIGHT_KEY]),
+            "day": reading_diff(current["import"][DAY_KEY], previous["import"][DAY_KEY]),
+            "night": reading_diff(current["import"][NIGHT_KEY], previous["import"][NIGHT_KEY]),
         },
         "export": {
-            "day": decimal_diff(current["export"][DAY_KEY], previous["export"][DAY_KEY]),
-            "night": decimal_diff(current["export"][NIGHT_KEY], previous["export"][NIGHT_KEY]),
+            "day": reading_diff(current["export"][DAY_KEY], previous["export"][DAY_KEY]),
+            "night": reading_diff(current["export"][NIGHT_KEY], previous["export"][NIGHT_KEY]),
+        },
+        "records": {
+            "current": record_date(current),
+            "previous": record_date(previous),
         },
     }
 
