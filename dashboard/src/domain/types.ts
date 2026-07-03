@@ -8,6 +8,8 @@ export interface MonthRow {
   readonly importNight: number
   readonly consumedDay: number
   readonly consumedNight: number
+  readonly lossesDay?: number
+  readonly lossesNight?: number
   readonly consumedTotal: number
   readonly importTotal: number
   readonly balance: number
