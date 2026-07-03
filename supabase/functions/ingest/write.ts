@@ -29,6 +29,8 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
       import_night: input.today.import.night,
       consumption_day: input.today.consumption.day,
       consumption_night: input.today.consumption.night,
+      losses_day: input.today.losses.day,
+      losses_night: input.today.losses.night,
       uah_usd_rate: input.today.currency.uahUsd,
       uah_eur_rate: input.today.currency.uahEur,
     },
@@ -42,6 +44,8 @@ function getRows(input: Input, token: Solaroid.Supabase.Access.Token) {
       import_night: input.thisMonth.import.night,
       consumption_day: input.thisMonth.consumption.day,
       consumption_night: input.thisMonth.consumption.night,
+      losses_day: input.thisMonth.losses.day,
+      losses_night: input.thisMonth.losses.night,
     },
     tariff: {
       plant_id: token.plant_id,

@@ -31,6 +31,7 @@ const Period = z.object({
   export: z.union([Number, DayNight]),
   consumption: DayNight,
   import: DayNight,
+  losses: DayNight,
 })
 
 export const Input = z.object({

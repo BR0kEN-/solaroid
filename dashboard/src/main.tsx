@@ -37,8 +37,11 @@ import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, P
 import "./styles.css";
 
 type RangeKey = "all" | "range";
+type DailyRangeKey = "currentMonth" | "7d" | "14d" | "21d" | "30d" | "range";
 type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly";
+const monthRangePresets = [1, 3, 6, 12] as const;
+const dailyRangePresets = [7, 14, 21, 30] as const;
 type Lang = "en" | "uk";
 interface PlantComparisonResult {
   readonly mode: PlantComparisonMode;
@@ -295,6 +298,7 @@ const i18n = {
     table: "Data table",
     filterMonth: "Filter month",
     range: "Range",
+    currentMonth: "Current month",
     from: "From",
     to: "To",
     allMonths: "All months",
@@ -470,6 +474,7 @@ const i18n = {
     table: "Таблиця даних",
     filterMonth: "Фільтр місяця",
     range: "Діапазон",
+    currentMonth: "Поточний місяць",
     from: "З",
     to: "До",
     allMonths: "Усі місяці",
@@ -726,6 +731,14 @@ function formatDeltaPct(delta: number, base: number) {
 
 function formatDeltaPctComma(delta: number, base: number) {
   return `, ${formatSignedPercentFromDelta(delta, base)}`;
+}
+
+function monthRangeLabel(count: number, lang: Lang) {
+  return `${count}${lang === "uk" ? "м" : "m"}`;
+}
+
+function dayRangeLabel(count: number, lang: Lang) {
+  return `${count}${lang === "uk" ? "д" : "d"}`;
 }
 
 function chartLevel(value: number, max: number, minVisible = 3) {
@@ -1087,6 +1100,15 @@ function pairedChartBarWidth(band: number, minWidth: number, ratio: number) {
   return Math.max(2, Math.min(Math.max(minWidth, band * ratio), band * 0.38));
 }
 
+function chartScrollClassName(itemCount: number) {
+  return itemCount <= 4 ? "chart-scroll chart-scroll-fit" : "chart-scroll";
+}
+
+function chartWidthForItemCount(itemCount: number, isMobile: boolean) {
+  if (!isMobile || itemCount > 4) return 900;
+  return Math.max(360, 56 + 22 + chartBand(900 - 56 - 22, itemCount) * Math.max(itemCount, 1));
+}
+
 function projectedProduction(row: MonthRow, projection?: ProductionProjection | null) {
   if (!projection) return undefined;
 
@@ -1366,6 +1388,44 @@ function filteredMonthlyRows(
   return sourceRows.filter((row) => monthKey(row.date) >= from && monthKey(row.date) <= to);
 }
 
+function shiftedDateKey(date: Date, days: number) {
+  const shifted = new Date(date);
+  shifted.setDate(shifted.getDate() + days);
+  return dateKey(shifted);
+}
+
+function filteredDailyRows(
+  sourceRows: readonly MonthRow[],
+  range: DailyRangeKey,
+  fromDate: string,
+  toDate: string,
+) {
+  const latest = sourceRows.at(-1);
+  if (!latest) return sourceRows;
+
+  if (range === "currentMonth") {
+    const latestMonth = monthKey(latest.date);
+    return sourceRows.filter((row) => monthKey(row.date) === latestMonth);
+  }
+
+  if (range.endsWith("d")) {
+    const count = Number.parseInt(range, 10);
+    const from = shiftedDateKey(latest.date, -(count - 1));
+    const to = dateKey(latest.date);
+    return sourceRows.filter((row) => {
+      const key = dateKey(row.date);
+      return key >= from && key <= to;
+    });
+  }
+
+  if (!fromDate || !toDate) return sourceRows;
+  const [from, to] = fromDate <= toDate ? [fromDate, toDate] : [toDate, fromDate];
+  return sourceRows.filter((row) => {
+    const key = dateKey(row.date);
+    return key >= from && key <= to;
+  });
+}
+
 function firstDateKey(rows: readonly MonthRow[]) {
   return rows.length ? dateKey(rows[rows.length - 1].date) : "";
 }
@@ -1483,6 +1543,9 @@ function App({
   const [range, setRange] = useState<RangeKey>("all");
   const [rangeFromMonth, setRangeFromMonth] = useState("");
   const [rangeToMonth, setRangeToMonth] = useState("");
+  const [dailyRange, setDailyRange] = useState<DailyRangeKey>("currentMonth");
+  const [dailyFromDate, setDailyFromDate] = useState("");
+  const [dailyToDate, setDailyToDate] = useState("");
   const [currency, setCurrency] = useState<Currency>("UAH");
   const [firstDay, setFirstDay] = useState("");
   const [secondDay, setSecondDay] = useState("");
@@ -1508,7 +1571,10 @@ function App({
     [dataState.rows, lang],
   );
 
-  const dailyRows = useMemo(() => dataState.dailyRows.slice(-30), [dataState.dailyRows]);
+  const dailyRows = useMemo(
+    () => filteredDailyRows(dataState.dailyRows, dailyRange, dailyFromDate, dailyToDate),
+    [dailyFromDate, dailyRange, dailyToDate, dataState.dailyRows],
+  );
 
   useEffect(() => {
     const latest = dataState.dailyRows.at(-1);
@@ -1530,6 +1596,19 @@ function App({
     if (!rangeFromMonth || !monthOptions.some(([value]) => value === rangeFromMonth)) setRangeFromMonth(firstMonth);
     if (!rangeToMonth || !monthOptions.some(([value]) => value === rangeToMonth)) setRangeToMonth(latestMonth);
   }, [monthOptions, rangeFromMonth, rangeToMonth]);
+
+  useEffect(() => {
+    const latest = dataState.dailyRows.at(-1);
+    if (!latest) return;
+    const first = dataState.dailyRows[0];
+    if (!first) return;
+    const firstKey = dateKey(first.date);
+    const latestKey = dateKey(latest.date);
+    const latestMonthStart = `${monthKey(latest.date)}-01`;
+    const defaultFrom = latestMonthStart < firstKey ? firstKey : latestMonthStart;
+    if (!dailyFromDate || dailyFromDate < firstKey || dailyFromDate > latestKey) setDailyFromDate(defaultFrom);
+    if (!dailyToDate || dailyToDate < firstKey || dailyToDate > latestKey) setDailyToDate(latestKey);
+  }, [dailyFromDate, dailyToDate, dataState.dailyRows]);
 
   useEffect(() => {
     if (viewMode !== "daily") setDailyCompareOpen(false);
@@ -1599,6 +1678,10 @@ function App({
     return filteredMonthlyRows(dataState.rows, range, rangeFromMonth, rangeToMonth);
   }, [dataState.rows, range, rangeFromMonth, rangeToMonth]);
   const productionProjection = dataState.projection ?? null;
+  const dailyDateBounds = useMemo(
+    () => [dataState.dailyRows[0] ? dateKey(dataState.dailyRows[0].date) : "", dataState.dailyRows.at(-1) ? dateKey(dataState.dailyRows.at(-1)!.date) : ""] as const,
+    [dataState.dailyRows],
+  );
 
   const plantComparisonMonthOptions = useMemo(
     () => [...new Map(dataState.dailyRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
@@ -2142,6 +2225,7 @@ function App({
       <section className="content">
         <DashboardToolbar
           t={t}
+          lang={lang}
           currency={currency}
           setCurrency={setCurrency}
           viewMode={viewMode}
@@ -2154,6 +2238,13 @@ function App({
           rangeToMonth={rangeToMonth}
           setRangeFromMonth={setRangeFromMonth}
           setRangeToMonth={setRangeToMonth}
+          dailyRange={dailyRange}
+          setDailyRange={setDailyRange}
+          dailyFromDate={dailyFromDate}
+          dailyToDate={dailyToDate}
+          setDailyFromDate={setDailyFromDate}
+          setDailyToDate={setDailyToDate}
+          dailyDateBounds={dailyDateBounds}
           isDailyCompareOpen={isDailyCompareOpen}
           setDailyCompareOpen={setDailyCompareOpen}
           investmentValue={showPlaceholders ? (
@@ -2860,6 +2951,7 @@ function PortalRoot() {
 
 interface DashboardToolbarProps {
   readonly t: Record<string, string>;
+  readonly lang: Lang;
   readonly currency: Currency;
   readonly setCurrency?: (currency: Currency) => void;
   readonly viewMode: ViewMode;
@@ -2872,6 +2964,13 @@ interface DashboardToolbarProps {
   readonly rangeToMonth?: string;
   readonly setRangeFromMonth?: (month: string) => void;
   readonly setRangeToMonth?: (month: string) => void;
+  readonly dailyRange?: DailyRangeKey;
+  readonly setDailyRange?: (range: DailyRangeKey) => void;
+  readonly dailyFromDate?: string;
+  readonly dailyToDate?: string;
+  readonly setDailyFromDate?: (date: string) => void;
+  readonly setDailyToDate?: (date: string) => void;
+  readonly dailyDateBounds?: readonly [string, string];
   readonly isDailyCompareOpen: boolean;
   readonly setDailyCompareOpen?: (isOpen: boolean) => void;
   readonly investmentValue: React.ReactNode;
@@ -2883,6 +2982,7 @@ interface DashboardToolbarProps {
 
 function DashboardToolbar({
   t,
+  lang,
   currency,
   setCurrency,
   viewMode,
@@ -2895,6 +2995,13 @@ function DashboardToolbar({
   rangeToMonth = "",
   setRangeFromMonth,
   setRangeToMonth,
+  dailyRange = "currentMonth",
+  setDailyRange,
+  dailyFromDate = "",
+  dailyToDate = "",
+  setDailyFromDate,
+  setDailyToDate,
+  dailyDateBounds,
   isDailyCompareOpen,
   setDailyCompareOpen,
   investmentValue,
@@ -2904,7 +3011,37 @@ function DashboardToolbar({
   isLoading,
 }: DashboardToolbarProps) {
   const [isRangePickerOpen, setRangePickerOpen] = useState(false);
+  const [isDailyRangePickerOpen, setDailyRangePickerOpen] = useState(false);
   const rangeToolsRef = useRef<HTMLDivElement | null>(null);
+  const dailyRangeToolsRef = useRef<HTMLDivElement | null>(null);
+  const applyMonthRangePreset = (count: number) => {
+    const latestIndex = monthOptions.length - 1;
+    const latestMonth = monthOptions[latestIndex]?.[0];
+    const firstMonth = monthOptions[Math.max(0, latestIndex - count + 1)]?.[0];
+    if (!latestMonth || !firstMonth) return;
+
+    setRange?.("range");
+    setRangeFromMonth?.(firstMonth);
+    setRangeToMonth?.(latestMonth);
+  };
+  const applyDailyRangePreset = (count: number) => {
+    const latestDate = dailyDateBounds?.[1];
+    const firstDate = dailyDateBounds?.[0];
+    if (!latestDate || !firstDate) return;
+    const fromDate = shiftedDateKey(new Date(`${latestDate}T00:00:00`), -(count - 1));
+
+    setDailyRange?.(`${count}d` as DailyRangeKey);
+    setDailyFromDate?.(fromDate < firstDate ? firstDate : fromDate);
+    setDailyToDate?.(latestDate);
+  };
+  const selectedMonthPreset = range === "range"
+    ? monthRangePresets.find((count) => {
+      const latestIndex = monthOptions.length - 1;
+      const latestMonth = monthOptions[latestIndex]?.[0];
+      const firstMonth = monthOptions[Math.max(0, latestIndex - count + 1)]?.[0];
+      return Boolean(latestMonth && firstMonth && rangeFromMonth === firstMonth && rangeToMonth === latestMonth);
+    })
+    : undefined;
 
   useEffect(() => {
     if (!isRangePickerOpen) return undefined;
@@ -2924,6 +3061,25 @@ function DashboardToolbar({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [isRangePickerOpen]);
+
+  useEffect(() => {
+    if (!isDailyRangePickerOpen) return undefined;
+
+    const closeOnOutside = (event: PointerEvent) => {
+      if (dailyRangeToolsRef.current?.contains(event.target as Node)) return;
+      setDailyRangePickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDailyRangePickerOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isDailyRangePickerOpen]);
 
   return (
     <header className="topbar">
@@ -2980,6 +3136,19 @@ function DashboardToolbar({
             </div>
             {range === "range" && isRangePickerOpen ? (
               <div className="month-range-controls">
+                <div className="range-preset-row" aria-label="Preset range">
+                  {monthRangePresets.map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      className={selectedMonthPreset === count ? "selected" : ""}
+                      onClick={() => applyMonthRangePreset(count)}
+                      disabled={isLoading || !monthOptions.length}
+                    >
+                      {monthRangeLabel(count, lang)}
+                    </button>
+                  ))}
+                </div>
                 <label className="month-field">
                   <span>{t.from}</span>
                   <input
@@ -3006,11 +3175,85 @@ function DashboardToolbar({
             ) : null}
           </div>
         ) : viewMode === "daily" ? (
-          <div className="segmented daily-tools" aria-label={t.compareDays}>
-            <button type="button" className={isDailyCompareOpen ? "selected" : ""} onClick={() => setDailyCompareOpen?.(true)} disabled={isLoading}>
-              {t.compareDays}
-            </button>
-          </div>
+          <>
+            <div className="daily-range-tools" aria-label={t.range} ref={dailyRangeToolsRef}>
+              <div className="segmented range-segmented">
+                <button
+                  type="button"
+                  className={dailyRange === "currentMonth" ? "selected" : ""}
+                  onClick={() => {
+                    setDailyRange?.("currentMonth");
+                    setDailyRangePickerOpen(false);
+                  }}
+                  disabled={isLoading}
+                >
+                  {t.all}
+                </button>
+                <button
+                  type="button"
+                  className={dailyRange !== "currentMonth" ? "selected" : ""}
+                  onClick={() => {
+                    if (dailyRange === "currentMonth") setDailyRange?.("range");
+                    setDailyRangePickerOpen((current) => !current);
+                  }}
+                  disabled={isLoading}
+                  aria-expanded={isDailyRangePickerOpen}
+                  aria-haspopup="dialog"
+                >
+                  {t.range}
+                </button>
+              </div>
+              {dailyRange !== "currentMonth" && isDailyRangePickerOpen ? (
+                <div className="daily-date-range-controls">
+                  <div className="range-preset-row" aria-label="Preset range">
+                    {dailyRangePresets.map((count) => {
+                      const item = `${count}d` as DailyRangeKey;
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          className={dailyRange === item ? "selected" : ""}
+                          onClick={() => {
+                            applyDailyRangePreset(count);
+                          }}
+                          disabled={isLoading}
+                        >
+                          {dayRangeLabel(count, lang)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <label className="month-field">
+                    <span>{t.from}</span>
+                    <input
+                      type="date"
+                      value={dailyFromDate}
+                      onChange={(event) => setDailyFromDate?.(event.target.value)}
+                      min={dailyDateBounds?.[0]}
+                      max={dailyDateBounds?.[1]}
+                      disabled={isLoading}
+                    />
+                  </label>
+                  <label className="month-field">
+                    <span>{t.to}</span>
+                    <input
+                      type="date"
+                      value={dailyToDate}
+                      onChange={(event) => setDailyToDate?.(event.target.value)}
+                      min={dailyDateBounds?.[0]}
+                      max={dailyDateBounds?.[1]}
+                      disabled={isLoading}
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </div>
+            <div className="segmented daily-tools" aria-label={t.compareDays}>
+              <button type="button" className={isDailyCompareOpen ? "selected" : ""} onClick={() => setDailyCompareOpen?.(true)} disabled={isLoading}>
+                {t.compareDays}
+              </button>
+            </div>
+          </>
         ) : null}
         <button
           type="button"
@@ -3034,6 +3277,7 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
       <section className="content">
         <DashboardToolbar
           t={t}
+          lang={lang}
           currency="UAH"
           viewMode="monthly"
           viewOptions={["monthly", "daily", "comparison"]}
@@ -3873,15 +4117,18 @@ function PlantPeriodLineChart({
   readonly onDeltaInfo: (title: string, body: React.ReactNode) => void;
 }) {
   const isMobile = useMediaQuery("(max-width: 820px)");
-  const width = 900;
-  const height = 280;
-  const pad = { left: 56, right: 22, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
-  const innerH = height - pad.top - pad.bottom;
   const periodKeys = useMemo(() => {
     const keys = [...new Set(plants.flatMap((plant) => plant.rows.map((row) => dateKey(row.date))))].sort();
     return isMobile ? keys.reverse() : keys;
   }, [isMobile, plants]);
+  const width = chartWidthForItemCount(periodKeys.length, isMobile);
+  const height = 280;
+  const pad = { left: 56, right: 22, top: 18, bottom: 42 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const band = chartBand(innerW, periodKeys.length);
+  const plotWidth = Math.min(innerW, band * Math.max(periodKeys.length, 1));
+  const plotStart = pad.left;
   const values = plants.flatMap((plant) => plant.rows.map(value)).filter((item) => Number.isFinite(item));
   const rawMin = Math.min(...values, 0);
   const rawMax = Math.max(...values, 1);
@@ -3890,8 +4137,7 @@ function PlantPeriodLineChart({
   const max = rawMax + spread * 0.04;
   const x = (date: string) => {
     const index = Math.max(0, periodKeys.indexOf(date));
-    if (periodKeys.length <= 1) return pad.left + innerW / 2;
-    return pad.left + (index / (periodKeys.length - 1)) * innerW;
+    return plotStart + index * band + band / 2;
   };
   const y = (item: number) => pad.top + innerH - ((item - min) / (max - min || 1)) * innerH;
   const rowByPlantAndDay = useMemo(
@@ -3979,7 +4225,7 @@ function PlantPeriodLineChart({
 
   return (
     <>
-      <div className="chart-scroll plant-line-chart-scroll">
+      <div className={`${chartScrollClassName(periodKeys.length)} plant-line-chart-scroll`}>
         <svg className="chart plant-line-chart" viewBox={`0 0 ${width} ${height}`} role="img">
           <g className="grid">
             {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
@@ -4026,12 +4272,17 @@ function PlantPeriodLineChart({
             const inspector = inspectors.get(periodKey);
             const date = new Date(`${periodKey}T00:00:00`);
             const xPosition = x(periodKey);
-            const targetWidth = Math.max(18, innerW / Math.max(periodKeys.length - 1, 1) * 0.48);
+            const targetWidth = Math.min(
+              innerW,
+              isMobile ? 56 : 72,
+              Math.max(isMobile ? 24 : 18, band * 0.72),
+            );
+            const targetX = Math.min(width - pad.right - targetWidth, Math.max(pad.left, xPosition - targetWidth / 2));
             return (
               <g key={periodKey}>
                 {inspector && (
                   <MonthTarget
-                    x={xPosition - targetWidth / 2}
+                    x={targetX}
                     y={pad.top}
                     width={targetWidth}
                     height={innerH}
@@ -4528,7 +4779,7 @@ function ProductionExportChart({
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = 900;
+  const width = chartWidthForItemCount(displayRows.length, isMobile);
   const height = 300;
   const pad = { left: 48, right: 18, top: 18, bottom: 42 };
   const innerW = width - pad.left - pad.right;
@@ -4550,7 +4801,7 @@ function ProductionExportChart({
 
   return (
     <>
-      <div className="chart-scroll">
+      <div className={chartScrollClassName(displayRows.length)}>
         <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
           <Grid width={width} height={height} pad={pad} max={max} />
           {displayRows.map((row, index) => {
@@ -4674,7 +4925,7 @@ function RoiChart({
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = 900;
+  const width = chartWidthForItemCount(displayRows.length, isMobile);
   const height = 300;
   const pad = { left: 48, right: 24, top: 18, bottom: 42 };
   const innerW = width - pad.left - pad.right;
@@ -4693,7 +4944,7 @@ function RoiChart({
 
   return (
     <>
-      <div className="chart-scroll">
+      <div className={chartScrollClassName(displayRows.length)}>
         <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
           <Grid width={width} height={height} pad={pad} max={moneyMax} currency={currency} />
           {displayRows.map(({ row, monthly: value }, index) => {
@@ -4781,7 +5032,7 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = 900;
+  const width = chartWidthForItemCount(displayRows.length, isMobile);
   const height = 300;
   const pad = { left: 70, right: 18, top: 18, bottom: 42 };
   const innerW = width - pad.left - pad.right;
@@ -4802,7 +5053,7 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
 
   return (
     <>
-      <div className="chart-scroll">
+      <div className={chartScrollClassName(displayRows.length)}>
         <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
           <g className="grid">
             {ticks.map((tick) => (
@@ -4887,7 +5138,7 @@ function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = 900;
+  const width = chartWidthForItemCount(displayRows.length, isMobile);
   const height = 300;
   const pad = { left: 48, right: 18, top: 18, bottom: 42 };
   const innerW = width - pad.left - pad.right;
@@ -4897,7 +5148,7 @@ function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
   const bar = Math.max(18, band * 0.48);
   return (
     <>
-      <div className="chart-scroll">
+      <div className={chartScrollClassName(displayRows.length)}>
         <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
           <Grid width={width} height={height} pad={pad} max={max} />
           {displayRows.map((row, index) => {
@@ -4971,7 +5222,7 @@ function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = 900;
+  const width = chartWidthForItemCount(displayRows.length, isMobile);
   const height = 300;
   const pad = { left: 48, right: 18, top: 18, bottom: 42 };
   const innerW = width - pad.left - pad.right;
@@ -4981,7 +5232,7 @@ function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
   const bar = Math.max(18, band * 0.48);
   return (
     <>
-      <div className="chart-scroll">
+      <div className={chartScrollClassName(displayRows.length)}>
         <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
           <Grid width={width} height={height} pad={pad} max={max} />
           {displayRows.map((row, index) => {
@@ -5108,30 +5359,14 @@ function DailyDashboard({
   readonly onNetPaymentInfo: (row: MonthRow) => void;
   readonly onRoiValueInfo: (row: MonthRow) => void;
 }) {
-  const monthOptions = useMemo(
-    () => [...new Map(allRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
-    [allRows, lang],
-  );
-  const [dailyMonthFilter, setDailyMonthFilter] = useState(monthOptions[0]?.[0] ?? "");
-  const effectiveDailyMonthFilter = dailyMonthFilter || (monthOptions[0]?.[0] ?? "");
-  const selectedRows = useMemo(
-    () => allRows.filter((row) => monthKey(row.date) === effectiveDailyMonthFilter),
-    [allRows, effectiveDailyMonthFilter],
-  );
+  const selectedRows = rows;
   const latest = selectedRows.at(-1);
-  const chartRows = selectedRows.length ? selectedRows : rows.length ? rows : allRows.slice(-30);
+  const chartRows = selectedRows;
   const dayOptions = useMemo(() => [...selectedRows].reverse(), [selectedRows]);
   const first = selectedRows.find((row) => row.month === firstDay) ?? selectedRows.at(-2) ?? selectedRows.at(-1);
   const second = selectedRows.find((row) => row.month === secondDay) ?? selectedRows.at(-1);
   const paymentDisplay = latest ? moneyFromUah(latest.electricityPayment, currency, latest.usdRate) : 0;
   const roiDisplay = latest ? rowRoiMoney(latest, currency) : 0;
-
-  useEffect(() => {
-    if (!monthOptions.length) return;
-    if (!dailyMonthFilter || !monthOptions.some(([key]) => key === dailyMonthFilter)) {
-      setDailyMonthFilter(monthOptions[0][0]);
-    }
-  }, [dailyMonthFilter, monthOptions]);
 
   useEffect(() => {
     if (!isCompareOpen) return undefined;
@@ -5273,17 +5508,6 @@ function DailyDashboard({
         <div className="section-heading">
           <div>
             <h2>{t.table}</h2>
-          </div>
-          <div className="filter-controls" aria-label={t.filterMonth}>
-            <label className="filter-box">
-              <select value={effectiveDailyMonthFilter} onChange={(event) => setDailyMonthFilter(event.target.value)}>
-                {monthOptions.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
         </div>
         <DataTable

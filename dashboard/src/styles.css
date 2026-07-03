@@ -1418,7 +1418,15 @@ h2 {
   gap: 8px;
 }
 
-.range-tools .segmented {
+.daily-range-tools {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-tools .segmented,
+.daily-range-tools .segmented {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 148px;
 }
@@ -1438,6 +1446,51 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--modal-shadow);
+}
+
+.daily-date-range-controls {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: min(280px, calc(100vw - 28px));
+  padding: 10px;
+  background:
+    linear-gradient(180deg, var(--panel-highlight), transparent),
+    var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--modal-shadow);
+}
+
+.daily-date-range-controls .month-field {
+  grid-column: 1 / -1;
+}
+
+.range-preset-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.range-preset-row button {
+  min-height: 34px;
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 18%);
+  border-radius: 7px;
+}
+
+.range-preset-row button.selected {
+  color: color-mix(in srgb, var(--text), var(--cyan) 18%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--cyan), transparent 91%), transparent 74%),
+    var(--panel);
+  border-color: color-mix(in srgb, var(--cyan), transparent 48%);
 }
 
 .month-field {
@@ -1689,6 +1742,10 @@ h2 {
   -webkit-overflow-scrolling: touch;
   border-radius: 6px;
   contain: paint;
+}
+
+.chart-scroll-fit {
+  overflow-x: hidden;
 }
 
 .chart {
@@ -2894,20 +2951,29 @@ tbody tr:hover {
   }
 
   .range-tools,
+  .daily-range-tools,
   .segmented.daily-tools {
     flex-basis: 100%;
     width: 100%;
   }
 
-  .range-tools {
+  .range-tools,
+  .daily-range-tools {
     display: grid;
     align-items: stretch;
     position: relative;
   }
 
   .range-tools .segmented,
+  .daily-range-tools .segmented,
   .segmented.daily-tools {
     width: 100%;
+  }
+
+  .range-tools .segmented,
+  .daily-range-tools .segmented {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
   }
 
   .range-segmented {
@@ -2921,6 +2987,19 @@ tbody tr:hover {
     left: 0;
     right: auto;
     order: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    margin-top: 0;
+    box-shadow: var(--modal-shadow);
+  }
+
+  .daily-date-range-controls {
+    position: absolute;
+    top: calc(100% + 8px);
+    bottom: auto;
+    left: 0;
+    right: auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
     min-width: 0;
@@ -2996,6 +3075,10 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .plant-comparison-controls button {
+    width: 100%;
+  }
+
   .comparison-bar-row {
     grid-template-columns: 1fr;
   }
@@ -3015,12 +3098,19 @@ tbody tr:hover {
     min-height: 260px;
   }
 
+  .chart-scroll-fit .chart {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .section-heading {
     gap: 10px;
   }
 
   .plant-comparison-mode {
     justify-self: start;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
 }
@@ -3046,8 +3136,8 @@ tbody tr:hover {
   }
 
   .segmented.plant-comparison-mode {
-    flex: 0 0 auto;
-    grid-template-columns: repeat(2, minmax(72px, auto));
+    flex: 1 1 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .segmented.view {
@@ -3104,11 +3194,23 @@ tbody tr:hover {
     flex: 1 1 100%;
   }
 
-  .range-tools .segmented {
+  .daily-range-tools {
+    order: 5;
+    flex: 1 1 100%;
+  }
+
+  .range-tools .segmented,
+  .daily-range-tools .segmented {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
   }
 
   .month-range-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 8px;
+  }
+
+  .daily-date-range-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 8px;
   }

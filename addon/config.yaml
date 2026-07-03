@@ -2,7 +2,7 @@
 url: https://github.com/BR0kEN-/solaroid
 name: Solaroid
 slug: solaroid
-version: 0.1.18
+version: 0.1.19
 description: Push Home Assistant solar telemetry and utility meter readings to Solaroid backend.
 init: false
 arch:
@@ -34,6 +34,9 @@ options:
       import:
         day: sensor.deye_sun_20k_lp_grid_import_today_day
         night: sensor.deye_sun_20k_lp_grid_import_today_night
+      losses:
+        day: sensor.deye_sun_20k_lp_electricity_losses_today_day
+        night: sensor.deye_sun_20k_lp_electricity_losses_today_night
       currency:
         uahUsd: sensor.usd_selling_rate_dnipro
         uahEur: sensor.eur_selling_rate_dnipro
@@ -48,6 +51,9 @@ options:
       import:
         day: sensor.grid_import_day
         night: sensor.grid_import_night
+      losses:
+        day: sensor.deye_sun_20k_lp_electricity_losses_day
+        night: sensor.deye_sun_20k_lp_electricity_losses_night
       monetary:
         import:
           day: input_number.electricity_base_rate
@@ -86,6 +92,9 @@ schema:
       import:
         day: "str"
         night: "str"
+      losses:
+        day: "str"
+        night: "str"
       currency:
         uahUsd: "str"
         uahEur: "str"
@@ -98,6 +107,9 @@ schema:
         day: "str"
         night: "str"
       import:
+        day: "str"
+        night: "str"
+      losses:
         day: "str"
         night: "str"
       monetary:
