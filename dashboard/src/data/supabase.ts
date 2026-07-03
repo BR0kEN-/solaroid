@@ -22,6 +22,8 @@ interface MonthRecord {
   readonly import_night: number
   readonly consumption_day: number
   readonly consumption_night: number
+  readonly losses_day?: number | null
+  readonly losses_night?: number | null
   readonly uah_usd_rate?: number | null
   readonly utility_import_day?: number | null
   readonly utility_import_night?: number | null
@@ -333,6 +335,8 @@ function toDashboardRow({
     importNight: snapshot.importNight,
     consumedDay: row.consumption_day,
     consumedNight: row.consumption_night,
+    lossesDay: row.losses_day ?? 0,
+    lossesNight: row.losses_night ?? 0,
     consumedTotal: consumedTotal(snapshot),
     importTotal: importTotal(snapshot),
     balance: balance(snapshot),

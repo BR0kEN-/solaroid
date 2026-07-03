@@ -64,7 +64,7 @@ type InfoModal =
   | "plantWorks"
   | "pvgis"
   | {
-    readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "exportPrice" | "netPayment" | "roiCalc" | "utilityMeter";
+    readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "lossesSplit" | "exportPrice" | "netPayment" | "roiCalc" | "utilityMeter";
     readonly row: MonthRow;
   }
   | {
@@ -180,6 +180,8 @@ const i18n = {
     azimuth: "Azimuth",
     slope: "Slope",
     loss: "Loss",
+    losses: "Losses",
+    lossesInfo: "These are the losses the inverter can see and report. Once energy leaves the inverter, it does not know the wire length, cable condition, connection quality, meter-side differences, or other downstream losses.",
     mounting: "Mounting",
     location: "Location",
     elevation: "Elevation",
@@ -356,6 +358,8 @@ const i18n = {
     azimuth: "Азимут",
     slope: "Нахил",
     loss: "Втрати",
+    losses: "Втрати",
+    lossesInfo: "Це втрати, які інвертор може бачити й показати. Коли енергія виходить з інвертора, він уже не знає довжину кабелю, стан кабелю, якість з'єднань, різницю на боці лічильника чи інші втрати далі по лінії.",
     mounting: "Монтаж",
     location: "Локація",
     elevation: "Висота",
@@ -579,6 +583,7 @@ const colors = {
   mint: "#74c7a6",
   blue: "#3175c7",
   indigo: "#6266c9",
+  orange: "#d8732f",
   rose: "#c95b5b",
   ink: "currentColor",
   grid: "#d9dee5",
@@ -1035,6 +1040,10 @@ function ProductionCapacityInfo({
 
 function importCostUah(row: MonthRow) {
   return importEnergyCost(row.importDay, row.importNight, tariffFromRow(row));
+}
+
+function lossesTotal(row: MonthRow) {
+  return (row.lossesDay ?? 0) + (row.lossesNight ?? 0);
 }
 
 function tariffFromRow(row: MonthRow): Tariff {
@@ -1937,6 +1946,22 @@ function App({
         ),
       };
     }
+    if (typeof infoModal === "object" && infoModal?.kind === "lossesSplit") {
+      const row = infoModal.row;
+      return {
+        title: `${t.losses} · ${row.month}`,
+        body: (
+          <SplitInfo
+            t={t}
+            lang={lang}
+            total={lossesTotal(row)}
+            day={row.lossesDay ?? 0}
+            night={row.lossesNight ?? 0}
+            note={t.lossesInfo}
+          />
+        ),
+      };
+    }
     if (typeof infoModal === "object" && infoModal?.kind === "exportPrice") {
       const row = infoModal.row;
       const grossDayPrice = moneyFromUah(row.exportPriceDay, currency, row.usdRate);
@@ -2290,6 +2315,7 @@ function App({
               onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
               onExportSplitInfo={(row) => setInfoModal({ kind: "exportSplit", row })}
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
+              onLossesSplitInfo={(row) => setInfoModal({ kind: "lossesSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
               onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
@@ -2557,7 +2583,7 @@ function App({
           </ChartPanel>
         </section>
 
-        <section className="chart-grid chart-grid-single">
+        <section className="chart-grid">
           <ChartPanel
             title={t.production}
             infoLabel={`${t.production} PVGIS`}
@@ -2569,6 +2595,15 @@ function App({
             ]}
           >
             {showPlaceholders ? <ChartSkeleton /> : <ProductionExportChart rows={rows} projection={productionProjection} />}
+          </ChartPanel>
+          <ChartPanel
+            title={t.losses}
+            legend={[
+              [t.day, colors.orange],
+              [t.night, colors.rose],
+            ]}
+          >
+            {showPlaceholders ? <ChartSkeleton /> : <LossesMixChart rows={rows} />}
           </ChartPanel>
         </section>
 
@@ -2594,6 +2629,7 @@ function App({
               onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
               onExportSplitInfo={(row) => setInfoModal({ kind: "exportSplit", row })}
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
+              onLossesSplitInfo={(row) => setInfoModal({ kind: "lossesSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
               onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
@@ -3771,9 +3807,9 @@ function DataTableSkeleton({ rowCount = 12 }: DataTableSkeletonProps) {
           <tr>
             {Array.from({ length: 12 }).map((_, index) => (
               <th key={index}>
-                <span className={index >= 7 && index <= 10 ? "table-heading" : undefined}>
+                <span className={index >= 8 && index <= 11 ? "table-heading" : undefined}>
                   <SkeletonText width={index === 0 ? "54px" : "82px"} height="12px" />
-                  {index >= 7 && index <= 10 ? <DisabledInfoIcon className="table-info-button" /> : null}
+                  {index >= 8 && index <= 11 ? <DisabledInfoIcon className="table-info-button" /> : null}
                 </span>
               </th>
             ))}
@@ -4027,6 +4063,13 @@ function PlantPeriodComparisonCharts({
     {
       title: t.consumed,
       value: (row: MonthRow) => row.consumedTotal,
+      format: (value: number) => formatKwh(value, lang),
+      unit: energyUnit(lang),
+      higherIsBetter: false,
+    },
+    {
+      title: t.losses,
+      value: (row: MonthRow) => lossesTotal(row),
       format: (value: number) => formatKwh(value, lang),
       unit: energyUnit(lang),
       higherIsBetter: false,
@@ -5283,6 +5326,96 @@ function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
   );
 }
 
+function LossesMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
+  const lang = useLanguage();
+  const t = i18n[lang];
+  const isMobile = useMediaQuery("(max-width: 820px)");
+  const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
+  const inspectors = useMemo(
+    () =>
+      new Map(
+        displayRows.map((row) => {
+          const lossesDay = row.lossesDay ?? 0;
+          const lossesNight = row.lossesNight ?? 0;
+          return [
+            row.month,
+            {
+              month: `${formatPeriodLabel(row, lang)} · ${formatKwh(lossesDay + lossesNight, lang)}`,
+              items: [
+                { label: t.day, value: formatKwh(lossesDay, lang), color: colors.orange },
+                { label: t.night, value: formatKwh(lossesNight, lang), color: colors.rose },
+              ],
+            },
+          ];
+        }),
+      ),
+    [displayRows, lang, t.day, t.night],
+  );
+  const latestRow = rows.at(-1);
+  const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
+  const width = chartWidthForItemCount(displayRows.length, isMobile);
+  const height = 300;
+  const pad = { left: 48, right: 18, top: 18, bottom: 42 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const max = axisMax(displayRows.map(lossesTotal));
+  const band = chartBand(innerW, displayRows.length);
+  const bar = Math.max(18, band * 0.48);
+  return (
+    <>
+      <div className={chartScrollClassName(displayRows.length)}>
+        <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
+          <Grid width={width} height={height} pad={pad} max={max} />
+          {displayRows.map((row, index) => {
+            const lossesDay = row.lossesDay ?? 0;
+            const lossesNight = row.lossesNight ?? 0;
+            const x = pad.left + band * index + band / 2 - bar / 2;
+            const dayH = (lossesDay / max) * innerH;
+            const nightH = (lossesNight / max) * innerH;
+            const base = pad.top + innerH;
+            const inspector = inspectors.get(row.month);
+            return (
+              <g key={row.month}>
+                <rect
+                  x={x}
+                  y={base - dayH}
+                  width={bar}
+                  height={dayH}
+                  rx="3"
+                  fill={colors.orange}
+                />
+                <rect
+                  x={x}
+                  y={base - dayH - nightH}
+                  width={bar}
+                  height={nightH}
+                  rx="3"
+                  fill={colors.rose}
+                />
+                {inspector && (
+                  <MonthTarget
+                    x={x + bar / 2 - band / 2}
+                    y={pad.top}
+                    width={band}
+                    height={innerH}
+                    selection={inspector}
+                    active={selection?.month === inspector.month}
+                    target={target}
+                  />
+                )}
+                <text x={x + bar / 2} y={height - 14} textAnchor="middle">
+                  {monthShort(row.month)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <ChartInspector selection={selection} hint={t.tapBar} />
+    </>
+  );
+}
+
 function Grid({
   width,
   height,
@@ -5333,6 +5466,7 @@ function DailyDashboard({
   onImportSplitInfo,
   onExportSplitInfo,
   onConsumedSplitInfo,
+  onLossesSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
   onRoiValueInfo,
@@ -5355,6 +5489,7 @@ function DailyDashboard({
   readonly onImportSplitInfo: (row: MonthRow) => void;
   readonly onExportSplitInfo: (row: MonthRow) => void;
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
+  readonly onLossesSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
   readonly onRoiValueInfo: (row: MonthRow) => void;
@@ -5502,6 +5637,15 @@ function DailyDashboard({
         >
           <ImportMixChart rows={chartRows} />
         </ChartPanel>
+        <ChartPanel
+          title={t.losses}
+          legend={[
+            [t.day, colors.orange],
+            [t.night, colors.rose],
+          ]}
+        >
+          <LossesMixChart rows={chartRows} />
+        </ChartPanel>
       </section>
 
       <section id="data" className="data-section">
@@ -5523,6 +5667,7 @@ function DailyDashboard({
           onImportSplitInfo={onImportSplitInfo}
           onExportSplitInfo={onExportSplitInfo}
           onConsumedSplitInfo={onConsumedSplitInfo}
+          onLossesSplitInfo={onLossesSplitInfo}
           onExportPriceInfo={onExportPriceInfo}
           onNetPaymentInfo={onNetPaymentInfo}
           onRoiValueInfo={onRoiValueInfo}
@@ -5664,6 +5809,7 @@ function DataTable({
   onImportSplitInfo,
   onExportSplitInfo,
   onConsumedSplitInfo,
+  onLossesSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
   onRoiValueInfo,
@@ -5681,6 +5827,7 @@ function DataTable({
   readonly onImportSplitInfo: (row: MonthRow) => void;
   readonly onExportSplitInfo: (row: MonthRow) => void;
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
+  readonly onLossesSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
   readonly onRoiValueInfo: (row: MonthRow) => void;
@@ -5695,6 +5842,7 @@ function DataTable({
       export: sum.export + exportTotal(row),
       importTotal: sum.importTotal + row.importTotal,
       consumedTotal: sum.consumedTotal + row.consumedTotal,
+      lossesTotal: sum.lossesTotal + lossesTotal(row),
       balance: sum.balance + row.balance,
       electricityPayment: sum.electricityPayment + moneyFromUah(row.electricityPayment, currency, row.usdRate),
       roi: sum.roi + rowRoiMoney(row, currency),
@@ -5704,6 +5852,7 @@ function DataTable({
       export: 0,
       importTotal: 0,
       consumedTotal: 0,
+      lossesTotal: 0,
       balance: 0,
       electricityPayment: 0,
       roi: 0,
@@ -5719,6 +5868,7 @@ function DataTable({
             <Th label={`${t.export} (${kwh})`} />
             <Th label={`${t.import} (${kwh})`} />
             <Th label={`${t.consumed} (${kwh})`} />
+            <Th label={`${t.losses} (${kwh})`} />
             <Th label={`${t.balance} (${kwh})`} />
             <Th label={`${t.netExport} (${money}/${kwh})`} />
             <Th label={`${t.import} (${money}/${kwh})`} infoLabel={t.import} onInfo={onImportPriceInfo} />
@@ -5746,6 +5896,9 @@ function DataTable({
               </td>
               <td>
                 <TableValueInfo value={formatNumber(row.consumedTotal, 2, 2)} label={t.consumed} onInfo={() => onConsumedSplitInfo(row)} />
+              </td>
+              <td>
+                <TableValueInfo value={formatNumber(lossesTotal(row), 2, 2)} label={t.losses} onInfo={() => onLossesSplitInfo(row)} />
               </td>
               <td className={row.balance < 0 ? "positive" : row.balance > 0 ? "negative" : "muted"}>
                 {formatNumber(row.balance, 2, 2)}
@@ -5787,6 +5940,7 @@ function DataTable({
             <td>{formatNumber(totals.export, 2, 2)}</td>
             <td>{formatNumber(totals.importTotal, 2, 2)}</td>
             <td>{formatNumber(totals.consumedTotal, 2, 2)}</td>
+            <td>{formatNumber(totals.lossesTotal, 2, 2)}</td>
             <td className={totals.balance < 0 ? "positive" : totals.balance > 0 ? "negative" : "muted"}>
               {formatNumber(totals.balance, 2, 2)}
             </td>
@@ -5829,28 +5983,33 @@ function SplitInfo({
   total,
   day,
   night,
+  note,
 }: {
   readonly t: Record<string, string>;
   readonly lang: Lang;
   readonly total: number;
   readonly day: number;
   readonly night: number;
+  readonly note?: string;
 }) {
   return (
-    <dl className="split-info">
-      <div>
-        <dt>{t.total}</dt>
-        <dd>{formatKwh(total, lang)}</dd>
-      </div>
-      <div>
-        <dt>{t.day}</dt>
-        <dd>{formatKwh(day, lang)}</dd>
-      </div>
-      <div>
-        <dt>{t.night}</dt>
-        <dd>{formatKwh(night, lang)}</dd>
-      </div>
-    </dl>
+    <>
+      {note ? <p>{note}</p> : null}
+      <dl className="split-info">
+        <div>
+          <dt>{t.total}</dt>
+          <dd>{formatKwh(total, lang)}</dd>
+        </div>
+        <div>
+          <dt>{t.day}</dt>
+          <dd>{formatKwh(day, lang)}</dd>
+        </div>
+        <div>
+          <dt>{t.night}</dt>
+          <dd>{formatKwh(night, lang)}</dd>
+        </div>
+      </dl>
+    </>
   );
 }
 
