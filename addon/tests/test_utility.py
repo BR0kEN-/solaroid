@@ -58,22 +58,18 @@ def load_fixture(name: str) -> dict[str, object]:
 
 def config() -> DtekConfig:
     return DtekConfig(
-        endpoint="https://n8n.example.test",
+        endpoint="https://example.test",
         phone="+380971234567",
         password="secret",
-        accountId="nest",
-        department="dnem",
         intervalMinutes=0,
     )
 
 
 def slow_config() -> DtekConfig:
     return DtekConfig(
-        endpoint="https://n8n.example.test",
+        endpoint="https://example.test",
         phone="+380971234567",
         password="secret",
-        accountId="nest",
-        department="dnem",
         intervalMinutes=60,
     )
 
@@ -135,7 +131,7 @@ def test_expected_utility_month_covers_start_grace_only() -> None:
     assert expected_utility_month(date(2026, 7, 4)) is None
 
 
-def test_fetch_history_calls_n8n_webhook_with_three_part_basic_auth(monkeypatch) -> None:
+def test_fetch_history_calls_endpoint_with_basic_auth(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
     class Response:
@@ -153,10 +149,10 @@ def test_fetch_history_calls_n8n_webhook_with_three_part_basic_auth(monkeypatch)
 
     payload = fetch_history(config())
 
-    token = base64.b64encode(b"nest:+380971234567:secret").decode("ascii")
+    token = base64.b64encode(b"+380971234567:secret").decode("ascii")
     assert calls == [
         {
-            "url": "https://n8n.example.test/webhook/um?department=dnem",
+            "url": "https://example.test",
             "headers": {
                 "Authorization": f"Basic {token}",
                 "Accept": "application/json",
@@ -165,36 +161,6 @@ def test_fetch_history_calls_n8n_webhook_with_three_part_basic_auth(monkeypatch)
         }
     ]
     assert payload == response_payload()
-
-
-def test_fetch_history_adds_department_query_to_base_url(monkeypatch) -> None:
-    calls: list[str] = []
-
-    class Response:
-        def raise_for_status(self) -> None:
-            pass
-
-        def json(self) -> dict[str, object]:
-            return response_payload()
-
-    def get(url: str, **_kwargs: object) -> Response:
-        calls.append(url)
-        return Response()
-
-    trailing_slash_config = DtekConfig(
-        endpoint="https://n8n.example.test/",
-        phone="+380971234567",
-        password="secret",
-        accountId="nest",
-        department="dnem",
-        intervalMinutes=0,
-    )
-
-    monkeypatch.setattr("solaroid.utility.requests.get", get)
-
-    fetch_history(trailing_slash_config)
-
-    assert calls == ["https://n8n.example.test/webhook/um?department=dnem"]
 
 
 def test_failed_fetch_updates_failure_state_without_clearing_cached_payload(tmp_path, monkeypatch) -> None:

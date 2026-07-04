@@ -5,6 +5,7 @@
 !/.editorconfig
 !/.gitignore
 !/Makefile
+!/PRODUCT.md
 !/README.md
 !/repository.yaml
 

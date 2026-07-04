@@ -52,7 +52,7 @@ class StaleUtilityDataError(ValueError):
 
 def fetch_history(config: DtekConfig) -> dict[str, Any]:
     response = requests.get(
-        config.url,
+        config.endpoint,
         headers={
             "Authorization": f"Basic {config.auth}",
             "Accept": "application/json",
@@ -303,12 +303,7 @@ def sanitize_error(error: Exception, config: DtekConfig) -> str:
     elif str(error):
         text = f"{text}: {error}"
 
-    for secret in (
-        config.phone,
-        config.password,
-        config.accountId,
-        config.auth,
-    ):
+    for secret in (config.phone, config.password, config.auth):
         if secret:
             text = text.replace(secret, "[redacted]")
 

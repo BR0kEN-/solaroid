@@ -14,26 +14,19 @@ class DtekConfig:
     endpoint: str
     phone: str
     password: str
-    accountId: str
-    department: str
     intervalMinutes: int
 
     @cached_property
     def enabled(self) -> bool:
         return (
             self.endpoint != ""
-            and self.password != ""
             and self.phone != "+380970000000"
-            and self.accountId != ""
+            and self.password != ""
         )
 
     @cached_property
-    def url(self) -> str:
-        return f"{self.endpoint.rstrip('/')}/webhook/um?department={self.department}"
-
-    @cached_property
     def auth(self) -> str:
-        return b64encode(f"{self.accountId}:{self.phone}:{self.password}".encode("utf-8")).decode("ascii")
+        return b64encode(f"{self.phone}:{self.password}".encode("utf-8")).decode("ascii")
 
 
 @dataclass(frozen=True)
@@ -58,7 +51,9 @@ def load_config(path: Path = CONFIG_PATH) -> SolaroidConfig:
     with path.open(encoding="utf-8") as file:
         data = json_load(file)
 
+    data["dtek"].pop("accountId", None)
     data["dtek"].pop("cookies", None)
+    data["dtek"].pop("department", None)
     data["dtek"] = DtekConfig(**data["dtek"])
 
     data.setdefault("notifications", {"mobileServices": ("notify.notify_admins",)})
