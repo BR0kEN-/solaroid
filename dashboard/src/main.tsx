@@ -651,6 +651,11 @@ function formatSignedPercentFromDelta(delta: number, base: number) {
   return delta === 0 ? "0%" : "—";
 }
 
+function formatUnsignedPercentFromDelta(delta: number, base: number) {
+  if (base) return `${formatNumber(Math.abs(delta / base) * 100)}%`;
+  return delta === 0 ? "0%" : "—";
+}
+
 function formatMonthlyKpiKwh(value: number, lang: Lang = DEFAULT_LANG) {
   if (Math.abs(value) <= 10_000) return formatKwh(value, lang);
   return `${formatNumber(value / 1000, 2, 2)} ${lang === "uk" ? "МВт·г" : "MWh"}`;
@@ -3911,8 +3916,11 @@ function PlantComparisonSection({
 }) {
   const displayedResult = result?.mode === plantComparisonMode ? result : null;
   const comparisonUpdated = displayedResult?.plants
-    .map((plant) => `${plant.plantId} ${plant.sheetUpdatedAt ? formatDateTimeLabel(plant.sheetUpdatedAt, lang) : "-"}`)
-    .join(" · ");
+    .filter((plant) => plant.plantId !== activePlantId)
+    .map((plant) => ({
+      plantId: plant.plantId,
+      updated: plant.sheetUpdatedAt ? formatDateTimeLabel(plant.sheetUpdatedAt, lang) : "-",
+    })) ?? [];
   const compareDisabled =
     isLoading ||
     !firstPlantId ||
@@ -3999,7 +4007,19 @@ function PlantComparisonSection({
         lang={lang}
         onDeltaInfo={onDeltaInfo}
       />
-      {comparisonUpdated ? <small className="plant-comparison-updated">{t.updated}: {comparisonUpdated}</small> : null}
+      {comparisonUpdated.length ? (
+        <div className="plant-comparison-updated">
+          <small>{t.updated}:</small>
+          <ul>
+            {comparisonUpdated.map((plant) => (
+              <li key={plant.plantId}>
+                <span>{plant.plantId}</span>
+                <span>{plant.updated}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -6168,6 +6188,7 @@ function UtilityComparisonTable({
   readonly formatValue: (value: number) => string;
   readonly formatDelta: (value: number) => string;
 }) {
+  const [day, night] = rows;
   const total = rows.reduce(
     (accumulator, row) => ({
       dashboard: accumulator.dashboard + row.dashboard,
@@ -6177,6 +6198,23 @@ function UtilityComparisonTable({
     { dashboard: 0, utility: 0, delta: 0 },
   );
   const higherIsBetter = rows.every((row) => row.higherIsBetter);
+  const deltaValue = (delta: number, base: number) => (
+    <span className="utility-delta-value">
+      <span>{formatDelta(delta)}</span>
+      <span>{formatUnsignedPercentFromDelta(delta, base)}</span>
+    </span>
+  );
+  const columns = [
+    day,
+    night,
+    {
+      zone: t.total,
+      dashboard: total.dashboard,
+      utility: total.utility,
+      delta: total.delta,
+      higherIsBetter,
+    },
+  ];
 
   return (
     <div className="utility-comparison-section">
@@ -6184,30 +6222,34 @@ function UtilityComparisonTable({
       <table className="price-comparison-table utility-comparison-table">
         <thead>
           <tr>
-            <th>{t.zone}</th>
-            <th>{t.dashboardValues}</th>
-            <th>{t.meterValues}</th>
-            <th>{t.delta}</th>
+            <th />
+            {columns.map((column) => (
+              <th key={column.zone}>{column.zone}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.zone}>
-              <th>{row.zone}</th>
-              <td>{formatValue(row.dashboard)}</td>
-              <td>{formatValue(row.utility)}</td>
-              <td className={comparisonDeltaTone(row.delta, row.higherIsBetter)}>{formatDelta(row.delta)}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
           <tr>
-            <th>{t.total}</th>
-            <td>{formatValue(total.dashboard)}</td>
-            <td>{formatValue(total.utility)}</td>
-            <td className={comparisonDeltaTone(total.delta, higherIsBetter)}>{formatDelta(total.delta)}</td>
+            <th>{t.dashboardValues}</th>
+            {columns.map((column) => (
+              <td key={column.zone}>{formatValue(column.dashboard)}</td>
+            ))}
           </tr>
-        </tfoot>
+          <tr>
+            <th>{t.meterValues}</th>
+            {columns.map((column) => (
+              <td key={column.zone}>{formatValue(column.utility)}</td>
+            ))}
+          </tr>
+          <tr>
+            <th>{t.delta}</th>
+            {columns.map((column) => (
+              <td key={column.zone} className={comparisonDeltaTone(column.delta, column.higherIsBetter)}>
+                {deltaValue(column.delta, column.dashboard)}
+              </td>
+            ))}
+          </tr>
+        </tbody>
       </table>
     </div>
   );
