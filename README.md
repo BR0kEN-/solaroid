@@ -381,12 +381,12 @@ Do not run local Supabase tests unless the user asks. The user normally applies 
 4. Configure.
    ```yaml
    api: https://PROJECT.supabase.co
-  token: SECURE1
-  dtek:
-    endpoint: http://192.168.68.59:54000/webhook/um?department=dnem&accountId=nest2
-    phone: "+380123456789"
-    password: SECURE2
-    intervalMinutes: 60
+   token: SECURE1
+   dtek:
+     endpoint: http://192.168.68.59:54000/webhook/um?department=dnem&accountId=nest2
+     phone: "+380123456789"
+     password: SECURE2
+     intervalMinutes: 60
    notifications:
      mobileServices:
        - notify.notify_admins
