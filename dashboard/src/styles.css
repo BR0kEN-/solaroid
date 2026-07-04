@@ -1048,12 +1048,43 @@ h2 {
 }
 
 .plant-comparison-updated {
-  display: block;
+  display: grid;
+  justify-items: start;
+  gap: 4px;
   margin-top: 2px;
   color: var(--muted);
   font-size: 0.8rem;
   line-height: 1.35;
-  text-align: right;
+}
+
+.plant-comparison-updated small {
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+}
+
+.plant-comparison-updated ul {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.plant-comparison-updated li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.plant-comparison-updated li::before {
+  content: "·";
+  flex: 0 0 auto;
+}
+
+.plant-comparison-updated li span:first-child {
+  color: color-mix(in srgb, var(--text), var(--muted) 26%);
+  font-weight: 700;
 }
 
 .plant-comparison-grid {
@@ -2369,6 +2400,10 @@ h2 {
   padding: 7px 0;
 }
 
+.utility-comparison-table {
+  table-layout: auto;
+}
+
 .utility-comparison-table thead th {
   border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
 }
@@ -2420,6 +2455,19 @@ h2 {
 .price-comparison-table.utility-comparison-table td.negative,
 .price-comparison-table.utility-comparison-table td.muted {
   font-weight: 500;
+}
+
+.utility-delta-value {
+  display: inline-grid;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.utility-delta-value span:last-child {
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .price-comparison-table td.positive {
