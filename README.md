@@ -52,8 +52,8 @@ Migrations live in `supabase/migrations/`.
 Canonical tables:
 
 - `plants`: plant metadata, investment, launch date, commercial date, optional electric-heating import threshold, and optional public `domain`.
-- `days`: daily cumulative snapshots and daily currency rates.
-- `months`: monthly cumulative snapshots and optional manual USD/UAH fallback rates.
+- `days`: daily cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and daily currency rates.
+- `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
@@ -146,22 +146,23 @@ Payload shape:
 interface Input {
   readonly today: {
     readonly production: number
-    readonly export: number
+    readonly export: number | { readonly day: number; readonly night: number }
     readonly consumption: { readonly day: number; readonly night: number }
     readonly import: { readonly day: number; readonly night: number }
+    readonly losses: { readonly day: number; readonly night: number }
     readonly currency: { readonly uahUsd: number; readonly uahEur: number }
   }
   readonly thisMonth: {
     readonly production: number
-    readonly export: number
+    readonly export: number | { readonly day: number; readonly night: number }
     readonly consumption: { readonly day: number; readonly night: number }
     readonly import: { readonly day: number; readonly night: number }
+    readonly losses: { readonly day: number; readonly night: number }
     readonly monetary: {
       readonly import: { readonly day: number; readonly night: number }
-      readonly export: {
-        readonly value: number
-        readonly taxes: readonly [string, number][]
-      }
+      readonly export:
+        | { readonly value: number; readonly taxes: readonly [string, number][] }
+        | { readonly day: number; readonly night: number; readonly taxes: readonly [string, number][] }
     }
   }
 }
@@ -195,9 +196,9 @@ Current read behavior:
 
 Dashboard modes:
 
-- Monthly: ROI, finance, production, import, consumption, forecast, monthly data table.
-- Daily: daily KPIs, daily charts, daily data table with month selector.
-- Comparison: compares two readable plants for a selected date.
+- Monthly: ROI, finance, production, import, consumption, inverter losses, forecast, monthly data table.
+- Daily: daily KPIs, daily charts, daily data table with month selector and inverter losses.
+- Comparison: compares two readable plants by selected daily or monthly period.
 
 Dashboard access behavior:
 
@@ -207,7 +208,7 @@ Dashboard access behavior:
 - In the production comparison popup, the location row is shown when at least one compared plant has `loc`. A plant without `loc` shows `—` in its location cell. Distance between plants is shown only when both plants have `loc`.
 - In the monthly PVGIS popup, panel location is shown only when the current plant has `loc`.
 - Production comparison also uses capacity-aware context: total capacity comes from `metadata.pvs[*].power`, yield is `kWh/kWp`, and the popup explains expected production by size plus surplus above/below that expected value.
-- Comparison deltas are first plant minus second plant. For production, export, ROI, and net payment, higher is better. For import and consumed energy, lower is better but the displayed sign stays mathematical. For balance, lower/negative is better and the displayed sign is inverted so a better balance reads as positive.
+- Comparison deltas are first plant minus second plant. For production, export, ROI, and net payment, higher is better. For import, consumed energy, and inverter losses, lower is better but the displayed sign stays mathematical. For balance, lower/negative is better and the displayed sign is inverted so a better balance reads as positive.
 
 Dashboard config:
 
@@ -278,9 +279,12 @@ Key formulas:
 ```ts
 consumed_total = consumed_day + consumed_night
 import_total = import_day + import_night
+losses_total = losses_day + losses_night
 balance = import_total - export
 consumed_price = consumed_day * price_import_day + consumed_night * price_import_night
 ```
+
+Losses are informational energy values reported by the inverter. They are shown as day/night splits in charts and data-table popups, but they are not used in ROI, payment, or balance formulas. The inverter can only report losses it can observe; after energy leaves the inverter, it does not know downstream wire length, cable condition, connection quality, meter-side differences, or other losses farther along the line.
 
 Payment logic:
 
@@ -369,91 +373,69 @@ npx supabase db push
 
 Do not run local Supabase tests unless the user asks. The user normally applies and verifies Supabase changes manually.
 
-## Home Assistant Example
+## Home Assistant
 
-Add a `rest_command` to Home Assistant:
+1. [![Install](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FBR0kEN-%2Fsolaroid)
+2. Install `Solaroid` addon.
+3. Turn on `Autoupdate` & `Watchdog`.
+4. Configure.
+   ```yaml
+   api: https://PROJECT.supabase.co
+  token: SECURE1
+  dtek:
+    endpoint: http://192.168.68.59:54000/webhook/um?department=dnem&accountId=nest2
+    phone: "+380123456789"
+    password: SECURE2
+    intervalMinutes: 60
+   notifications:
+     mobileServices:
+       - notify.notify_admins
+   payload:
+     today:
+       production: sensor.inverter_today_production
+       export:
+         day: sensor.storage_deye_sun_20k_lp_grid_export_today_day
+         night: sensor.storage_deye_sun_20k_lp_grid_export_today_night
+       consumption:
+         day: sensor.deye_sun_20k_lp_electricity_consumed_today_day
+         night: sensor.deye_sun_20k_lp_electricity_consumed_today_night
+       import:
+         day: sensor.deye_sun_20k_lp_grid_import_today_day
+         night: sensor.deye_sun_20k_lp_grid_import_today_night
+       losses:
+         day: sensor.deye_sun_20k_lp_electricity_losses_today_day
+         night: sensor.deye_sun_20k_lp_electricity_losses_today_night
+       currency:
+         uahUsd: sensor.usd_selling_rate_dnipro
+         uahEur: sensor.eur_selling_rate_dnipro
+     thisMonth:
+       production: sensor.deye_sun_20k_lp_electricity_produced
+       export:
+         day: sensor.storage_deye_sun_20k_lp_grid_export_day
+         night: sensor.storage_deye_sun_20k_lp_grid_export_night
+       consumption:
+         day: sensor.electricity_consumed_day
+         night: sensor.electricity_consumed_night
+       import:
+         day: sensor.grid_import_day
+         night: sensor.grid_import_night
+       losses:
+         day: sensor.deye_sun_20k_lp_electricity_losses_day
+         night: sensor.deye_sun_20k_lp_electricity_losses_night
+       monetary:
+         import:
+           day: input_number.electricity_base_rate
+           night: sensor.electricity_night_rate
+         export:
+           day: input_number.electricity_export_rate
+           night: input_number.electricity_export_rate
+           taxes:
+             - type: vat
+               value: 18
+             - type: mil
+               value: 5
+   ```
+5. Start and check logs to ensure it's running.
 
-```yaml
-rest_command:
-  solaroid_update:
-    url: "https://PROJECT_ID.supabase.co/functions/v1/ingest"
-    method: post
-    timeout: 30
-    content_type: "application/json"
-    headers:
-      Authorization: "Bearer RAW_TOKEN_VALUE"
-    payload: >
-      {
-        "today": {
-          "production": {{ states('sensor.inverter_today_production')|float(0) }},
-          "export": {{ states('sensor.inverter_today_energy_export')|float(0) }},
-          "consumption": {
-            "day": {{ states('sensor.deye_sun_20k_lp_electricity_consumed_today_day')|float(0) }},
-            "night": {{ states('sensor.deye_sun_20k_lp_electricity_consumed_today_night')|float(0) }}
-          },
-          "import": {
-            "day": {{ states('sensor.deye_sun_20k_lp_grid_import_today_day')|float(0) }},
-            "night": {{ states('sensor.deye_sun_20k_lp_grid_import_today_night')|float(0) }}
-          },
-          "currency": {
-            "uahUsd": {{ states('sensor.usd_selling_rate_dnipro')|float(0) }},
-            "uahEur": {{ states('sensor.eur_selling_rate_dnipro')|float(0) }}
-          }
-        },
-        "thisMonth": {
-          "production": {{ states('sensor.deye_sun_20k_lp_electricity_produced')|float(0) }},
-          "export": {{ states('sensor.grid_export')|float(0) }},
-          "consumption": {
-            "day": {{ states('sensor.electricity_consumed_day')|float(0) }},
-            "night": {{ states('sensor.electricity_consumed_night')|float(0) }}
-          },
-          "import": {
-            "day": {{ states('sensor.grid_import_day')|float(0) }},
-            "night": {{ states('sensor.grid_import_night')|float(0) }}
-          },
-          "monetary": {
-            "import": {
-              "day": {{ states('input_number.electricity_base_rate')|float(0) }},
-              "night": {{ states('sensor.electricity_night_rate')|float(0) }}
-            },
-            "export": {
-              "value": {{ states('input_number.electricity_export_rate')|float(0) }},
-              "taxes": [
-                ["vat", 18],
-                ["mil", 5]
-              ]
-            }
-          }
-        }
-      }
-```
-
-### Automation
-
-Runs every 20 mins.
-
-```yaml
-mode: single
-alias: Update Solaroid
-description: ""
-triggers:
-  - trigger: time_pattern
-    minutes: /20
-conditions: []
-actions:
-  - action: rest_command.utility_payment_update_supa
-    data: {}
-    metadata: {}
-    continue_on_error: true
-    response_variable: response
-  - if:
-      - alias: Failed?
-        condition: template
-        value_template: "{{ response is not defined or response.status != 200 or not response.content.ok }}"
-    then:
-      - action: notify.notify_admins
-        metadata: {}
-        data:
-          message: Update failed!
-          title: 💵 Utility Payment
-```
+> [!NOTE]
+> The `dtek.endpoint` is expected to return the same structure as `POST https://ok.dtek-dnem.com.ua/api/get-common`. Include any proxy path, account alias, department, or query parameters directly in the endpoint URL. Due to the Incapsula endpoints protection, querying it is not as simple as sending the request. A decent proxy-server is a solution.
