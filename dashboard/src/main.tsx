@@ -68,6 +68,10 @@ type InfoModal =
     readonly row: MonthRow;
   }
   | {
+    readonly kind: "consumedTotals";
+    readonly rows: readonly MonthRow[];
+  }
+  | {
     readonly kind: "comparisonDelta";
     readonly title: string;
     readonly body: React.ReactNode;
@@ -156,6 +160,7 @@ const i18n = {
     daily: "Daily",
     comparison: "Comparison",
     total: "Total",
+    cost: "Cost",
     compareDays: "Compare days",
     firstDay: "First day",
     secondDay: "Second day",
@@ -334,6 +339,7 @@ const i18n = {
     daily: "Дні",
     comparison: "Порівняння",
     total: "Разом",
+    cost: "Вартість",
     compareDays: "Порівняти дні",
     firstDay: "Перший день",
     secondDay: "Другий день",
@@ -1945,12 +1951,24 @@ function App({
       return {
         title: `${t.consumed} · ${row.month}`,
         body: (
-          <SplitInfo
+          <ConsumedInfo
             t={t}
             lang={lang}
-            total={row.consumedTotal}
-            day={row.consumedDay}
-            night={row.consumedNight}
+            currency={currency}
+            rows={[row]}
+          />
+        ),
+      };
+    }
+    if (typeof infoModal === "object" && infoModal?.kind === "consumedTotals") {
+      return {
+        title: `${t.consumed} · ${t.total}`,
+        body: (
+          <ConsumedInfo
+            t={t}
+            lang={lang}
+            currency={currency}
+            rows={infoModal.rows}
           />
         ),
       };
@@ -2324,6 +2342,7 @@ function App({
               onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
               onExportSplitInfo={(row) => setInfoModal({ kind: "exportSplit", row })}
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
+              onConsumedTotalsInfo={(rows) => setInfoModal({ kind: "consumedTotals", rows })}
               onLossesSplitInfo={(row) => setInfoModal({ kind: "lossesSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
@@ -2638,6 +2657,7 @@ function App({
               onImportSplitInfo={(row) => setInfoModal({ kind: "importSplit", row })}
               onExportSplitInfo={(row) => setInfoModal({ kind: "exportSplit", row })}
               onConsumedSplitInfo={(row) => setInfoModal({ kind: "consumedSplit", row })}
+              onConsumedTotalsInfo={(rows) => setInfoModal({ kind: "consumedTotals", rows })}
               onLossesSplitInfo={(row) => setInfoModal({ kind: "lossesSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
@@ -5490,6 +5510,7 @@ function DailyDashboard({
   onImportSplitInfo,
   onExportSplitInfo,
   onConsumedSplitInfo,
+  onConsumedTotalsInfo,
   onLossesSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
@@ -5513,6 +5534,7 @@ function DailyDashboard({
   readonly onImportSplitInfo: (row: MonthRow) => void;
   readonly onExportSplitInfo: (row: MonthRow) => void;
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
+  readonly onConsumedTotalsInfo: (rows: readonly MonthRow[]) => void;
   readonly onLossesSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
@@ -5691,6 +5713,7 @@ function DailyDashboard({
           onImportSplitInfo={onImportSplitInfo}
           onExportSplitInfo={onExportSplitInfo}
           onConsumedSplitInfo={onConsumedSplitInfo}
+          onConsumedTotalsInfo={onConsumedTotalsInfo}
           onLossesSplitInfo={onLossesSplitInfo}
           onExportPriceInfo={onExportPriceInfo}
           onNetPaymentInfo={onNetPaymentInfo}
@@ -5833,6 +5856,7 @@ function DataTable({
   onImportSplitInfo,
   onExportSplitInfo,
   onConsumedSplitInfo,
+  onConsumedTotalsInfo,
   onLossesSplitInfo,
   onExportPriceInfo,
   onNetPaymentInfo,
@@ -5851,6 +5875,7 @@ function DataTable({
   readonly onImportSplitInfo: (row: MonthRow) => void;
   readonly onExportSplitInfo: (row: MonthRow) => void;
   readonly onConsumedSplitInfo: (row: MonthRow) => void;
+  readonly onConsumedTotalsInfo: (rows: readonly MonthRow[]) => void;
   readonly onLossesSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onNetPaymentInfo: (row: MonthRow) => void;
@@ -5963,7 +5988,9 @@ function DataTable({
             <td>{formatNumber(totals.production, 2, 2)}</td>
             <td>{formatNumber(totals.export, 2, 2)}</td>
             <td>{formatNumber(totals.importTotal, 2, 2)}</td>
-            <td>{formatNumber(totals.consumedTotal, 2, 2)}</td>
+            <td>
+              <TableValueInfo value={formatNumber(totals.consumedTotal, 2, 2)} label={t.consumed} onInfo={() => onConsumedTotalsInfo(rows)} />
+            </td>
             <td>{formatNumber(totals.lossesTotal, 2, 2)}</td>
             <td className={totals.balance < 0 ? "positive" : totals.balance > 0 ? "negative" : "muted"}>
               {formatNumber(totals.balance, 2, 2)}
@@ -6034,6 +6061,89 @@ function SplitInfo({
         </div>
       </dl>
     </>
+  );
+}
+
+function ConsumedInfo({
+  t,
+  lang,
+  currency,
+  rows,
+}: {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly currency: Currency;
+  readonly rows: readonly MonthRow[];
+}) {
+  const totals = rows.reduce(
+    (sum, row) => {
+      const tariff = tariffFromRow(row);
+      const breakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
+      const dayCost = breakdown.discountedDay * row.importPriceDay + breakdown.regularDay * regularImportDayPrice(tariff);
+      const nightCost = breakdown.discountedNight * row.importPriceNight + breakdown.regularNight * regularImportNightPrice(tariff);
+      return {
+        day: sum.day + row.consumedDay,
+        night: sum.night + row.consumedNight,
+        total: sum.total + row.consumedTotal,
+        dayCost: sum.dayCost + moneyFromUah(dayCost, currency, row.usdRate),
+        nightCost: sum.nightCost + moneyFromUah(nightCost, currency, row.usdRate),
+        totalCost: sum.totalCost + moneyFromUah(dayCost + nightCost, currency, row.usdRate),
+      };
+    },
+    { day: 0, night: 0, total: 0, dayCost: 0, nightCost: 0, totalCost: 0 },
+  );
+
+  return (
+    <div className="info-stack">
+      <ConsumedInfoTable
+        label={energyUnit(lang)}
+        values={[
+          formatKwh(totals.total, lang),
+          formatKwh(totals.day, lang),
+          formatKwh(totals.night, lang),
+        ]}
+        t={t}
+      />
+      <ConsumedInfoTable
+        label={t.cost}
+        values={[
+          formatDisplayMoney(totals.totalCost, currency, lang),
+          formatDisplayMoney(totals.dayCost, currency, lang),
+          formatDisplayMoney(totals.nightCost, currency, lang),
+        ]}
+        t={t}
+      />
+    </div>
+  );
+}
+
+function ConsumedInfoTable({
+  label,
+  values,
+  t,
+}: {
+  readonly label: string;
+  readonly values: readonly [total: string, day: string, night: string];
+  readonly t: Record<string, string>;
+}) {
+  return (
+    <section className="info-stack">
+      <h3 className="utility-comparison-title">{label}</h3>
+      <dl className="split-info">
+        <div>
+          <dt>{t.total}</dt>
+          <dd>{values[0]}</dd>
+        </div>
+        <div>
+          <dt>{t.day}</dt>
+          <dd>{values[1]}</dd>
+        </div>
+        <div>
+          <dt>{t.night}</dt>
+          <dd>{values[2]}</dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 
