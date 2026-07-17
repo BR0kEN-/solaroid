@@ -137,15 +137,16 @@ export function toLoadedPlant({
   const fallbackUsdRate = latestPositiveRate(days)
   const tariffByMonth = new Map(tariffs.map((tariff) => [tariff.date, tariff]))
   const commercialDate = parseDate(plant.commercial_date)
+  const commercialPeriodStart = parseDate(dateMonth(commercialDate))
   const electricHeatingThresholdKwh = plant.electric_heating_import_threshold_kwh ?? undefined
   const adjustedDays = applyUtilityMeterToDays(days, utilityTargetsByMonth(months))
-  const dailyRows = adjustedDays.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialDate))
+  const dailyRows = adjustedDays.map((day) => toDailyRow(day, tariffByMonth.get(monthDate(day.date)), commercialPeriodStart))
   const dailyRowsByMonth = groupDailyRowsByMonth(dailyRows)
   const rows = months.map((month) => toMonthRow(
     month,
     tariffByMonth.get(month.date),
     monthUsdRate(month, monthlyRates, fallbackUsdRate),
-    commercialDate,
+    commercialPeriodStart,
     electricHeatingThresholdKwh,
     dailyRowsByMonth.get(month.date),
   ))

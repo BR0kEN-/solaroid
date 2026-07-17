@@ -1106,6 +1106,10 @@ function sameMonth(first: Date, second: Date) {
   return first.getFullYear() === second.getFullYear() && first.getMonth() === second.getMonth();
 }
 
+function monthStart(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
 function chartBand(innerWidth: number, count: number, maxBand = 72) {
   return Math.min(innerWidth / Math.max(count, 1), maxBand);
 }
@@ -6754,14 +6758,15 @@ function NetPaymentInfo({
 
 function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefined, dailyRows: readonly MonthRow[]) {
   if (!commercialDate) return undefined;
-  if (!sameMonth(row.date, commercialDate) || row.date >= commercialDate) return undefined;
+  const commercialPeriodStart = monthStart(commercialDate);
+  if (!sameMonth(row.date, commercialPeriodStart) || row.date >= commercialPeriodStart) return undefined;
 
   const rows = dailyRows.filter((current) => sameMonth(current.date, row.date));
   if (!rows.length) return undefined;
 
   return {
-    before: rows.filter((current) => current.date < commercialDate),
-    after: rows.filter((current) => current.date >= commercialDate),
+    before: rows.filter((current) => current.date < commercialPeriodStart),
+    after: rows.filter((current) => current.date >= commercialPeriodStart),
   };
 }
 

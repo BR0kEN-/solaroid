@@ -152,7 +152,7 @@ describe('payback', () => {
       rows,
       payback: payback!,
       currency: 'UAH',
-      commercialDate: new Date('2026-06-01T00:00:00'),
+      commercialDate: new Date('2026-06-15T00:00:00'),
       launchDate: new Date('2026-06-01T00:00:00'),
       endDate: new Date('2030-01-01T00:00:00'),
       projection: {
@@ -163,6 +163,7 @@ describe('payback', () => {
 
     expect(result.recovered).toBeCloseTo(543_472.22)
     expect(result.progress).toBeCloseTo(54.35)
+    expect(dateKey(result.details?.commercialStartDate)).toBe('2026-06-01')
   })
 
   it('calculates annual commercial recovery as PVGIS surplus plus self-consumption savings', () => {
