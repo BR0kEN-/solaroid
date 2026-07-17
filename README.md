@@ -288,7 +288,7 @@ Losses are informational energy values reported by the inverter. They are shown 
 
 Payment logic:
 
-- Before `commercial_date`, export is unpaid and does not offset import.
+- Commercial rules start at the beginning of the `commercial_date` month. Before that month, export is unpaid and does not offset import.
 - If commercial export is active and export exceeds import, the net surplus earns export payout after taxes.
 - Otherwise export offsets day/night import proportionally, and remaining import is charged by day/night tariff.
 - For plants with an electric-heating threshold, October-April monthly rows treat the tariff day/night prices from Home Assistant as the discounted electric-heating rates. The first monthly threshold kWh are charged at those rates. Any import above the threshold is split proportionally by balanced day/night import and charged at regular day/night rates. When this rule is active, `consumed_price` uses the same threshold split for `consumed_day + consumed_night`.

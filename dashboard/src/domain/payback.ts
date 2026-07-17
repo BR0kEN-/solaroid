@@ -102,10 +102,12 @@ export function calculateCommercialEndRecovery({
     return progressResult(payback.recovered, payback.investment, null, launchDate ?? rows[0]?.date ?? new Date(), today, null)
   }
 
+  const commercialPeriodStart = monthStart(commercialDate)
+
   return projectedRecovery({
     rows,
     launchDate,
-    commercialDate,
+    commercialDate: commercialPeriodStart,
     commercialEndDate: endDate,
     investment: payback.investment,
     currency,
