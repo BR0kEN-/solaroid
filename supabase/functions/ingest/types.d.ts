@@ -80,6 +80,42 @@ declare global {
       }
     }
 
+    // Day-ahead market.
+    namespace Dam {
+      interface Record {
+        readonly date: Date.Ymd
+        readonly hour1: number
+        readonly hour2: number
+        readonly hour3: number
+        readonly hour4: number
+        readonly hour5: number
+        readonly hour6: number
+        readonly hour7: number
+        readonly hour8: number
+        readonly hour9: number
+        readonly hour10: number
+        readonly hour11: number
+        readonly hour12: number
+        readonly hour13: number
+        readonly hour14: number
+        readonly hour15: number
+        readonly hour16: number
+        readonly hour17: number
+        readonly hour18: number
+        readonly hour19: number
+        readonly hour20: number
+        readonly hour21: number
+        readonly hour22: number
+        readonly hour23: number
+        readonly hour24: number
+      }
+
+      interface Storage {
+        getLatestDamPriceUpdatedAt(): Promise<string | undefined>
+        upsertDamPrices(rows: readonly Record[]): Promise<void>
+      }
+    }
+
     namespace Access {
       type Kind = 'ingest' | 'auth'
       type Scope = 'loc'

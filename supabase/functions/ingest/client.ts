@@ -17,7 +17,7 @@ function toReads(
   )
 }
 
-export class SupabaseClient {
+export class SupabaseClient implements Solaroid.Supabase.Dam.Storage {
   protected readonly client
 
   constructor() {
@@ -118,6 +118,28 @@ export class SupabaseClient {
       .eq('date', date)
 
     if (error) throw new Error(`update failed on ${table}`, { cause: error })
+  }
+
+  async getLatestDamPriceUpdatedAt(): Promise<string | undefined> {
+    const { data, error } = await this.client
+      .from('dam_prices')
+      .select('updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+
+    if (error) throw new Error('DAM price freshness lookup failed', { cause: error })
+
+    return data[0]?.updated_at
+  }
+
+  async upsertDamPrices(rows: readonly Solaroid.Supabase.Dam.Record[]): Promise<void> {
+    if (!rows.length) return
+
+    const { error } = await this.client
+      .from('dam_prices')
+      .upsert(rows, { onConflict: 'date' })
+
+    if (error) throw new Error('DAM price upsert failed', { cause: error })
   }
 
   async getPlant(plantId: Solaroid.Supabase.Plant.Id) {

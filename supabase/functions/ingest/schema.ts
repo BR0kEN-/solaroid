@@ -10,6 +10,7 @@ const DayNight = z.object({
   night: Number,
 })
 
+const Date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const DateTime = z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
 
 const UtilityRecordDates = z.object({
@@ -70,5 +71,15 @@ export const Panel = z.object({
   mounting: String,
 })
 
+export const Dam = z.object({
+  result: z.array(
+    z.object({
+      date: Date,
+      prices: z.array(z.number().finite()).length(24),
+    }),
+  ),
+})
+
 export type Input = z.infer<typeof Input>
 export type Panel = z.infer<typeof Panel>
+export type Dam = z.infer<typeof Dam>

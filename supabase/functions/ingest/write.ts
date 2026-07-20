@@ -1,4 +1,5 @@
 import type { SupabaseClient } from './client.ts'
+import { Dam } from './dam.ts'
 import { ForbiddenError } from './errors.ts'
 import { Input } from './schema.ts'
 import { dateUtil } from './utils/date.ts'
@@ -85,6 +86,12 @@ async function write(request: Request, token: Solaroid.Supabase.Access.Token, cl
 
   if (rows.utilityMonth) {
     await client.updatePlantRow('months', rows.utilityMonth)
+  }
+
+  try {
+    await new Dam({ store: client }).refreshPrices()
+  } catch (error) {
+    console.error('DAM price refresh failed', error)
   }
 
   return {

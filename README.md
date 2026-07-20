@@ -30,6 +30,7 @@ Main Edge Function files:
 - `supabase/functions/ingest/read.ts`: read routing and access checks.
 - `supabase/functions/ingest/write.ts`: ingestion/write behavior.
 - `supabase/functions/ingest/client.ts`: Supabase queries/upserts.
+- `supabase/functions/ingest/dam.ts`: DAM freshness check, source validation, and hourly price mapping.
 - `supabase/functions/ingest/schema.ts`: Zod input schema.
 - `supabase/functions/ingest/types.d.ts`: Deno/global Solaroid types.
 
@@ -55,6 +56,7 @@ Canonical tables:
 - `days`: daily cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and daily currency rates.
 - `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
+- `dam_prices`: hourly day-ahead market prices cached by market date, stored as UAH/kWh in `hour1` through `hour24`.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
 - `user_plant_access`: Supabase Auth users mapped to readable plants, with scopes for each assigned plant.
@@ -191,6 +193,15 @@ Current read behavior:
 - `granularity=YYYY-MM-DD`: returns daily row for that date.
 - `granularity=YYYY-MM`: intended for range-oriented reads. Check `client.ts` before relying on this, because this behavior has changed during comparison work.
 - `granularity=YYYY`: returns yearly range data.
+
+DAM price refresh:
+
+- Each successful telemetry ingestion checks the greatest `dam_prices.updated_at` value.
+- A missing cache or cache at least 50 minutes old triggers a DAM source fetch and complete-row upsert.
+- Source: `https://n8n.levko.dog/webhook/dam?date=MM.YYYY`.
+- Expected response: `{ "result": [{ "date": "YYYY-MM-DD", "prices": [24 numbers] }] }`.
+- Source prices are UAH/MWh. Each value is divided by `1000` before array indexes `0..23` map to UAH/kWh columns `hour1..hour24`.
+- DAM refresh failure is logged without failing telemetry ingestion; the next ingestion retries.
 
 ## Dashboard
 
