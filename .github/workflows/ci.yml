@@ -21,6 +21,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - run: make i
 
       - run: make ci
