@@ -77,6 +77,7 @@ class Dam {
         (record) => record.prices.reduce(
           (accumulator, price, index) => {
             // The price is UAH/MWh. Converting to UAH/kWh.
+            // @ts-expect-error ok for dynamic record creation.
             accumulator[`hour${index + 1}`] = price / 1000
             return accumulator
           },

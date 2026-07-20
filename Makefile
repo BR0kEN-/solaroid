@@ -13,4 +13,16 @@ pytest:
 nodetest:
 	cd dashboard && npm test
 
-ci: pytest nodetest
+denocheck:
+	cd supabase/functions/ingest && deno check index.ts
+
+denotest:
+	cd supabase/functions/ingest && \
+	SUPABASE_URL=http://localhost \
+	SUPABASE_SECRET_KEYS='{"default":"test"}' \
+	DAM_API_USER=test \
+	DAM_API_PASS=test \
+	deno test \
+	--allow-env=SUPABASE_URL,SUPABASE_SECRET_KEYS,DAM_API_USER,DAM_API_PASS
+
+ci: pytest nodetest denocheck denotest

@@ -358,8 +358,8 @@ rtk npm run deploy:lev
 Edge Function:
 
 ```sh
-cd supabase/functions/ingest
-rtk deno check index.ts
+rtk make denocheck
+rtk make denotest
 ```
 
 Agent/LLM rule: do not edit Supabase Edge Function files unless the user explicitly permits it after the agent explains why the edit is necessary. Reading, reviewing, and running `rtk deno check index.ts` are allowed when relevant.
