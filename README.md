@@ -29,9 +29,8 @@ Main Edge Function files:
 - `supabase/functions/ingest/server.ts`: HTTP server, auth, errors, CORS.
 - `supabase/functions/ingest/read.ts`: read routing and access checks.
 - `supabase/functions/ingest/write.ts`: ingestion/write behavior.
-- `supabase/functions/ingest/client.ts`: Supabase queries/upserts.
-- `supabase/functions/ingest/dam.ts`: DAM freshness check, source validation, and hourly price mapping.
 - `supabase/functions/ingest/client.ts`: Supabase reads/upserts plus private monthly document storage/listing.
+- `supabase/functions/ingest/dam.ts`: DAM freshness check, source validation, and hourly price mapping.
 - `supabase/functions/ingest/schema.ts`: Zod input schema.
 - `supabase/functions/ingest/types.d.ts`: Deno/global Solaroid types.
 
