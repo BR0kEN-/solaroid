@@ -6253,14 +6253,13 @@ function DocumentsModal({
               <small>{document ? `${formatFileSize(document.sizeBytes)} · ${document.contentType}` : t.documentPdfOnly}</small>
             </span>
             <label
-              htmlFor={inputId}
               className="ghost-button document-file-picker"
               aria-disabled={isBusy || isOpening}
             >
               <Upload size={16} />
               {isBusy ? t.documentUploading : document ? t.replaceDocument : t.addDocument}
+              <input id={inputId} type="file" accept="application/pdf,.pdf" onChange={chooseFile} disabled={isBusy || isOpening} />
             </label>
-            <input id={inputId} type="file" accept="application/pdf,.pdf" onChange={chooseFile} disabled={isBusy || isOpening} />
           </div>
           {localError || error ? <p className="document-error">{localError || error}</p> : null}
         </div>
