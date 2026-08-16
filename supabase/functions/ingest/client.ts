@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from './config.ts'
+import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, UPLOAD_MAX_SIZE, UPLOAD_TYPES } from './config.ts'
 import { Pvgis } from './pvgis.ts'
 import { hash } from './utils/crypto.ts'
 import { dateUtil } from './utils/date.ts'
@@ -120,6 +120,89 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage {
     if (error) throw new Error(`update failed on ${table}`, { cause: error })
   }
 
+  async uploadFile(
+    plantId: Solaroid.Supabase.Plant.Id,
+    month: unknown,
+    type: unknown,
+    file: unknown,
+  ): Promise<void> {
+    if (!(file instanceof File)) {
+      throw new Error('Document is required')
+    }
+
+    if (file.size <= 0 || file.size > UPLOAD_MAX_SIZE) {
+      throw new Error(`Document must be between 1 and ${UPLOAD_MAX_SIZE} bytes`)
+    }
+
+    if (typeof month !== 'string' || !dateUtil.granularity.is.month(month)) {
+      throw new Error('Document month must use YYYY-MM format')
+    }
+
+    if (typeof type !== 'string' || !UPLOAD_TYPES.includes(type as Solaroid.Supabase.Upload.Type)) {
+      throw new Error(`Upload of "${type}" documents is forbidden`)
+    }
+
+    const { data: monthRow, error: monthError } = await this.client
+      .from('months')
+      .select('date')
+      .eq('plant_id', plantId)
+      .eq('date', `${month}-01`)
+      .maybeSingle()
+
+    if (monthError) throw new Error('Month lookup failed', { cause: monthError })
+    if (!monthRow) throw new Error(`${month} is not available for this plant`)
+
+    const { error: uploadError } = await this.client.storage
+      .from('month-docs')
+      .upload(
+        `${plantId}/${type}/${month}`,
+        file,
+        {
+          upsert: true,
+          metadata: {
+            plantId,
+            month,
+            type,
+          },
+        },
+      )
+
+    if (uploadError) throw new Error('Upload failed', { cause: uploadError })
+  }
+
+  async getUploadedFiles(
+    plantId: Solaroid.Supabase.Plant.Id,
+    month: Solaroid.Supabase.Date.Ym,
+  ): Promise<readonly Solaroid.Supabase.Upload.File[]> {
+    const { data, error } = await this.client.rpc('month_docs', { plant_id: plantId, month })
+
+    if (error) throw new Error('Files lookup failed', { cause: error })
+
+    const files: Solaroid.Supabase.Upload.File[] = []
+
+    for (const file of data || []) {
+      files.push({
+        path: file.name,
+        type: file.user_metadata.type as Solaroid.Supabase.Upload.Type,
+        size: Number(file.metadata.size),
+        mime: String(file.metadata.mimetype),
+      })
+    }
+
+    return files
+  }
+
+  async getUploadFilePresignedUrl(path: string): Promise<string> {
+    const { data, error } = await this.client
+      .storage
+      .from('month-docs')
+      .createSignedUrl(path, 60)
+
+    if (error) throw new Error('Document URL creation failed', { cause: error })
+
+    return data.signedUrl
+  }
+
   async getLatestDamPriceUpdatedAt(): Promise<string | undefined> {
     const { data, error } = await this.client
       .from('dam_prices')
@@ -151,9 +234,19 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage {
     return {
       plant,
       days,
-      months,
       tariffs,
       projection: await this.#getPvgisProjection(plant),
+      months: await Promise.all(
+        months.map(async (row) => {
+          // @ts-expect-error TS18046
+          const [y, m] = row.date.split('-')
+
+          return {
+            ...row,
+            files: await this.getUploadedFiles(plantId, `${y}-${m}`),
+          }
+        }),
+      ),
     }
   }
 

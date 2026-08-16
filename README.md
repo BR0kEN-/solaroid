@@ -29,7 +29,7 @@ Main Edge Function files:
 - `supabase/functions/ingest/server.ts`: HTTP server, auth, errors, CORS.
 - `supabase/functions/ingest/read.ts`: read routing and access checks.
 - `supabase/functions/ingest/write.ts`: ingestion/write behavior.
-- `supabase/functions/ingest/client.ts`: Supabase queries/upserts.
+- `supabase/functions/ingest/client.ts`: Supabase reads/upserts plus private monthly document storage/listing.
 - `supabase/functions/ingest/dam.ts`: DAM freshness check, source validation, and hourly price mapping.
 - `supabase/functions/ingest/schema.ts`: Zod input schema.
 - `supabase/functions/ingest/types.d.ts`: Deno/global Solaroid types.
@@ -65,6 +65,7 @@ Important auth model:
 
 - Supabase Auth users can read assigned plants only.
 - Supabase Auth users can never write ingestion data.
+- Supabase Auth users can upload or replace green-tariff documents for plants they can read; this does not grant ingestion-data write access.
 - Raw access tokens are still used for Home Assistant ingestion.
 - Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
 - Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
@@ -179,6 +180,21 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026-06-08
 GET /functions/v1/ingest?plant=bondas&granularity=2026-06
 GET /functions/v1/ingest?plant=bondas&granularity=2026
 ```
+
+### Monthly documents
+
+Selecting a month in the monthly data table opens its document manager. Users with access to the plant can upload or replace the monthly green-tariff receipt. The regular monthly payload includes matching files for each month. Daily rows do not open the document manager.
+
+```http
+POST /functions/v1/ingest
+Content-Type: multipart/form-data
+
+month=YYYY-MM
+type=green-tariff-receipt
+file=<PDF>
+```
+
+The upload uses the authenticated dashboard token, accepts files up to 20 MiB, and stores them in the private `month-docs` bucket. The storage path is `<plant>/<type>/<month>`, so replacing a document overwrites the existing object. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function validates plant access and returns a signed URL valid for 60 seconds. The original email/document should remain the legal archive; Solaroid stores a convenient private copy for the monthly view.
 
 Current read behavior:
 

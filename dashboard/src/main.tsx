@@ -7,19 +7,23 @@ import {
   CheckCircle2,
   CircleAlert,
   CircleDollarSign,
+  ExternalLink,
+  FileText,
   GitCompareArrows,
   Info,
   LogOut,
   RefreshCw,
   SunMedium,
+  Upload,
   WalletCards,
   X,
 } from "lucide-react";
-import { configureDashboardAccess, loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
+import { configureDashboardAccess, getMonthDocumentUrl, loadDashboardData, loadPlantData, loadPlantGranularity, uploadMonthReceipt } from "./data/supabase";
 import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
+import type { MonthReceipt } from "./domain/types";
 import {
   capacityAdjustedProductionSurplus,
   capacityDeltaPct,
@@ -330,6 +334,15 @@ const i18n = {
     night: "Night",
     sourceWarning: "Data fetch failed. Check Supabase access, plant id, and read policies.",
     currency: "Currency",
+    documents: "Documents",
+    greenTariffReceipt: "Green tariff receipt",
+    addDocument: "Add",
+    replaceDocument: "Replace",
+    openGreenTariffReceipt: "Open green tariff receipt",
+    documentPdfOnly: "PDF only, up to 20 MB",
+    documentOpenFailed: "Document could not be opened.",
+    documentPopupBlocked: "Allow popups to open this document.",
+    documentUploading: "Uploading",
     tapBar: "Tap a bar to inspect the value",
     tapBarOrDot: "Tap a bar or dot to inspect the value",
   },
@@ -509,6 +522,15 @@ const i18n = {
     night: "Ніч",
     sourceWarning: "Не вдалось завантажити дані. Перевірте доступ до Supabase, id станції та політики читання.",
     currency: "Валюта",
+    documents: "Документи",
+    greenTariffReceipt: "Акт за зеленим тарифом",
+    addDocument: "Додати",
+    replaceDocument: "Замінити",
+    openGreenTariffReceipt: "Відкрити акт за зеленим тарифом",
+    documentPdfOnly: "Тільки PDF, до 20 МБ",
+    documentOpenFailed: "Не вдалося відкрити документ.",
+    documentPopupBlocked: "Дозвольте спливні вікна, щоб відкрити документ.",
+    documentUploading: "Завантаження",
     tapBar: "Торкніться стовпчика, щоб побачити значення",
     tapBarOrDot: "Торкніться стовпчика або точки, щоб побачити значення",
   },
@@ -1584,6 +1606,11 @@ function App({
   const [comparisonError, setComparisonError] = useState("");
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
+  const [documentsModalRow, setDocumentsModalRow] = useState<MonthRow | null>(null);
+  const [receiptOverrides, setReceiptOverrides] = useState<Record<string, MonthReceipt>>({});
+  const [receiptBusy, setReceiptBusy] = useState(false);
+  const [receiptOpening, setReceiptOpening] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
   const [lang, setLang] = useState<Lang>(initialLang);
   const setAppLang = (nextLang: Lang) => {
     setLang(nextLang);
@@ -1681,13 +1708,15 @@ function App({
   };
 
   useEffect(() => {
-    if (!infoModal) return undefined;
+    if (!infoModal && !documentsModalRow) return undefined;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setInfoModal(null);
+      if (event.key !== "Escape") return;
+      setInfoModal(null);
+      setDocumentsModalRow(null);
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [infoModal]);
+  }, [infoModal, documentsModalRow]);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -1701,11 +1730,70 @@ function App({
   const rows = useMemo(() => {
     return filteredMonthlyRows(dataState.rows, range, rangeFromMonth, rangeToMonth);
   }, [dataState.rows, range, rangeFromMonth, rangeToMonth]);
+  const rowsWithReceipts = useMemo(
+    () => rows.map((row) => {
+      const receipt = receiptOverrides[monthKey(row.date)]
+      return receipt ? { ...row, receipt } : row
+    }),
+    [receiptOverrides, rows],
+  );
   const productionProjection = dataState.projection ?? null;
   const dailyDateBounds = useMemo(
     () => [dataState.dailyRows[0] ? dateKey(dataState.dailyRows[0].date) : "", dataState.dailyRows.at(-1) ? dateKey(dataState.dailyRows.at(-1)!.date) : ""] as const,
     [dataState.dailyRows],
   );
+
+  const openDocumentsModal = (row: MonthRow) => {
+    setReceiptError("");
+    setReceiptOpening(false);
+    setDocumentsModalRow(row);
+  };
+
+  const openReceipt = async (receipt: MonthReceipt) => {
+    const popup = window.open("about:blank", "_blank");
+
+    if (!popup) {
+      setReceiptError(t.documentPopupBlocked);
+      return;
+    }
+
+    popup.opener = null;
+    setReceiptOpening(true);
+    setReceiptError("");
+
+    try {
+      const url = await getMonthDocumentUrl(receipt.path);
+      popup.location.replace(url);
+    } catch (error) {
+      popup.close();
+      setReceiptError(error instanceof Error ? error.message : t.documentOpenFailed);
+    } finally {
+      setReceiptOpening(false);
+    }
+  };
+
+  const uploadReceipt = async (file: File) => {
+    if (!documentsModalRow) return;
+
+    setReceiptBusy(true);
+    setReceiptError("");
+    try {
+      const month = monthKey(documentsModalRow.date);
+      await uploadMonthReceipt(month, file);
+      const receipt: MonthReceipt = {
+        path: `${dataState.plantId}/green-tariff-receipt/${month}`,
+        filename: month,
+        contentType: file.type || "application/pdf",
+        sizeBytes: file.size,
+      };
+      setReceiptOverrides((current) => ({ ...current, [month]: receipt }));
+      setDocumentsModalRow((current) => current ? { ...current, receipt } : current);
+    } catch (error) {
+      setReceiptError(error instanceof Error ? error.message : "Receipt upload failed");
+    } finally {
+      setReceiptBusy(false);
+    }
+  };
 
   const plantComparisonMonthOptions = useMemo(
     () => [...new Map(dataState.dailyRows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)])).entries()].reverse(),
@@ -2645,7 +2733,7 @@ function App({
             <DataTableSkeleton />
           ) : (
             <DataTable
-              rows={rows}
+              rows={rowsWithReceipts}
               period="monthly"
               t={t}
               currency={currency}
@@ -2663,6 +2751,7 @@ function App({
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
               onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
               onUtilityMeterInfo={(row) => setInfoModal({ kind: "utilityMeter", row })}
+              onDocumentsInfo={openDocumentsModal}
             />
           )}
         </section>
@@ -2693,6 +2782,19 @@ function App({
               </div>
             </section>
           </div>
+        )}
+        {documentsModalRow && (
+          <DocumentsModal
+            row={documentsModalRow}
+            document={documentsModalRow.receipt ?? null}
+            t={t}
+            isBusy={receiptBusy}
+            isOpening={receiptOpening}
+            error={receiptError}
+            onClose={() => setDocumentsModalRow(null)}
+            onOpen={() => documentsModalRow.receipt && void openReceipt(documentsModalRow.receipt)}
+            onUpload={uploadReceipt}
+          />
         )}
         <footer className="dash-footer">
           <span>
@@ -3950,6 +4052,7 @@ function PlantComparisonSection({
     !firstPlantId ||
     !secondPlantId ||
     (plantComparisonMode === "monthly" ? !plantComparisonYear : !plantComparisonMonth);
+  const plantOptionLabel = (plantId: string) => `${plantId}${plantId === activePlantId ? ` (${t.activePlant})` : ""}`;
 
   return (
     <section className="plant-comparison-section">
@@ -3995,7 +4098,7 @@ function PlantComparisonSection({
           <select value={firstPlantId} onChange={(event) => setFirstPlantId(event.target.value)}>
             {availablePlantIds.map((plantId) => (
               <option key={plantId} value={plantId}>
-                {plantId}
+                {plantOptionLabel(plantId)}
               </option>
             ))}
           </select>
@@ -4005,7 +4108,7 @@ function PlantComparisonSection({
           <select value={secondPlantId} onChange={(event) => setSecondPlantId(event.target.value)}>
             {availablePlantIds.map((plantId) => (
               <option key={plantId} value={plantId}>
-                {plantId}
+                {plantOptionLabel(plantId)}
               </option>
             ))}
           </select>
@@ -4023,7 +4126,6 @@ function PlantComparisonSection({
       {error ? <small className="negative">{error}</small> : null}
       <PlantPeriodComparisonCharts
         plants={displayedResult?.plants ?? []}
-        activePlantId={activePlantId}
         mode={plantComparisonMode}
         period={plantComparisonMode === "monthly" ? displayedResult?.year ?? "" : displayedResult?.month ?? ""}
         t={t}
@@ -4050,7 +4152,6 @@ function PlantComparisonSection({
 
 function PlantPeriodComparisonCharts({
   plants,
-  activePlantId,
   mode,
   period,
   t,
@@ -4059,7 +4160,6 @@ function PlantPeriodComparisonCharts({
   onDeltaInfo,
 }: {
   readonly plants: readonly PlantComparison[];
-  readonly activePlantId: string;
   readonly mode: PlantComparisonMode;
   readonly period: string;
   readonly t: Record<string, string>;
@@ -4152,7 +4252,6 @@ function PlantPeriodComparisonCharts({
               {periodPlants.map((plant, index) => (
                 <span key={plant.plantId}>
                   <i style={{ background: comparisonLineColors[index % comparisonLineColors.length] }} /> {plant.plantId}
-                  {plant.plantId === activePlantId ? <em>{t.activePlant}</em> : null}
                 </span>
               ))}
             </div>
@@ -5862,6 +5961,7 @@ function DataTable({
   onNetPaymentInfo,
   onRoiValueInfo,
   onUtilityMeterInfo,
+  onDocumentsInfo,
 }: {
   readonly rows: readonly MonthRow[];
   readonly period: "monthly" | "daily";
@@ -5881,6 +5981,7 @@ function DataTable({
   readonly onNetPaymentInfo: (row: MonthRow) => void;
   readonly onRoiValueInfo: (row: MonthRow) => void;
   readonly onUtilityMeterInfo?: (row: MonthRow) => void;
+  readonly onDocumentsInfo?: (row: MonthRow) => void;
 }) {
   const newestFirst = [...rows].sort((a, b) => b.date.getTime() - a.date.getTime());
   const kwh = energyUnit(lang);
@@ -5929,12 +6030,15 @@ function DataTable({
         <tbody>
           {newestFirst.map((row) => (
             <tr key={row.month}>
-              <th>
-                {period === "monthly" && row.utilityMeter && onUtilityMeterInfo ? (
-                  <TableValueInfo value={row.month} label={t.utilityMeter} onInfo={() => onUtilityMeterInfo(row)} />
-                ) : (
-                  period === "daily" ? formatDayMonthLabel(row.date, lang) : row.month
-                )}
+              <th className={period === "monthly" && onDocumentsInfo ? "month-documents-cell" : undefined}>
+                {period === "monthly" ? (
+                  <MonthTableCell
+                    row={row}
+                    t={t}
+                    onDocumentsInfo={onDocumentsInfo}
+                    onUtilityMeterInfo={onUtilityMeterInfo}
+                  />
+                ) : formatDayMonthLabel(row.date, lang)}
               </th>
               <td>{formatNumber(row.production, 2, 2)}</td>
               <td>
@@ -6026,6 +6130,147 @@ function TableValueInfo({
       </button>
     </span>
   );
+}
+
+function MonthTableCell({
+  row,
+  t,
+  onDocumentsInfo,
+  onUtilityMeterInfo,
+}: {
+  readonly row: MonthRow;
+  readonly t: Record<string, string>;
+  readonly onDocumentsInfo?: (row: MonthRow) => void;
+  readonly onUtilityMeterInfo?: (row: MonthRow) => void;
+}) {
+  if (!onDocumentsInfo) {
+    return row.utilityMeter && onUtilityMeterInfo ? (
+      <TableValueInfo value={row.month} label={t.utilityMeter} onInfo={() => onUtilityMeterInfo(row)} />
+    ) : row.month;
+  }
+
+  return (
+    <span className="month-documents-cell-content">
+      <button
+        type="button"
+        className="month-documents-button"
+        onClick={() => onDocumentsInfo(row)}
+        aria-label={`${t.documents}: ${row.month}`}
+        aria-haspopup="dialog"
+        title={t.documents}
+      >
+        {row.month}
+      </button>
+      {row.utilityMeter && onUtilityMeterInfo ? (
+        <button
+          type="button"
+          className="table-info-button month-utility-info"
+          aria-label={t.utilityMeter}
+          onClick={() => onUtilityMeterInfo(row)}
+        >
+          <Info size={14} />
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+function DocumentsModal({
+  row,
+  document,
+  t,
+  isBusy,
+  isOpening,
+  error,
+  onClose,
+  onOpen,
+  onUpload,
+}: {
+  readonly row: MonthRow;
+  readonly document: MonthReceipt | null;
+  readonly t: Record<string, string>;
+  readonly isBusy: boolean;
+  readonly isOpening: boolean;
+  readonly error: string;
+  readonly onClose: () => void;
+  readonly onOpen: () => void;
+  readonly onUpload: (file: File) => Promise<void>;
+}) {
+  const [localError, setLocalError] = useState("");
+  const inputId = `document-file-${monthKey(row.date)}`;
+
+  const chooseFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const next = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    setLocalError("");
+    if (!next) return;
+    if (!next.name.toLowerCase().endsWith(".pdf") || (next.type && next.type !== "application/pdf")) {
+      setLocalError(t.documentPdfOnly);
+      return;
+    }
+    if (next.size <= 0 || next.size > 20 * 1024 * 1024) {
+      setLocalError(t.documentPdfOnly);
+      return;
+    }
+    void onUpload(next);
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="info-modal modal-card documents-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="documents-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="section-heading modal-heading">
+          <div>
+            <h2 id="documents-modal-title">{t.documents} · {row.month}</h2>
+          </div>
+          <button type="button" className="icon-button info-modal-close-top" onClick={onClose} aria-label={t.close} disabled={isBusy || isOpening}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="info-modal-body documents-modal-body">
+          <div className="document-item">
+            <span className="document-type-icon"><FileText size={20} /></span>
+            <span className="document-item-copy">
+              {document ? (
+                <button
+                  type="button"
+                  className="document-title-button"
+                  onClick={onOpen}
+                  disabled={isBusy || isOpening}
+                  aria-label={t.openGreenTariffReceipt}
+                >
+                  <span>{t.greenTariffReceipt}</span>
+                  <ExternalLink size={14} />
+                </button>
+              ) : (
+                <strong>{t.greenTariffReceipt}</strong>
+              )}
+              <small>{document ? `${formatFileSize(document.sizeBytes)} · ${document.contentType}` : t.documentPdfOnly}</small>
+            </span>
+            <label
+              className="ghost-button document-file-picker"
+              aria-disabled={isBusy || isOpening}
+            >
+              <Upload size={16} />
+              {isBusy ? t.documentUploading : document ? t.replaceDocument : t.addDocument}
+              <input id={inputId} type="file" accept="application/pdf,.pdf" onChange={chooseFile} disabled={isBusy || isOpening} />
+            </label>
+          </div>
+          {localError || error ? <p className="document-error">{localError || error}</p> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function formatFileSize(value: number) {
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function SplitInfo({
