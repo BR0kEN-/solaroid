@@ -28,6 +28,15 @@ export interface MonthRow {
   readonly roiUsd: number
   readonly isCommercial: boolean
   readonly utilityMeter?: UtilityMeterReconciliation
+  readonly receipt?: MonthReceipt
+}
+
+export interface MonthReceipt {
+  readonly id?: string
+  readonly path: string
+  readonly filename: string
+  readonly contentType: string
+  readonly sizeBytes: number
 }
 
 export interface UtilityMeterReconciliation {

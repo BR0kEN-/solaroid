@@ -1,4 +1,5 @@
 import type { SupabaseClient } from './client.ts'
+import type { UPLOAD_TYPES } from './config.ts'
 
 declare global {
   namespace Solaroid.Supabase {
@@ -132,6 +133,17 @@ declare global {
     namespace Http {
       type Method = string
       type Handler = (request: Request, token: Access.Token, client: SupabaseClient) => Promise<Json>
+    }
+
+    namespace Upload {
+      type Type = typeof UPLOAD_TYPES[number]
+
+      interface File {
+        readonly type: Type
+        readonly path: string
+        readonly size: number
+        readonly mime: string
+      }
     }
   }
 }

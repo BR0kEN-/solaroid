@@ -25,6 +25,18 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
     throw new ForbiddenError()
   }
 
+  const documentPath = params.get('document')
+
+  if (documentPath) {
+    if (documentPath.split('/')[0] !== plantId) {
+      throw new ForbiddenError()
+    }
+
+    return {
+      documentUrl: await client.getUploadFilePresignedUrl(documentPath),
+    }
+  }
+
   if (token.kind === 'auth' && params.has('metadata')) {
     return {
       plants: await client.getPlantsMetadata([token.plant_id, ...Object.keys(token.reads)]),

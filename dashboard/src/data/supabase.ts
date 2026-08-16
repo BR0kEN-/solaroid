@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
+import type { EnergySnapshot, ExportTax, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -30,7 +30,15 @@ interface MonthRecord {
   readonly utility_export_day?: number | null
   readonly utility_export_night?: number | null
   readonly utility_record_dates?: UtilityMeterRecordDates | null
+  readonly files?: readonly UploadedFileRecord[] | null
   readonly updated_at?: string
+}
+
+interface UploadedFileRecord {
+  readonly id?: string
+  readonly path: string
+  readonly size: number
+  readonly mime: string
 }
 
 interface DayRecord extends MonthRecord {
@@ -52,6 +60,7 @@ interface TariffRecord {
 interface ApiResponse {
   readonly ok: boolean
   readonly message?: string
+  readonly documentUrl?: string
   readonly plant?: PlantRecord
   readonly days?: readonly DayRecord[]
   readonly months?: readonly MonthRecord[]
@@ -75,6 +84,33 @@ const FULL_ACCESS_SCOPES = ['loc'] as const
 
 export function configureDashboardAccess(next: DashboardAccess) {
   dashboardAccess = next
+}
+
+export async function uploadMonthReceipt(month: string, file: File): Promise<void> {
+  const url = new URL(apiUrl())
+  const body = new FormData()
+  body.append('month', month)
+  body.append('type', 'green-tariff-receipt')
+  body.append('file', file)
+
+  await documentRequest(url, {
+    method: 'POST',
+    body,
+  })
+}
+
+export async function getMonthDocumentUrl(path: string): Promise<string> {
+  const url = new URL(apiUrl())
+  const currentPlantId = plantId()
+
+  if (currentPlantId) url.searchParams.set('plant', currentPlantId)
+  url.searchParams.set('document', path)
+
+  const data = await documentRequest(url)
+
+  if (!data.documentUrl) throw new Error('Document URL was not returned')
+
+  return data.documentUrl
 }
 
 export async function loadDashboardData(): Promise<LoadedData> {
@@ -209,6 +245,23 @@ async function fetchDashboardData(
     reads: data.reads ?? {},
     projection: data.projection ?? null,
   }
+}
+
+async function documentRequest(url: URL, init?: RequestInit) {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${accessToken()}`,
+      ...(init?.headers ?? {}),
+    },
+  })
+  const data = await response.json() as ApiResponse
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.message ?? 'Document request failed')
+  }
+
+  return data
 }
 
 function normalizeReadablePlantScopes(reads: Readonly<Record<string, readonly string[]>> | readonly string[]): Readonly<Record<string, readonly string[]>> {
@@ -356,6 +409,20 @@ function toDashboardRow({
     roiUsd: usdRate ? electricitySavings / usdRate : 0,
     isCommercial,
     utilityMeter,
+    receipt: toReceipt(row),
+  }
+}
+
+function toReceipt(row: MonthRecord): MonthReceipt | undefined {
+  const file = row.files?.find((candidate) => candidate.path.split('/')[1] === 'green-tariff-receipt')
+  if (!file) return undefined
+
+  return {
+    id: file.id,
+    path: file.path,
+    filename: file.path.split('/').at(-1) ?? file.path,
+    contentType: file.mime,
+    sizeBytes: file.size,
   }
 }
 
