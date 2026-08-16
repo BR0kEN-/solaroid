@@ -13,7 +13,7 @@ returns table (
   user_metadata jsonb
 )
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 begin
