@@ -1,7 +1,8 @@
 import { z } from 'zod'
-import { HttpError, MethodNotAllowedError, UnauthorizedError } from './errors.ts'
 import { CORS_HEADERS } from './config.ts'
 import { SupabaseClient } from './client.ts'
+import { isEmailRelayRequest } from './email.ts'
+import { HttpError, MethodNotAllowedError, UnauthorizedError } from './errors.ts'
 
 const BEARER_PREFIX = 'Bearer '
 
@@ -67,6 +68,7 @@ function bearerToken(request: Request): string {
 
 function serve(
   handlers: Record<Solaroid.Supabase.Http.Method, Solaroid.Supabase.Http.Handler>,
+  emailHandler: Solaroid.Supabase.Email.Handler,
 ) {
   const responder = new Responder(Object.keys(handlers))
 
@@ -78,11 +80,16 @@ function serve(
     const handler = handlers[request.method]
 
     try {
+      const client = new SupabaseClient()
+
+      if (isEmailRelayRequest(request)) {
+        return responder.json({ ok: true, ...await emailHandler(request, bearerToken(request), client) })
+      }
+
       if (!handler) {
         throw new MethodNotAllowedError()
       }
 
-      const client = new SupabaseClient()
       const accessToken = await client.getAccessToken(bearerToken(request))
 
       if (!accessToken) {

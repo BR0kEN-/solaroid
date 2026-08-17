@@ -135,6 +135,105 @@ declare global {
       type Handler = (request: Request, token: Access.Token, client: SupabaseClient) => Promise<Json>
     }
 
+    namespace Document {
+      interface Pdf {
+        readonly filename: string
+        readonly content: ArrayBuffer
+      }
+
+      interface Signature {
+        readonly content: ArrayBuffer
+        readonly contentType: string
+      }
+
+      interface GridEnergy {
+        readonly importKwh: number
+        readonly exportKwh: number
+      }
+
+      interface PayableEnergy {
+        readonly consumerKwh: number
+        readonly supplierKwh: number
+      }
+
+      interface Energy {
+        readonly grid: GridEnergy
+        readonly payable: PayableEnergy
+      }
+
+      interface PurchaseRow {
+        readonly kwh: number
+        readonly priceKopPerKwh: number
+        readonly amountUah: number
+      }
+
+      interface Purchase {
+        readonly greenTariff: PurchaseRow
+        readonly weightedPrice: PurchaseRow
+      }
+
+      interface Taxes {
+        readonly personalIncomeUah: number
+        readonly militaryLevyUah: number
+      }
+
+      interface Payment {
+        readonly grossUah: number
+        readonly taxes: Taxes
+        readonly netUah: number
+      }
+
+      interface GreenTariffReport {
+        readonly account: string
+        readonly eic: string
+        readonly actDate: Date.Ymd
+        readonly energy: Energy
+        readonly purchase: Purchase
+        readonly payment: Payment
+      }
+    }
+
+    namespace Email {
+      type Handler = (request: Request, bearer: string, client: SupabaseClient) => Promise<Json>
+
+      interface AnalysisInput {
+        readonly subject: string
+        readonly text: string
+        readonly pdfs: readonly Document.Pdf[]
+      }
+
+      interface Analysis {
+        readonly attachmentIndex?: number
+        readonly document?: {
+          readonly type: Upload.Type
+          readonly month: Date.Ym
+          readonly report: Document.GreenTariffReport
+        }
+      }
+
+      type Analyzer = (input: AnalysisInput) => Promise<Analysis>
+
+      interface Document {
+        readonly plantId: Plant.Id
+        readonly type: Upload.Type
+        readonly month: Date.Ym
+        readonly report: Solaroid.Supabase.Document.GreenTariffReport
+        readonly pdf: ArrayBuffer
+        readonly signature?: Solaroid.Supabase.Document.Signature
+      }
+
+      interface Storage {
+        uploadFile(document: Document): Promise<void>
+
+        getUploadedFiles(
+          plantId: Plant.Id,
+          month: Date.Ym,
+        ): Promise<readonly Upload.File[]>
+
+        getUploadFilePresignedUrl(path: string): Promise<string>
+      }
+    }
+
     namespace Upload {
       type Type = typeof UPLOAD_TYPES[number]
 

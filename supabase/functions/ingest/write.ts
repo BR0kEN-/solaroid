@@ -76,21 +76,6 @@ async function write(request: Request, token: Solaroid.Supabase.Access.Token, cl
     throw new ForbiddenError()
   }
 
-  if (request.headers.get('content-type') !== 'application/json') {
-    const form = await request.formData()
-
-    await client.uploadFile(
-      token.plant_id,
-      form.get('month'),
-      form.get('type'),
-      form.get('file'),
-    )
-
-    return {
-      ok: true,
-    }
-  }
-
   const rows = getRows(Input.parse(await request.json()), token)
 
   await client.upsertPlantRow('days', rows.day)

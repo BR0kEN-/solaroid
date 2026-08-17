@@ -17,7 +17,7 @@ function toReads(
   )
 }
 
-export class SupabaseClient implements Solaroid.Supabase.Dam.Storage {
+export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.Supabase.Email.Storage {
   protected readonly client
 
   constructor() {
@@ -120,25 +120,22 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage {
     if (error) throw new Error(`update failed on ${table}`, { cause: error })
   }
 
-  async uploadFile(
-    plantId: Solaroid.Supabase.Plant.Id,
-    month: unknown,
-    type: unknown,
-    file: unknown,
-  ): Promise<void> {
-    if (!(file instanceof File)) {
-      throw new Error('Document is required')
-    }
+  async uploadFile(document: Solaroid.Supabase.Email.Document): Promise<void> {
+    const { month, pdf, plantId, report, signature, type } = document
 
-    if (file.size <= 0 || file.size > UPLOAD_MAX_SIZE) {
+    if (
+      pdf.byteLength <= 0 ||
+      pdf.byteLength > UPLOAD_MAX_SIZE ||
+      (signature && (signature.content.byteLength <= 0 || signature.content.byteLength > UPLOAD_MAX_SIZE))
+    ) {
       throw new Error(`Document must be between 1 and ${UPLOAD_MAX_SIZE} bytes`)
     }
 
-    if (typeof month !== 'string' || !dateUtil.granularity.is.month(month)) {
+    if (!dateUtil.granularity.is.month(month)) {
       throw new Error('Document month must use YYYY-MM format')
     }
 
-    if (typeof type !== 'string' || !UPLOAD_TYPES.includes(type as Solaroid.Supabase.Upload.Type)) {
+    if (!UPLOAD_TYPES.includes(type)) {
       throw new Error(`Upload of "${type}" documents is forbidden`)
     }
 
@@ -152,22 +149,35 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage {
     if (monthError) throw new Error('Month lookup failed', { cause: monthError })
     if (!monthRow) throw new Error(`${month} is not available for this plant`)
 
-    const { error: uploadError } = await this.client.storage
-      .from('month-docs')
-      .upload(
-        `${plantId}/${type}/${month}`,
-        file,
-        {
-          upsert: true,
-          metadata: {
-            plantId,
-            month,
-            type,
+    const upload = async (
+      content: ArrayBuffer,
+      contentType: string,
+      asset: 'document' | 'signature',
+    ) => {
+      const suffix = asset === 'signature' ? '-signature' : ''
+      const { error } = await this.client.storage
+        .from('month-docs')
+        .upload(
+          `${plantId}/${type}/${month}${suffix}`,
+          new Uint8Array(content),
+          {
+            contentType,
+            upsert: true,
+            metadata: {
+              asset,
+              month,
+              plantId,
+              report,
+              type,
+            },
           },
-        },
-      )
+        )
 
-    if (uploadError) throw new Error('Upload failed', { cause: uploadError })
+      if (error) throw new Error(`${asset} upload failed`, { cause: error })
+    }
+
+    if (signature) await upload(signature.content, signature.contentType, 'signature')
+    await upload(pdf, 'application/pdf', 'document')
   }
 
   async getUploadedFiles(
@@ -181,6 +191,8 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage {
     const files: Solaroid.Supabase.Upload.File[] = []
 
     for (const file of data || []) {
+      if (file.user_metadata.asset === 'signature') continue
+
       files.push({
         path: file.name,
         type: file.user_metadata.type as Solaroid.Supabase.Upload.Type,

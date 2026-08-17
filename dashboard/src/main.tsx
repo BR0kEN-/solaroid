@@ -6118,7 +6118,7 @@ function MonthTableCell({
         aria-haspopup="dialog"
         title={t.documents}
       >
-        {row.month}
+        <span>{row.month}</span>
       </button>
       {row.utilityMeter && onUtilityMeterInfo ? (
         <button

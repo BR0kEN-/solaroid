@@ -179,7 +179,7 @@ describe('email handler', () => {
     expect(console.error).toHaveBeenCalledTimes(2)
   })
 
-  it('uses a 15 second relay timeout', () => {
-    expect(RELAY_TIMEOUT_MS).toBe(15_000)
+  it('allows enough time for downstream document analysis', () => {
+    expect(RELAY_TIMEOUT_MS).toBe(60_000)
   })
 })

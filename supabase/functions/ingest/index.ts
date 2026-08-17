@@ -1,5 +1,6 @@
 import { serve } from './server.ts'
 import { read as GET } from './read.ts'
 import { write as POST } from './write.ts'
+import { receiveEmail } from './email.ts'
 
-serve({ GET, POST })
+serve({ GET, POST }, receiveEmail)

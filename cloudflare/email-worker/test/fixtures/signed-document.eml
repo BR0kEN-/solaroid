@@ -12,9 +12,9 @@ Content-Transfer-Encoding: base64
 
 JVBERi0xLjQKJSBzeW50aGV0aWMgZml4dHVyZQo=
 --solaroid-fixture
-Content-Type: application/pkcs7-signature
-Content-Disposition: attachment; filename="document.pdf.p7s"
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="document.pdf.signature"
 Content-Transfer-Encoding: base64
 
-MAMCAQE=
+c2lnbmF0dXJl
 --solaroid-fixture--

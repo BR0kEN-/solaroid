@@ -37,6 +37,8 @@ Main Edge Function files:
 - `supabase/functions/ingest/write.ts`: ingestion/write behavior.
 - `supabase/functions/ingest/client.ts`: Supabase reads/upserts plus private monthly document storage/listing.
 - `supabase/functions/ingest/dam.ts`: DAM freshness check, source validation, and hourly price mapping.
+- `supabase/functions/ingest/email.ts`: raw email validation, MIME parsing, and analyzed attachment selection.
+- `supabase/functions/ingest/email_analysis.ts`: OpenAI PDF classification and structured report extraction.
 - `supabase/functions/ingest/schema.ts`: Zod input schema.
 - `supabase/functions/ingest/types.d.ts`: Deno/global Solaroid types.
 
@@ -48,7 +50,7 @@ Home Assistant posts sensor snapshots to the Supabase Edge Function:
 Home Assistant -> POST /functions/v1/ingest -> Supabase tables
 Portal mode -> Supabase Auth -> GET /functions/v1/ingest -> Supabase tables
 HA mode -> GET /functions/v1/ingest -> Supabase tables
-Mailbox -> Cloudflare Email Worker -> dedicated signed-document receiver (not implemented yet)
+Mailbox -> Cloudflare Email Worker -> POST /functions/v1/ingest -> OpenAI analysis -> private document storage
 ```
 
 Portal mode is intended for `https://solaroid.app`. HA mode remains static and can still be served from Home Assistant, Cloudflare, or any static host. Neither mode stores Supabase service credentials.
@@ -192,25 +194,57 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026
 
 Selecting a month in the monthly data table opens its read-only document manager. Existing green-tariff documents can be opened through a short-lived signed URL; missing documents show an empty state. The regular monthly payload includes matching files for each month. Daily rows do not open the document manager.
 
-The existing multipart write remains available to trusted internal automation using the plant's raw ingest token. The dashboard does not expose it:
-
-```http
-POST /functions/v1/ingest
-Authorization: Bearer RAW_TOKEN_VALUE
-Content-Type: multipart/form-data
-
-month=YYYY-MM
-type=green-tariff-receipt
-file=<PDF>
-```
-
-The internal upload accepts files up to 20 MiB and stores them in the private `month-docs` bucket. The storage path is `<plant>/<type>/<month>`, so replacing a document overwrites the existing object. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function validates plant access and returns a signed URL valid for 60 seconds.
+Document writes are email-managed. The dashboard and regular plant-token ingestion route cannot add or replace files. Accepted document and optional signature objects are limited to 20 MiB each and stored in the private `month-docs` bucket. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function validates plant access and returns a signed URL valid for 60 seconds.
 
 ### Signed-document email routing
 
-`cloudflare/email-worker` receives `docs+<plant-id>@solaroid.app` through Cloudflare Email Routing and streams the complete email to a dedicated authenticated receiver. It intentionally does not parse MIME or verify `.p7s`, preserving the original signed container for downstream validation.
+`cloudflare/email-worker` receives `docs+<plant-id>@solaroid.app` through Cloudflare Email Routing and streams the complete email to `POST /functions/v1/ingest`. The Worker intentionally does not parse MIME.
 
-The receiver is not part of the current implementation. Do not point the Worker at `/functions/v1/ingest`, and do not activate the production route until the receiver exists. Future acceptance requires a verified CAdES enveloped `.p7s`, a configured signer EDRPOU, and signed account/EIC/month fields matching the routed plant. Original `.p7s` and extracted PDF will both be retained.
+Raw email requests use a dedicated `EMAIL_INGEST_TOKEN`, not a plant ingest token. The Edge Function validates relay metadata, parses MIME generically, and sends every valid PDF candidate to the OpenAI Responses API in one in-memory structured-analysis request. Email text and filenames are context only. The analyzer currently recognizes `green-tariff-receipt`; unknown or ambiguous messages fail without a storage write, causing the Worker to forward the original email to its fallback address.
+
+For a recognized report, analysis returns one coupled `document` object containing its known type, settlement month, and type-specific report. A single additional attachment whose name starts with `<selected-pdf-name>.` is retained as the optional signature; its extension and MIME type are not prescribed. Multiple matching attachments are ambiguous and rejected. Ingestion upserts only final objects:
+
+```text
+<plant>/<document-type>/<YYYY-MM>
+<plant>/<document-type>/<YYYY-MM>-signature
+```
+
+`UPLOAD_TYPES` is the canonical list of known document types. A signature is an asset of its document, not another document type. Document and signature objects receive the same nested `report` user metadata plus `plantId`, `month`, `type`, and `asset`. Green-tariff report metadata has this structure:
+
+```text
+report
+  account
+  eic
+  actDate
+  energy
+    grid
+      importKwh
+      exportKwh
+    payable
+      consumerKwh
+      supplierKwh
+  purchase
+    greenTariff
+      kwh
+      priceKopPerKwh
+      amountUah
+    weightedPrice
+      kwh
+      priceKopPerKwh
+      amountUah
+  payment
+    grossUah
+    taxes
+      personalIncomeUah
+      militaryLevyUah
+    netUah
+```
+
+Printed prices remain in kopiykas/kWh; monetary values remain in UAH. No incoming/staging objects or raw email are retained. Signature assets are excluded from dashboard document listings.
+
+The OpenAI request uses inline PDF data, strict structured output, and `store: false`. Configure `OPENAI_API_KEY` as a Supabase Edge Function secret. `OPENAI_MODEL` is optional and defaults to `gpt-4.1-mini`.
+
+This intake preserves an optional signature attachment byte-for-byte but does not cryptographically verify it or prove that the separate PDF matches its signed content. Extracted account/EIC values are retained for later validation; they are not currently matched against plant configuration. Do not present these documents as signature-verified.
 
 Enable Cloudflare subaddressing and route `docs@solaroid.app` to the Worker. Each mailbox forwards future supplier messages to its plant alias. Historical read messages must be forwarded individually; Cloudflare cannot pull mailbox history. Full setup, failure behavior, privacy rules, and deployment commands are in `cloudflare/email-worker/README.md`.
 

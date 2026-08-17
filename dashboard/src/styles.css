@@ -2234,14 +2234,18 @@ h2 {
 
 .month-documents-cell-content {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 46px;
+  padding-right: 14px;
 }
 
 .month-documents-button {
-  display: block;
-  width: 100%;
+  display: inline-flex;
+  align-items: center;
   min-height: 46px;
-  padding: 12px 42px 12px 14px;
+  padding: 12px 0 12px 14px;
   color: inherit;
   background: transparent;
   border: 0;
@@ -2251,28 +2255,46 @@ h2 {
   text-align: left;
 }
 
+.month-documents-button::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: "";
+  background: transparent;
+}
+
+.month-documents-button > span {
+  position: relative;
+  z-index: 1;
+}
+
 .month-documents-button:hover,
 .month-documents-button:focus-visible {
   color: var(--text);
+}
+
+.month-documents-button:hover::before,
+.month-documents-button:focus-visible::before {
   background: var(--row-hover);
 }
 
-.month-documents-button:focus-visible,
 .document-title-button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
 .month-documents-button:focus-visible {
+  outline: 0;
+}
+
+.month-documents-button:focus-visible::before {
+  outline: 2px solid var(--focus-ring);
   outline-offset: -3px;
 }
 
 .month-utility-info {
-  position: absolute;
-  top: 50%;
-  right: 12px;
+  position: relative;
   z-index: 1;
-  transform: translateY(-50%);
 }
 
 .documents-modal-body {

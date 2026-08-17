@@ -26,9 +26,16 @@ class MethodNotAllowedError extends HttpError {
   }
 }
 
+class PayloadTooLargeError extends HttpError {
+  constructor(options?: ErrorOptions) {
+    super('Payload Too Large', 413, options)
+  }
+}
+
 export {
   HttpError,
   UnauthorizedError,
   ForbiddenError,
   MethodNotAllowedError,
+  PayloadTooLargeError,
 }

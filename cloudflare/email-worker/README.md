@@ -2,7 +2,7 @@
 
 Cloudflare Email Routing entry point for signed monthly documents. The Worker accepts plant-specific aliases, streams the original RFC 5322 message to a private downstream receiver, and forwards delivery failures to a verified fallback inbox.
 
-The Worker is intentionally thin. It does not parse MIME, inspect attachments, verify `.p7s`, call AI, access Supabase, or write monthly documents.
+The Worker is intentionally thin. It does not parse MIME, inspect attachments, verify signatures, call AI, access Supabase, or write monthly documents.
 
 ## Addressing
 
@@ -19,7 +19,7 @@ docs+<plant-id>@solaroid.app
 docs+bondas@solaroid.app
 ```
 
-The complete recipient regex comes from `EMAIL_RECIPIENT_PATTERN`, currently defined in `wrangler.jsonc`. It must be anchored with `^` and `$`; capture group 1 supplies the plant ID. Captured plant IDs are still independently restricted to `[a-z0-9_-]{1,59}`. The plant ID is routing metadata, not authorization. The downstream receiver must verify the signed document belongs to that plant before any write.
+The complete recipient regex comes from `EMAIL_RECIPIENT_PATTERN`, currently defined in `wrangler.jsonc`. It must be anchored with `^` and `$`; capture group 1 supplies the plant ID. Captured plant IDs are still independently restricted to `[a-z0-9_-]{1,59}`. The plant ID is routing metadata, not authorization. Current downstream intake extracts account/EIC values but does not yet match them against plant configuration and does not verify the signature.
 
 ## Downstream Contract
 
@@ -37,20 +37,20 @@ X-Solaroid-Raw-Size: <bytes>
 <original RFC 5322 message bytes>
 ```
 
-Any `2xx` response means the message was durably accepted. A duplicate should also return `2xx`. Redirects are disabled. The request times out after 15 seconds.
+Any `2xx` response means the recognized document was analyzed and stored. Repeated delivery replaces that plant/month document and also returns `2xx`. Redirects are disabled. The request times out after 60 seconds; downstream AI analysis has its own 45-second timeout.
 
-Do not point `EMAIL_INGEST_URL` at `/functions/v1/ingest`. That function accepts telemetry JSON or internal monthly-document multipart uploads, not raw MIME. A dedicated receiver must exist before the email route is activated.
+`EMAIL_INGEST_URL` points to the existing `/functions/v1/ingest` Edge Function. `message/rfc822` POST requests use the dedicated relay token. The receiver parses MIME generically, analyzes valid PDF candidates, and currently accepts only a recognized green-tariff report. One same-name suffix attachment may be retained as its signature without assuming a particular container format. Unknown messages return non-`2xx` and are forwarded to fallback. Raw email is not persisted.
 
 ## Configuration
 
 Runtime configuration:
 
-- `EMAIL_INGEST_URL`: dedicated HTTPS receiver.
+- `EMAIL_INGEST_URL`: `https://PROJECT.supabase.co/functions/v1/ingest`.
 - `EMAIL_INGEST_TOKEN`: receiver bearer credential used only by the Worker.
 - `FALLBACK_ADDRESS`: verified Cloudflare Email Routing destination.
 - `EMAIL_RECIPIENT_PATTERN`: non-secret, anchored recipient regex in `wrangler.jsonc`.
 
-The first three values are Worker secrets. Change `EMAIL_RECIPIENT_PATTERN` in `wrangler.jsonc` when the mailbox or domain changes; deployment exposes it through the Worker's `env` parameter.
+Keep `EMAIL_INGEST_URL` and `EMAIL_INGEST_TOKEN` as Worker secrets. `FALLBACK_ADDRESS` may be a secret or a dashboard text variable; `keep_vars` preserves dashboard-only variables during Wrangler deployments. Change `EMAIL_RECIPIENT_PATTERN` in `wrangler.jsonc` when the mailbox or domain changes; deployment exposes it through the Worker's `env` parameter.
 
 For local development, create an ignored `.dev.vars` from `.dev.vars.example`. Use only synthetic email data.
 
@@ -78,7 +78,7 @@ rtk curl --request POST \
   --data-binary '@test/fixtures/signed-document.eml'
 ```
 
-The committed fixture contains dummy PDF and `.p7s` bytes only. Never commit or send real receipts through a test receiver.
+The committed fixture contains dummy document and signature bytes only. Never commit or send real receipts through a test receiver.
 
 ## Deployment
 
@@ -90,10 +90,18 @@ rtk npm ci
 rtk npm run deploy
 rtk npx wrangler secret put EMAIL_INGEST_URL
 rtk npx wrangler secret put EMAIL_INGEST_TOKEN
-rtk npx wrangler secret put FALLBACK_ADDRESS
 ```
 
-The initial deploy creates the Worker without an active email route. Each `secret put` deploys a new version with that secret. Do not activate routing until all secrets and the receiver are ready.
+Set `FALLBACK_ADDRESS` as a verified dashboard text variable or with `wrangler secret put`. The initial deploy creates the Worker without an active email route. Each `secret put` deploys a new version with that secret. Do not activate routing until all configuration and the receiver are ready.
+
+Configure the same random `EMAIL_INGEST_TOKEN` value plus `OPENAI_API_KEY` as Supabase Edge Function secrets, then deploy `ingest`:
+
+```sh
+rtk npx supabase secrets set --env-file supabase/functions/.env.real
+rtk npx supabase functions deploy ingest
+```
+
+The ignored env file must contain `EMAIL_INGEST_TOKEN` and `OPENAI_API_KEY` alongside the existing function secrets. `OPENAI_MODEL` is optional and defaults to `gpt-4.1-mini`. Never reuse a plant ingest token.
 
 ### Deploy On Merge
 
@@ -129,19 +137,20 @@ Cloudflare documents the [`email()` handler](https://developers.cloudflare.com/e
 
 Logs contain only a failure category and, for downstream responses, HTTP status. They never contain plant IDs, addresses, subjects, attachment names, or message content.
 
-## Signed Document Policy
+## Document Intake
 
-The future receiver must preserve raw MIME, then process only verified CAdES enveloped `.p7s` documents:
+The receiver is generic at the MIME layer: unrelated attachment counts and formats are allowed. Valid PDF candidates are submitted together to OpenAI using inline file data, strict structured output, and `store: false`. The only recognized type is currently `green-tariff-receipt`.
 
-1. Verify the DSTU 4145 signature with Ukrainian-compatible trust tooling.
-2. Require a qualified signature, valid certificate chain/status, and qualified timestamp.
-3. Require the configured signer organization EDRPOU. The inspected supplier sample uses `42082379`; this value belongs in receiver configuration, never Worker code.
-4. Extract the embedded PDF only after successful verification.
-5. Match signed account, EIC, and month to `X-Solaroid-Plant-Id`.
-6. Deduplicate with SHA-256 of both `.p7s` and extracted PDF.
-7. Store original `.p7s` as signature evidence and extracted PDF for dashboard preview.
+For that type, analysis selects the report PDF and returns one coupled object containing type, month, and nested report data. One attachment whose filename starts with the selected PDF filename plus a suffix may be retained as its optional signature. The receiver does not assume its extension, MIME type, or container format. More than one matching attachment is rejected as ambiguous. Final paths are:
 
-Standalone PDFs, detached signatures, missing signatures, invalid signatures, and plant mismatches must be quarantined and must never replace a monthly document. Do not pin a person's name, certificate serial, or RNOKPP because personnel and certificates can rotate.
+```text
+<plant>/<document-type>/<YYYY-MM>
+<plant>/<document-type>/<YYYY-MM>-signature
+```
+
+Both objects preserve their original bytes and receive the extracted report as nested Supabase Storage `user_metadata.report`. `UPLOAD_TYPES` contains document types only; the signature suffix identifies a secondary asset. No raw email, staging object, or deferred promotion exists. Unknown, ambiguous, malformed, or failed analysis writes nothing and triggers Worker fallback.
+
+The receiver does not cryptographically verify signature attachments, extract embedded content, or prove that the separate PDF matches one. It also does not yet compare extracted account/EIC values with plant configuration.
 
 ## Mailbox Forwarding
 

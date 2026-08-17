@@ -21,10 +21,12 @@ denotest:
 	cd supabase/functions/ingest && \
 	SUPABASE_URL=http://localhost \
 	SUPABASE_SECRET_KEYS='{"default":"test"}' \
+	EMAIL_INGEST_TOKEN=test \
+	OPENAI_API_KEY=test \
 	DAM_API_USER=test \
 	DAM_API_PASS=test \
 	deno test \
-	--allow-env=SUPABASE_URL,SUPABASE_SECRET_KEYS,DAM_API_USER,DAM_API_PASS
+	--allow-env=SUPABASE_URL,SUPABASE_SECRET_KEYS,EMAIL_INGEST_TOKEN,OPENAI_API_KEY,OPENAI_MODEL,DAM_API_USER,DAM_API_PASS
 
 workercheck:
 	cd cloudflare/email-worker && npm run check

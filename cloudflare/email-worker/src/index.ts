@@ -1,4 +1,4 @@
-const RELAY_TIMEOUT_MS = 15_000
+const RELAY_TIMEOUT_MS = 60_000
 const PLANT_ID_PATTERN = /^[a-z0-9_-]{1,59}$/
 
 interface Env {

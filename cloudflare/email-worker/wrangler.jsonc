@@ -3,10 +3,23 @@
   "name": "solaroid-email-worker",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-17",
+  "keep_vars": true,
   "vars": {
     "EMAIL_RECIPIENT_PATTERN": "^docs\\+([a-z0-9_-]{1,59})@solaroid\\.app$"
   },
   "observability": {
-    "enabled": false
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
   }
 }
