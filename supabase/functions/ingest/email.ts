@@ -1,7 +1,7 @@
 import PostalMime, { type Attachment } from 'postal-mime'
-import { EMAIL_INGEST_MAX_SIZE, EMAIL_INGEST_TOKEN } from './config.ts'
+import { EMAIL_ALLOWED_SENDER_DOMAINS, EMAIL_INGEST_MAX_SIZE, EMAIL_INGEST_TOKEN } from './config.ts'
 import { analyzeEmail } from './email_analysis.ts'
-import { PayloadTooLargeError, UnauthorizedError } from './errors.ts'
+import { ForbiddenError, PayloadTooLargeError, UnauthorizedError } from './errors.ts'
 import { Hash } from './utils/crypto.ts'
 
 const PLANT_ID_PATTERN = /^[a-z0-9_-]{1,59}$/
@@ -39,6 +39,21 @@ function attachmentBytes(attachment: Attachment): ArrayBuffer {
   throw new Error('Invalid email attachment')
 }
 
+function isAllowedEnvelopeSender(sender: string, allowedDomains: ReadonlySet<string>): boolean {
+  const normalized = sender.trim().toLowerCase()
+  const separator = normalized.indexOf('@')
+
+  if (
+    separator <= 0 ||
+    separator !== normalized.lastIndexOf('@') ||
+    /[<>\s]/.test(normalized)
+  ) {
+    return false
+  }
+
+  return allowedDomains.has(normalized.slice(separator + 1))
+}
+
 function matchingSignature(attachments: readonly Attachment[], pdf: Attachment): Attachment | undefined {
   const prefix = `${attachmentName(pdf)}.`
   const signatures = attachments.filter((attachment) => (
@@ -64,14 +79,17 @@ async function receiveEmail(
   storage: Solaroid.Supabase.Email.Storage,
   expectedToken = EMAIL_INGEST_TOKEN,
   analyzer: Solaroid.Supabase.Email.Analyzer = analyzeEmail,
+  allowedSenderDomains: ReadonlySet<string> = EMAIL_ALLOWED_SENDER_DOMAINS,
 ): Promise<Solaroid.Supabase.Json> {
   if (!(await Hash.eq(bearer, expectedToken))) throw new UnauthorizedError()
 
   const plantId = requiredHeader(request, 'X-Solaroid-Plant-Id')
   const rawSizeValue = requiredHeader(request, 'X-Solaroid-Raw-Size')
+  const sender = requiredHeader(request, 'X-Solaroid-Envelope-From')
 
-  requiredHeader(request, 'X-Solaroid-Envelope-From')
   requiredHeader(request, 'X-Solaroid-Recipient')
+
+  if (!isAllowedEnvelopeSender(sender, allowedSenderDomains)) throw new ForbiddenError()
 
   if (!PLANT_ID_PATTERN.test(plantId) || !RAW_SIZE_PATTERN.test(rawSizeValue)) {
     throw new Error('Invalid email relay metadata')
@@ -141,6 +159,7 @@ async function receiveEmail(
 }
 
 export {
+  isAllowedEnvelopeSender,
   isEmailRelayRequest,
   receiveEmail,
 }

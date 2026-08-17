@@ -1,5 +1,5 @@
 import { EMAIL_INGEST_MAX_SIZE } from './config.ts'
-import { isEmailRelayRequest, receiveEmail } from './email.ts'
+import { isAllowedEnvelopeSender, isEmailRelayRequest, receiveEmail } from './email.ts'
 
 const RELAY_TOKEN = 'relay-secret'
 const PDF = new TextEncoder().encode('%PDF-1.7\n%%EOF\n')
@@ -274,6 +274,43 @@ Deno.test('email receiver requires the dedicated relay token', async () => {
   )
 
   if (storage.documents.length) throw new Error('unauthorized document was stored')
+})
+
+Deno.test('email receiver accepts only exact configured envelope sender domains', async () => {
+  const allowedDomains = new Set(['supplier.example', 'testing.example'])
+
+  if (!isAllowedEnvelopeSender('Reports@Supplier.Example', allowedDomains)) {
+    throw new Error('configured sender domain rejected')
+  }
+
+  for (const sender of [
+    'reports@sub.supplier.example',
+    'reports@supplier.example.attacker.test',
+    'reports@attacker-supplier.example',
+    'reports@@supplier.example',
+    'Reports <reports@supplier.example>',
+  ]) {
+    if (isAllowedEnvelopeSender(sender, allowedDomains)) throw new Error(`invalid sender accepted: ${sender}`)
+  }
+
+  let analyzed = false
+
+  await expectFailure(
+    () => receiveEmail(
+      request(mime(defaultAttachments()), { sender: 'reports@attacker.test' }),
+      RELAY_TOKEN,
+      new FakeStorage(),
+      RELAY_TOKEN,
+      () => {
+        analyzed = true
+        return Promise.resolve(knownAnalysis())
+      },
+      allowedDomains,
+    ),
+    'unknown sender domain accepted',
+  )
+
+  if (analyzed) throw new Error('unknown sender reached document analysis')
 })
 
 Deno.test('email receiver rejects invalid relay metadata and body size', async () => {

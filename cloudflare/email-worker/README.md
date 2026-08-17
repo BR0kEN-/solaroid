@@ -39,7 +39,7 @@ X-Solaroid-Raw-Size: <bytes>
 
 Any `2xx` response means the recognized document was analyzed and stored. Repeated delivery replaces that plant/month document and also returns `2xx`. Redirects are disabled. The request times out after 60 seconds; downstream AI analysis has its own 45-second timeout.
 
-`EMAIL_INGEST_URL` points to the existing `/functions/v1/ingest` Edge Function. `message/rfc822` POST requests use the dedicated relay token. The receiver parses MIME generically, analyzes valid PDF candidates, and currently accepts only a recognized green-tariff report. One same-name suffix attachment may be retained as its signature without assuming a particular container format. Unknown messages return non-`2xx` and are forwarded to fallback. Raw email is not persisted.
+`EMAIL_INGEST_URL` points to the existing `/functions/v1/ingest` Edge Function. `message/rfc822` POST requests use the dedicated relay token. The receiver applies its own sender policy before parsing MIME or analyzing valid PDF candidates, and currently accepts only a recognized green-tariff report. One same-name suffix attachment may be retained as its signature without assuming a particular container format. Unknown messages return non-`2xx` and are forwarded to fallback. Raw email is not persisted.
 
 ## Configuration
 
@@ -94,14 +94,14 @@ rtk npx wrangler secret put EMAIL_INGEST_TOKEN
 
 Set `FALLBACK_ADDRESS` as a verified dashboard text variable or with `wrangler secret put`. The initial deploy creates the Worker without an active email route. Each `secret put` deploys a new version with that secret. Do not activate routing until all configuration and the receiver are ready.
 
-Configure the same random `EMAIL_INGEST_TOKEN` value plus `OPENAI_API_KEY` as Supabase Edge Function secrets, then deploy `ingest`:
+Configure the same random `EMAIL_INGEST_TOKEN` value plus the receiver secrets documented in the root README as Supabase Edge Function secrets, then deploy `ingest`:
 
 ```sh
 rtk npx supabase secrets set --env-file supabase/functions/.env.real
 rtk npx supabase functions deploy ingest
 ```
 
-The ignored env file must contain `EMAIL_INGEST_TOKEN` and `OPENAI_API_KEY` alongside the existing function secrets. `OPENAI_MODEL` is optional and defaults to `gpt-4.1-mini`. Never reuse a plant ingest token.
+The ignored env file must contain `EMAIL_INGEST_TOKEN` alongside the receiver's other function secrets. Never reuse a plant ingest token.
 
 ### Deploy On Merge
 

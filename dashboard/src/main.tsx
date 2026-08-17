@@ -5969,7 +5969,7 @@ function DataTable({
   );
   return (
     <div className="table-wrap">
-      <table>
+      <table className={period === "monthly" ? "monthly-data-table" : undefined}>
         <thead>
           <tr>
             <Th label={period === "daily" ? t.tableDay : t.month} />

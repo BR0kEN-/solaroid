@@ -7,6 +7,7 @@ function requiredVar(name: string): string | never {
 const SUPABASE_URL = requiredVar('SUPABASE_URL')
 const { default: SUPABASE_SERVICE_ROLE_KEY } = JSON.parse(requiredVar('SUPABASE_SECRET_KEYS'))
 const EMAIL_INGEST_TOKEN = requiredVar('EMAIL_INGEST_TOKEN')
+const EMAIL_ALLOWED_SENDER_DOMAINS = requiredVar('EMAIL_ALLOWED_SENDER_DOMAINS').split(',').map((domain) => domain.trim().toLowerCase())
 const OPENAI_API_KEY = requiredVar('OPENAI_API_KEY')
 const OPENAI_MODEL = Deno.env.get('OPENAI_MODEL') || 'gpt-4.1-mini'
 const DAM_API_AUTH = `Basic ${btoa(`${requiredVar('DAM_API_USER')}:${requiredVar('DAM_API_PASS')}`)}`
@@ -24,6 +25,7 @@ export {
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
   EMAIL_INGEST_TOKEN,
+  EMAIL_ALLOWED_SENDER_DOMAINS,
   OPENAI_API_KEY,
   OPENAI_MODEL,
   DAM_API_AUTH,

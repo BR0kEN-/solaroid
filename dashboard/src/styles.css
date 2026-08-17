@@ -2229,23 +2229,22 @@ h2 {
 }
 
 .month-documents-cell {
-  padding: 0;
+  padding: 12px 14px;
 }
 
 .month-documents-cell-content {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 46px;
-  padding-right: 14px;
+  gap: 6px;
+  width: 100%;
+  min-height: 22px;
 }
 
 .month-documents-button {
   display: inline-flex;
   align-items: center;
-  min-height: 46px;
-  padding: 12px 0 12px 14px;
+  min-height: 22px;
+  padding: 0;
   color: inherit;
   background: transparent;
   border: 0;
@@ -2295,6 +2294,7 @@ h2 {
 .month-utility-info {
   position: relative;
   z-index: 1;
+  margin-left: auto;
 }
 
 .documents-modal-body {
@@ -2941,6 +2941,10 @@ table {
   min-width: 1220px;
   border-collapse: collapse;
   background: var(--panel);
+}
+
+.monthly-data-table th:first-child {
+  width: 1%;
 }
 
 th,
