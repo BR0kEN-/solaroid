@@ -1,0 +1,3 @@
+EMAIL_INGEST_URL=https://PROJECT.supabase.co/functions/v1/email-ingest
+EMAIL_INGEST_TOKEN=replace-me
+FALLBACK_ADDRESS=verified-fallback@example.com

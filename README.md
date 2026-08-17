@@ -8,6 +8,7 @@ The name is `Solar` + `ROI` + `d`.
 
 ```text
 solaroid/
+  cloudflare/email-worker/     Raw signed-document email relay
   dashboard/                  React/Vite dashboard, built in HA or portal mode
   supabase/
     migrations/               Supabase schema migrations
@@ -22,6 +23,11 @@ Main dashboard files:
 - `dashboard/src/domain/types.ts`: shared dashboard domain interfaces.
 - `dashboard/src/config.ts`: Vite env config.
 - `dashboard/src/styles.css`: global dashboard styling.
+
+Cloudflare Email Worker:
+
+- `cloudflare/email-worker/src/index.ts`: validates plant aliases and relays raw RFC 5322 messages.
+- `cloudflare/email-worker/README.md`: routing, secrets, deployment, downstream contract, and signed-document policy.
 
 Main Edge Function files:
 
@@ -42,6 +48,7 @@ Home Assistant posts sensor snapshots to the Supabase Edge Function:
 Home Assistant -> POST /functions/v1/ingest -> Supabase tables
 Portal mode -> Supabase Auth -> GET /functions/v1/ingest -> Supabase tables
 HA mode -> GET /functions/v1/ingest -> Supabase tables
+Mailbox -> Cloudflare Email Worker -> dedicated signed-document receiver (not implemented yet)
 ```
 
 Portal mode is intended for `https://solaroid.app`. HA mode remains static and can still be served from Home Assistant, Cloudflare, or any static host. Neither mode stores Supabase service credentials.
@@ -65,7 +72,7 @@ Important auth model:
 
 - Supabase Auth users can read assigned plants only.
 - Supabase Auth users can never write ingestion data.
-- Supabase Auth users can upload or replace green-tariff documents for plants they can read; this does not grant ingestion-data write access.
+- Dashboard users can list and open green-tariff documents for plants they can read, but cannot upload or replace them.
 - Raw access tokens are still used for Home Assistant ingestion.
 - Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
 - Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
@@ -183,10 +190,13 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026
 
 ### Monthly documents
 
-Selecting a month in the monthly data table opens its document manager. Users with access to the plant can upload or replace the monthly green-tariff receipt. The regular monthly payload includes matching files for each month. Daily rows do not open the document manager.
+Selecting a month in the monthly data table opens its read-only document manager. Existing green-tariff documents can be opened through a short-lived signed URL; missing documents show an empty state. The regular monthly payload includes matching files for each month. Daily rows do not open the document manager.
+
+The existing multipart write remains available to trusted internal automation using the plant's raw ingest token. The dashboard does not expose it:
 
 ```http
 POST /functions/v1/ingest
+Authorization: Bearer RAW_TOKEN_VALUE
 Content-Type: multipart/form-data
 
 month=YYYY-MM
@@ -194,7 +204,15 @@ type=green-tariff-receipt
 file=<PDF>
 ```
 
-The upload uses the authenticated dashboard token, accepts files up to 20 MiB, and stores them in the private `month-docs` bucket. The storage path is `<plant>/<type>/<month>`, so replacing a document overwrites the existing object. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function validates plant access and returns a signed URL valid for 60 seconds. The original email/document should remain the legal archive; Solaroid stores a convenient private copy for the monthly view.
+The internal upload accepts files up to 20 MiB and stores them in the private `month-docs` bucket. The storage path is `<plant>/<type>/<month>`, so replacing a document overwrites the existing object. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function validates plant access and returns a signed URL valid for 60 seconds.
+
+### Signed-document email routing
+
+`cloudflare/email-worker` receives `docs+<plant-id>@solaroid.app` through Cloudflare Email Routing and streams the complete email to a dedicated authenticated receiver. It intentionally does not parse MIME or verify `.p7s`, preserving the original signed container for downstream validation.
+
+The receiver is not part of the current implementation. Do not point the Worker at `/functions/v1/ingest`, and do not activate the production route until the receiver exists. Future acceptance requires a verified CAdES enveloped `.p7s`, a configured signer EDRPOU, and signed account/EIC/month fields matching the routed plant. Original `.p7s` and extracted PDF will both be retained.
+
+Enable Cloudflare subaddressing and route `docs@solaroid.app` to the Worker. Each mailbox forwards future supplier messages to its plant alias. Historical read messages must be forwarded individually; Cloudflare cannot pull mailbox history. Full setup, failure behavior, privacy rules, and deployment commands are in `cloudflare/email-worker/README.md`.
 
 Current read behavior:
 
@@ -376,6 +394,16 @@ Edge Function:
 ```sh
 rtk make denocheck
 rtk make denotest
+```
+
+Cloudflare Email Worker:
+
+```sh
+cd cloudflare/email-worker
+rtk npm ci
+rtk npm run check
+rtk npm run dev
+rtk npm run deploy
 ```
 
 Agent/LLM rule: do not edit Supabase Edge Function files unless the user explicitly permits it after the agent explains why the edit is necessary. Reading, reviewing, and running `rtk deno check index.ts` are allowed when relevant.

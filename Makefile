@@ -5,7 +5,8 @@ venv:
 
 i:
 	cd addon && pip install .[dev]
-	cd dashboard && npm install
+	cd dashboard && npm ci
+	cd cloudflare/email-worker && npm ci
 
 pytest:
 	pytest addon/tests -vvv --cov-report term
@@ -25,4 +26,7 @@ denotest:
 	deno test \
 	--allow-env=SUPABASE_URL,SUPABASE_SECRET_KEYS,DAM_API_USER,DAM_API_PASS
 
-ci: pytest nodetest denocheck denotest
+workercheck:
+	cd cloudflare/email-worker && npm run check
+
+ci: pytest nodetest denocheck denotest workercheck

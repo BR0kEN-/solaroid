@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "solaroid-email-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-17",
+  "vars": {
+    "EMAIL_RECIPIENT_PATTERN": "^docs\\+([a-z0-9_-]{1,59})@solaroid\\.app$"
+  },
+  "observability": {
+    "enabled": false
+  }
+}
