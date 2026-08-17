@@ -1,5 +1,10 @@
 import PostalMime, { type Attachment } from 'postal-mime'
-import { EMAIL_ALLOWED_SENDER_DOMAINS, EMAIL_INGEST_MAX_SIZE, EMAIL_INGEST_TOKEN } from './config.ts'
+import {
+  EMAIL_ALLOWED_SENDER_ADDRESSES,
+  EMAIL_ALLOWED_SENDER_DOMAINS,
+  EMAIL_INGEST_MAX_SIZE,
+  EMAIL_INGEST_TOKEN,
+} from './config.ts'
 import { analyzeEmail } from './email_analysis.ts'
 import { ForbiddenError, PayloadTooLargeError, UnauthorizedError } from './errors.ts'
 import { Hash } from './utils/crypto.ts'
@@ -39,7 +44,11 @@ function attachmentBytes(attachment: Attachment): ArrayBuffer {
   throw new Error('Invalid email attachment')
 }
 
-function isAllowedEnvelopeSender(sender: string, allowedDomains: ReadonlySet<string>): boolean {
+function isAllowedEnvelopeSender(
+  sender: string,
+  allowedDomains: ReadonlySet<string>,
+  allowedAddresses: ReadonlySet<string> = new Set(),
+): boolean {
   const normalized = sender.trim().toLowerCase()
   const separator = normalized.indexOf('@')
 
@@ -51,7 +60,7 @@ function isAllowedEnvelopeSender(sender: string, allowedDomains: ReadonlySet<str
     return false
   }
 
-  return allowedDomains.has(normalized.slice(separator + 1))
+  return allowedAddresses.has(normalized) || allowedDomains.has(normalized.slice(separator + 1))
 }
 
 function matchingSignature(attachments: readonly Attachment[], pdf: Attachment): Attachment | undefined {
@@ -80,6 +89,7 @@ async function receiveEmail(
   expectedToken = EMAIL_INGEST_TOKEN,
   analyzer: Solaroid.Supabase.Email.Analyzer = analyzeEmail,
   allowedSenderDomains: ReadonlySet<string> = EMAIL_ALLOWED_SENDER_DOMAINS,
+  allowedSenderAddresses: ReadonlySet<string> = EMAIL_ALLOWED_SENDER_ADDRESSES,
 ): Promise<Solaroid.Supabase.Json> {
   if (!(await Hash.eq(bearer, expectedToken))) throw new UnauthorizedError()
 
@@ -89,7 +99,7 @@ async function receiveEmail(
 
   requiredHeader(request, 'X-Solaroid-Recipient')
 
-  if (!isAllowedEnvelopeSender(sender, allowedSenderDomains)) throw new ForbiddenError()
+  if (!isAllowedEnvelopeSender(sender, allowedSenderDomains, allowedSenderAddresses)) throw new ForbiddenError()
 
   if (!PLANT_ID_PATTERN.test(plantId) || !RAW_SIZE_PATTERN.test(rawSizeValue)) {
     throw new Error('Invalid email relay metadata')

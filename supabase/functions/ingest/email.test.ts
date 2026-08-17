@@ -276,21 +276,29 @@ Deno.test('email receiver requires the dedicated relay token', async () => {
   if (storage.documents.length) throw new Error('unauthorized document was stored')
 })
 
-Deno.test('email receiver accepts only exact configured envelope sender domains', async () => {
+Deno.test('email receiver accepts only exact configured envelope senders', async () => {
   const allowedDomains = new Set(['supplier.example', 'testing.example'])
+  const allowedAddresses = new Set(['tester@gmail.com'])
 
-  if (!isAllowedEnvelopeSender('Reports@Supplier.Example', allowedDomains)) {
+  if (!isAllowedEnvelopeSender('Reports@Supplier.Example', allowedDomains, allowedAddresses)) {
     throw new Error('configured sender domain rejected')
   }
 
+  if (!isAllowedEnvelopeSender('Tester@Gmail.com', allowedDomains, allowedAddresses)) {
+    throw new Error('configured sender address rejected')
+  }
+
   for (const sender of [
+    'other@gmail.com',
     'reports@sub.supplier.example',
     'reports@supplier.example.attacker.test',
     'reports@attacker-supplier.example',
     'reports@@supplier.example',
     'Reports <reports@supplier.example>',
   ]) {
-    if (isAllowedEnvelopeSender(sender, allowedDomains)) throw new Error(`invalid sender accepted: ${sender}`)
+    if (isAllowedEnvelopeSender(sender, allowedDomains, allowedAddresses)) {
+      throw new Error(`invalid sender accepted: ${sender}`)
+    }
   }
 
   let analyzed = false
@@ -306,8 +314,9 @@ Deno.test('email receiver accepts only exact configured envelope sender domains'
         return Promise.resolve(knownAnalysis())
       },
       allowedDomains,
+      allowedAddresses,
     ),
-    'unknown sender domain accepted',
+    'unknown sender accepted',
   )
 
   if (analyzed) throw new Error('unknown sender reached document analysis')
