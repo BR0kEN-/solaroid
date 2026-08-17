@@ -19,6 +19,16 @@
 !addon/tests/*.py
 !addon/tests/__fixtures__/*.json
 
+!cloudflare/email-worker/.dev.vars.example
+!cloudflare/email-worker/.node-version
+!cloudflare/email-worker/README.md
+!cloudflare/email-worker/package*.json
+!cloudflare/email-worker/tsconfig.json
+!cloudflare/email-worker/wrangler.jsonc
+!cloudflare/email-worker/src/**/*.ts
+!cloudflare/email-worker/test/**/*.ts
+!cloudflare/email-worker/test/fixtures/*.eml
+
 !dashboard/deploy.sh
 !dashboard/index.html
 !dashboard/package*.json
@@ -36,5 +46,7 @@
 **/.DS_Store
 /.idea/
 /addon/src/*.egg-info/
+/cloudflare/email-worker/.dev.vars
+/cloudflare/email-worker/node_modules/
 /dashboard/dist/
 /dashboard/node_modules/

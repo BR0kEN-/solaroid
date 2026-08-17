@@ -14,11 +14,10 @@ import {
   LogOut,
   RefreshCw,
   SunMedium,
-  Upload,
   WalletCards,
   X,
 } from "lucide-react";
-import { configureDashboardAccess, getMonthDocumentUrl, loadDashboardData, loadPlantData, loadPlantGranularity, uploadMonthReceipt } from "./data/supabase";
+import { configureDashboardAccess, getMonthDocumentUrl, loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
 import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
@@ -336,13 +335,10 @@ const i18n = {
     currency: "Currency",
     documents: "Documents",
     greenTariffReceipt: "Green tariff receipt",
-    addDocument: "Add",
-    replaceDocument: "Replace",
     openGreenTariffReceipt: "Open green tariff receipt",
-    documentPdfOnly: "PDF only, up to 20 MB",
+    documentMissing: "No document",
     documentOpenFailed: "Document could not be opened.",
     documentPopupBlocked: "Allow popups to open this document.",
-    documentUploading: "Uploading",
     tapBar: "Tap a bar to inspect the value",
     tapBarOrDot: "Tap a bar or dot to inspect the value",
   },
@@ -524,13 +520,10 @@ const i18n = {
     currency: "Валюта",
     documents: "Документи",
     greenTariffReceipt: "Акт за зеленим тарифом",
-    addDocument: "Додати",
-    replaceDocument: "Замінити",
     openGreenTariffReceipt: "Відкрити акт за зеленим тарифом",
-    documentPdfOnly: "Тільки PDF, до 20 МБ",
+    documentMissing: "Документа немає",
     documentOpenFailed: "Не вдалося відкрити документ.",
     documentPopupBlocked: "Дозвольте спливні вікна, щоб відкрити документ.",
-    documentUploading: "Завантаження",
     tapBar: "Торкніться стовпчика, щоб побачити значення",
     tapBarOrDot: "Торкніться стовпчика або точки, щоб побачити значення",
   },
@@ -1607,8 +1600,6 @@ function App({
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
   const [documentsModalRow, setDocumentsModalRow] = useState<MonthRow | null>(null);
-  const [receiptOverrides, setReceiptOverrides] = useState<Record<string, MonthReceipt>>({});
-  const [receiptBusy, setReceiptBusy] = useState(false);
   const [receiptOpening, setReceiptOpening] = useState(false);
   const [receiptError, setReceiptError] = useState("");
   const [lang, setLang] = useState<Lang>(initialLang);
@@ -1730,13 +1721,6 @@ function App({
   const rows = useMemo(() => {
     return filteredMonthlyRows(dataState.rows, range, rangeFromMonth, rangeToMonth);
   }, [dataState.rows, range, rangeFromMonth, rangeToMonth]);
-  const rowsWithReceipts = useMemo(
-    () => rows.map((row) => {
-      const receipt = receiptOverrides[monthKey(row.date)]
-      return receipt ? { ...row, receipt } : row
-    }),
-    [receiptOverrides, rows],
-  );
   const productionProjection = dataState.projection ?? null;
   const dailyDateBounds = useMemo(
     () => [dataState.dailyRows[0] ? dateKey(dataState.dailyRows[0].date) : "", dataState.dailyRows.at(-1) ? dateKey(dataState.dailyRows.at(-1)!.date) : ""] as const,
@@ -1769,29 +1753,6 @@ function App({
       setReceiptError(error instanceof Error ? error.message : t.documentOpenFailed);
     } finally {
       setReceiptOpening(false);
-    }
-  };
-
-  const uploadReceipt = async (file: File) => {
-    if (!documentsModalRow) return;
-
-    setReceiptBusy(true);
-    setReceiptError("");
-    try {
-      const month = monthKey(documentsModalRow.date);
-      await uploadMonthReceipt(month, file);
-      const receipt: MonthReceipt = {
-        path: `${dataState.plantId}/green-tariff-receipt/${month}`,
-        filename: month,
-        contentType: file.type || "application/pdf",
-        sizeBytes: file.size,
-      };
-      setReceiptOverrides((current) => ({ ...current, [month]: receipt }));
-      setDocumentsModalRow((current) => current ? { ...current, receipt } : current);
-    } catch (error) {
-      setReceiptError(error instanceof Error ? error.message : "Receipt upload failed");
-    } finally {
-      setReceiptBusy(false);
     }
   };
 
@@ -2733,7 +2694,7 @@ function App({
             <DataTableSkeleton />
           ) : (
             <DataTable
-              rows={rowsWithReceipts}
+              rows={rows}
               period="monthly"
               t={t}
               currency={currency}
@@ -2788,12 +2749,10 @@ function App({
             row={documentsModalRow}
             document={documentsModalRow.receipt ?? null}
             t={t}
-            isBusy={receiptBusy}
             isOpening={receiptOpening}
             error={receiptError}
             onClose={() => setDocumentsModalRow(null)}
             onOpen={() => documentsModalRow.receipt && void openReceipt(documentsModalRow.receipt)}
-            onUpload={uploadReceipt}
           />
         )}
         <footer className="dash-footer">
@@ -6179,42 +6138,19 @@ function DocumentsModal({
   row,
   document,
   t,
-  isBusy,
   isOpening,
   error,
   onClose,
   onOpen,
-  onUpload,
 }: {
   readonly row: MonthRow;
   readonly document: MonthReceipt | null;
   readonly t: Record<string, string>;
-  readonly isBusy: boolean;
   readonly isOpening: boolean;
   readonly error: string;
   readonly onClose: () => void;
   readonly onOpen: () => void;
-  readonly onUpload: (file: File) => Promise<void>;
 }) {
-  const [localError, setLocalError] = useState("");
-  const inputId = `document-file-${monthKey(row.date)}`;
-
-  const chooseFile = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const next = event.target.files?.[0] ?? null;
-    event.target.value = "";
-    setLocalError("");
-    if (!next) return;
-    if (!next.name.toLowerCase().endsWith(".pdf") || (next.type && next.type !== "application/pdf")) {
-      setLocalError(t.documentPdfOnly);
-      return;
-    }
-    if (next.size <= 0 || next.size > 20 * 1024 * 1024) {
-      setLocalError(t.documentPdfOnly);
-      return;
-    }
-    void onUpload(next);
-  };
-
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -6228,7 +6164,7 @@ function DocumentsModal({
           <div>
             <h2 id="documents-modal-title">{t.documents} · {row.month}</h2>
           </div>
-          <button type="button" className="icon-button info-modal-close-top" onClick={onClose} aria-label={t.close} disabled={isBusy || isOpening}>
+          <button type="button" className="icon-button info-modal-close-top" onClick={onClose} aria-label={t.close} disabled={isOpening}>
             <X size={18} />
           </button>
         </div>
@@ -6241,7 +6177,7 @@ function DocumentsModal({
                   type="button"
                   className="document-title-button"
                   onClick={onOpen}
-                  disabled={isBusy || isOpening}
+                  disabled={isOpening}
                   aria-label={t.openGreenTariffReceipt}
                 >
                   <span>{t.greenTariffReceipt}</span>
@@ -6250,18 +6186,10 @@ function DocumentsModal({
               ) : (
                 <strong>{t.greenTariffReceipt}</strong>
               )}
-              <small>{document ? `${formatFileSize(document.sizeBytes)} · ${document.contentType}` : t.documentPdfOnly}</small>
+              <small>{document ? `${formatFileSize(document.sizeBytes)} · ${document.contentType}` : t.documentMissing}</small>
             </span>
-            <label
-              className="ghost-button document-file-picker"
-              aria-disabled={isBusy || isOpening}
-            >
-              <Upload size={16} />
-              {isBusy ? t.documentUploading : document ? t.replaceDocument : t.addDocument}
-              <input id={inputId} type="file" accept="application/pdf,.pdf" onChange={chooseFile} disabled={isBusy || isOpening} />
-            </label>
           </div>
-          {localError || error ? <p className="document-error">{localError || error}</p> : null}
+          {error ? <p className="document-error">{error}</p> : null}
         </div>
       </section>
     </div>

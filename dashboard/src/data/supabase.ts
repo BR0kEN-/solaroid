@@ -86,19 +86,6 @@ export function configureDashboardAccess(next: DashboardAccess) {
   dashboardAccess = next
 }
 
-export async function uploadMonthReceipt(month: string, file: File): Promise<void> {
-  const url = new URL(apiUrl())
-  const body = new FormData()
-  body.append('month', month)
-  body.append('type', 'green-tariff-receipt')
-  body.append('file', file)
-
-  await documentRequest(url, {
-    method: 'POST',
-    body,
-  })
-}
-
 export async function getMonthDocumentUrl(path: string): Promise<string> {
   const url = new URL(apiUrl())
   const currentPlantId = plantId()

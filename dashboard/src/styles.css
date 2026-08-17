@@ -2258,7 +2258,6 @@ h2 {
 }
 
 .month-documents-button:focus-visible,
-.document-file-picker:focus-within,
 .document-title-button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -2319,24 +2318,6 @@ h2 {
 .document-item small {
   color: var(--muted);
   font-size: 0.78rem;
-}
-
-.document-item input[type="file"] {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.document-file-picker {
-  flex: 0 0 auto;
-  gap: 7px;
-}
-
-.document-file-picker[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .document-title-button {
@@ -3481,10 +3462,6 @@ tbody tr:hover {
     padding-top: 12px;
     margin-top: 12px;
     border-top: 1px solid color-mix(in srgb, var(--border), transparent 18%);
-  }
-
-  .document-file-picker {
-    min-height: 42px;
   }
 
   .dash-footer {
