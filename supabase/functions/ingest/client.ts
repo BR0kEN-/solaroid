@@ -149,35 +149,36 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     if (monthError) throw new Error('Month lookup failed', { cause: monthError })
     if (!monthRow) throw new Error(`${month} is not available for this plant`)
 
-    const upload = async (
-      content: ArrayBuffer,
-      contentType: string,
-      asset: 'document' | 'signature',
-    ) => {
-      const suffix = asset === 'signature' ? '-signature' : ''
-      const { error } = await this.client.storage
-        .from('month-docs')
-        .upload(
-          `${plantId}/${type}/${month}${suffix}`,
-          new Uint8Array(content),
-          {
-            contentType,
-            upsert: true,
-            metadata: {
-              asset,
-              month,
-              plantId,
-              report,
-              type,
-            },
-          },
-        )
+    const uploads: [ArrayBuffer, string, { suffix?: string, metadata?: object }][] = [
+      [pdf, 'application/pdf', { metadata: { report } }],
+    ]
 
-      if (error) throw new Error(`${asset} upload failed`, { cause: error })
+    if (signature) {
+      uploads.push([signature.content, signature.contentType, { suffix: '-signature' }])
     }
 
-    if (signature) await upload(signature.content, signature.contentType, 'signature')
-    await upload(pdf, 'application/pdf', 'document')
+    await Promise.all(
+      uploads.map(async ([content, contentType, options]) => {
+        const name = `${plantId}/${type}/${month}${options?.suffix || ''}`
+        const { error } = await this.client.storage
+          .from('month-docs')
+          .upload(
+            name,
+            new Uint8Array(content),
+            {
+              contentType,
+              upsert: true,
+              metadata: {
+                month,
+                plantId,
+                ...(options?.metadata || {}),
+              },
+            },
+          )
+
+        if (error) throw new Error(`${name} upload failed`, { cause: error })
+      })
+    )
   }
 
   async getUploadedFiles(
@@ -190,14 +191,19 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
 
     const files: Solaroid.Supabase.Upload.File[] = []
 
-    for (const file of data || []) {
-      if (file.user_metadata.asset === 'signature') continue
+    for (const { user_metadata, ...file } of data || []) {
+      if (file.name.endsWith('-signature')) continue
+
+      const [, type] = file.name.split('/')
+      // It's known.
+      delete user_metadata.plantId
 
       files.push({
+        type,
         path: file.name,
-        type: file.user_metadata.type as Solaroid.Supabase.Upload.Type,
         size: Number(file.metadata.size),
         mime: String(file.metadata.mimetype),
+        metadata: user_metadata,
       })
     }
 
