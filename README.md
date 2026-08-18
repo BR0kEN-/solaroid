@@ -74,7 +74,8 @@ Important auth model:
 
 - Supabase Auth users can read assigned plants only.
 - Supabase Auth users can never write ingestion data.
-- Dashboard users can list and open green-tariff documents for plants they can read, but cannot upload or replace them.
+- Dashboard users can list and open green-tariff documents only for the token's primary `plant_id`, but cannot upload or replace them.
+- Extra comparison/read access never grants document listing or signed-URL access.
 - Raw access tokens are still used for Home Assistant ingestion.
 - Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
 - Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
@@ -192,9 +193,9 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026
 
 ### Monthly documents
 
-Selecting a month in the monthly data table opens its read-only document manager. A green-tariff document has compact actions beneath its size and MIME type. `View` opens the in-app PDF viewer; `Details` opens the validated structured report extracted during email ingestion. The document title itself is not interactive. Missing documents show an empty state, and documents without valid report metadata omit `Details`. The regular monthly payload includes matching files for each month. Daily rows do not open the document manager.
+Selecting a month in the monthly data table opens its read-only document manager. A green-tariff document has compact actions beneath its size and MIME type. `View` opens the in-app PDF viewer; `Details` opens the validated structured report extracted during email ingestion. The document title itself is not interactive. Missing documents show an empty state, and documents without valid report metadata omit `Details`. The regular monthly payload includes matching files only when the requested plant is the token's primary `plant_id`; comparison plant payloads never include files. Daily rows do not open the document manager.
 
-Document writes are email-managed. The dashboard and regular plant-token ingestion route cannot add or replace files. Accepted document and optional signature objects are limited to 20 MiB each and stored in the private `month-docs` bucket. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function validates plant access and returns a signed URL valid for 60 seconds.
+Document writes are email-managed. The dashboard and regular plant-token ingestion route cannot add or replace files. Accepted document and optional signature objects are limited to 20 MiB each and stored in the private `month-docs` bucket. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function requires the requested plant and storage path to match the token's primary `plant_id`, then returns a signed URL valid for 60 seconds.
 
 ### Signed-document email routing
 

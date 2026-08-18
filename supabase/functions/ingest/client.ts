@@ -243,7 +243,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     if (error) throw new Error('DAM price upsert failed', { cause: error })
   }
 
-  async getPlant(plantId: Solaroid.Supabase.Plant.Id) {
+  async getPlant(plantId: Solaroid.Supabase.Plant.Id, includeFiles = true) {
     const plant = await this.#getPlantMetadata(plantId)
     const [days, months, tariffs] = await Promise.all(
       ['days', 'months', 'month_tariffs'].map((table) => this.#getPlantRows(plantId, table)),
@@ -254,7 +254,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
       days,
       tariffs,
       projection: await this.#getPvgisProjection(plant),
-      months: await Promise.all(
+      months: includeFiles ? await Promise.all(
         months.map(async (row) => {
           // @ts-expect-error TS18046
           const [y, m] = row.date.split('-')
@@ -264,7 +264,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
             files: await this.getUploadedFiles(plantId, `${y}-${m}`),
           }
         }),
-      ),
+      ) : months,
     }
   }
 
