@@ -129,6 +129,24 @@ Deno.test('OpenAI analyzer preserves unknown document classification', async () 
   if (analysis.document) throw new Error('unknown document was accepted')
 })
 
+Deno.test('OpenAI analyzer keeps settlement month independent from act date', async () => {
+  const analyzer = new OpenAIEmailAnalyzer({
+    apiKey: 'test',
+    fetcher: () => Promise.resolve(apiResponse(knownOutput({
+      month: '2026-05',
+      report: {
+        ...REPORT,
+        actDate: '2026-06-03',
+      },
+    }))),
+  })
+
+  const analysis = await analyzer.analyze(input())
+
+  if (analysis.document?.month !== '2026-05') throw new Error('settlement month changed')
+  if (analysis.document.report.actDate !== '2026-06-03') throw new Error('act date changed')
+})
+
 Deno.test('OpenAI analyzer skips API call without PDF candidates', async () => {
   let called = false
   const analyzer = new OpenAIEmailAnalyzer({
@@ -148,7 +166,13 @@ Deno.test('OpenAI analyzer skips API call without PDF candidates', async () => {
 Deno.test('OpenAI analyzer rejects malformed or inconsistent results', async () => {
   const outputs = [
     { ...knownOutput(), attachmentIndex: 5 },
-    knownOutput({ month: '2026-06' }),
+    knownOutput({ month: '1926-02' }),
+    knownOutput({
+      report: {
+        ...REPORT,
+        actDate: '1926-02-28',
+      },
+    }),
     knownOutput({ report: null }),
     knownOutput({
       report: {

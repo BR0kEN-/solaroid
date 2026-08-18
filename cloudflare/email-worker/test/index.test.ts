@@ -75,7 +75,7 @@ describe('email handler', () => {
       expect(headers.get('X-Solaroid-Recipient')).toBe('docs+bondas@solaroid.app')
       expect(headers.get('X-Solaroid-Envelope-From')).toBe('forwarder@example.com')
       expect(headers.get('X-Solaroid-Raw-Size')).toBe(String(rawEmail.byteLength))
-      expect(init?.redirect).toBe('error')
+      expect(init?.redirect).toBe('manual')
       expect(init?.signal).toBeInstanceOf(AbortSignal)
 
       return new Response(null, { status: 204 })
@@ -135,6 +135,18 @@ describe('email handler', () => {
     expect(forward).toHaveBeenCalledWith(env.FALLBACK_ADDRESS)
     expect(reject).not.toHaveBeenCalled()
     expect(console.error).toHaveBeenCalledTimes(1)
+  })
+
+  it('logs a privacy-safe network reason', async () => {
+    const { message } = testMessage()
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Network connection lost.') }))
+
+    await worker.email(message, env)
+
+    expect(console.error).toHaveBeenCalledWith('Email relay failed', {
+      category: 'network',
+      reason: 'connection',
+    })
   })
 
   it.each([

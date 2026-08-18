@@ -5989,7 +5989,11 @@ function DataTable({
         <tbody>
           {newestFirst.map((row) => (
             <tr key={row.month}>
-              <th className={period === "monthly" && onDocumentsInfo ? "month-documents-cell" : undefined}>
+              <th
+                className={period === "monthly" && onDocumentsInfo
+                  ? `month-documents-cell${row.receipt ? " has-document" : ""}`
+                  : undefined}
+              >
                 {period === "monthly" ? (
                   <MonthTableCell
                     row={row}

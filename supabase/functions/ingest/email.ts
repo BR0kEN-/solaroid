@@ -46,8 +46,8 @@ function attachmentBytes(attachment: Attachment): ArrayBuffer {
 
 function isAllowedEnvelopeSender(
   sender: string,
-  allowedDomains: ReadonlySet<string>,
-  allowedAddresses: ReadonlySet<string> = new Set(),
+  allowedDomains: readonly string[],
+  allowedAddresses: readonly string[] = [],
 ): boolean {
   const normalized = sender.trim().toLowerCase()
   const separator = normalized.indexOf('@')
@@ -60,7 +60,7 @@ function isAllowedEnvelopeSender(
     return false
   }
 
-  return allowedAddresses.has(normalized) || allowedDomains.has(normalized.slice(separator + 1))
+  return allowedAddresses.includes(normalized) || allowedDomains.includes(normalized.slice(separator + 1))
 }
 
 function matchingSignature(attachments: readonly Attachment[], pdf: Attachment): Attachment | undefined {
@@ -88,8 +88,8 @@ async function receiveEmail(
   storage: Solaroid.Supabase.Email.Storage,
   expectedToken = EMAIL_INGEST_TOKEN,
   analyzer: Solaroid.Supabase.Email.Analyzer = analyzeEmail,
-  allowedSenderDomains: ReadonlySet<string> = EMAIL_ALLOWED_SENDER_DOMAINS,
-  allowedSenderAddresses: ReadonlySet<string> = EMAIL_ALLOWED_SENDER_ADDRESSES,
+  allowedSenderDomains: readonly string[] = EMAIL_ALLOWED_SENDER_DOMAINS,
+  allowedSenderAddresses: readonly string[] = EMAIL_ALLOWED_SENDER_ADDRESSES,
 ): Promise<Solaroid.Supabase.Json> {
   if (!(await Hash.eq(bearer, expectedToken))) throw new UnauthorizedError()
 

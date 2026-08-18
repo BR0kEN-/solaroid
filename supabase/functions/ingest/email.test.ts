@@ -277,8 +277,8 @@ Deno.test('email receiver requires the dedicated relay token', async () => {
 })
 
 Deno.test('email receiver accepts only exact configured envelope senders', async () => {
-  const allowedDomains = new Set(['supplier.example', 'testing.example'])
-  const allowedAddresses = new Set(['tester@gmail.com'])
+  const allowedDomains = ['supplier.example', 'testing.example']
+  const allowedAddresses = ['tester@gmail.com']
 
   if (!isAllowedEnvelopeSender('Reports@Supplier.Example', allowedDomains, allowedAddresses)) {
     throw new Error('configured sender domain rejected')

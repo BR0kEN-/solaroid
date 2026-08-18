@@ -99,7 +99,7 @@ async function relay(
     method: 'POST',
     body: message.raw,
     headers: relayHeaders(message, plantId, configuration.ingestToken),
-    redirect: 'error',
+    redirect: 'manual',
     signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
   })
   const status = response.status
@@ -107,6 +107,20 @@ async function relay(
   await response.body?.cancel().catch(() => undefined)
 
   if (!response.ok) throw new DownstreamError(status)
+}
+
+function networkReason(error: unknown): string {
+  if (!(error instanceof Error)) return 'unknown'
+
+  const message = error.message.toLowerCase()
+
+  if (message.includes('network connection lost') || message.includes('network unavailable')) return 'connection'
+  if (message.includes('redirect')) return 'redirect'
+  if (message.includes('certificate') || message.includes('tls')) return 'tls'
+  if (message.includes('dns') || message.includes('resolve')) return 'dns'
+  if (message.includes('stream') || message.includes('body')) return 'body-stream'
+
+  return error.name
 }
 
 function logRelayFailure(error: unknown): void {
@@ -125,7 +139,7 @@ function logRelayFailure(error: unknown): void {
     return
   }
 
-  console.error('Email relay failed', { category: 'network' })
+  console.error('Email relay failed', { category: 'network', reason: networkReason(error) })
 }
 
 async function forwardToFallback(

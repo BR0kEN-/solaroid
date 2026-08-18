@@ -16,7 +16,11 @@ const reportSchema = {
   properties: {
     account: { type: 'string' },
     eic: { type: 'string' },
-    actDate: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])-([0-2]\\d|3[01])$' },
+    actDate: {
+      type: 'string',
+      description: 'Date printed next to the ACT heading, independent from the settlement month.',
+      pattern: '^20\\d{2}-(0[1-9]|1[0-2])-([0-2]\\d|3[01])$',
+    },
     energy: {
       type: 'object',
       additionalProperties: false,
@@ -100,7 +104,11 @@ const outputSchema = {
           additionalProperties: false,
           properties: {
             type: { type: 'string', enum: UPLOAD_TYPES },
-            month: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$' },
+            month: {
+              type: 'string',
+              description: 'Explicit report settlement period, independent from the act date.',
+              pattern: '^20\\d{2}-(0[1-9]|1[0-2])$',
+            },
             report: reportSchema,
           },
           required: ['type', 'month', 'report'],
@@ -121,7 +129,7 @@ const PurchaseRow = z.object({
 const Report = z.object({
   account: z.string().trim().min(1),
   eic: z.string().trim().min(1),
-  actDate: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/),
+  actDate: z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/),
   energy: z.object({
     grid: z.object({
       importKwh: Amount,
@@ -150,7 +158,7 @@ const AnalysisResponse = z.object({
   attachmentIndex: z.number().int().nonnegative().nullable(),
   document: z.object({
     type: z.enum(UPLOAD_TYPES),
-    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+    month: z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/),
     report: Report,
   }).nullable(),
 })
@@ -172,7 +180,10 @@ Rules:
 - attachmentIndex is the zero-based PDF order shown by the attachment-N.pdf filenames.
 - Return null for both attachmentIndex and document unless one PDF clearly matches the supported document.
 - document.type and document.report are one coupled result. Never return one without the other.
-- document.month is the report settlement period, never the email or file date.
+- document.month is the explicitly printed report settlement period, such as "за Лютий 2026 року" or "за розрахунковий період Лютий 2026 року". Never derive it from the act date, email date, signature date, or PDF metadata.
+- report.actDate is only the date printed next to the "АКТ" heading, such as "від “28” лютого 2026". Never derive it from the settlement period, email date, signature date, or PDF metadata.
+- document.month and report.actDate are independent and may belong to different calendar months. Re-read both printed sources before returning them.
+- All supported document years are between 2000 and 2099. Preserve and re-check all four printed year digits; never change the century.
 - Copy account and EIC exactly.
 - report.energy.grid.importKwh is "Надходження ... в мережу Споживача".
 - report.energy.grid.exportKwh is "Віддача ... з мережі Споживача".
@@ -281,10 +292,6 @@ class OpenAIEmailAnalyzer {
 
     if (!input.pdfs[analysis.attachmentIndex]) {
       throw new Error('Document analyzer selected an invalid attachment')
-    }
-
-    if (!analysis.document.report.actDate.startsWith(`${analysis.document.month}-`)) {
-      throw new Error('Document month does not match act date')
     }
 
     return {

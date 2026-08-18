@@ -1,4 +1,6 @@
-function requiredVar<L extends boolean>(name: string, list: L = false): (L extends true ? readonly string[] : string) | never {
+function requiredVar(name: string): string
+function requiredVar(name: string, list: true): readonly string[]
+function requiredVar(name: string, list = false): string | readonly string[] {
   const value = Deno.env.get(name)
   if (!value) throw new Error(`${name} is not configured`)
   return list ? value.split(',').map((domain) => domain.trim().toLowerCase()) : value

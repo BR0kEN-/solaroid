@@ -2232,6 +2232,16 @@ h2 {
   padding: 12px 14px;
 }
 
+.month-documents-cell.has-document {
+  background:
+    linear-gradient(
+      110deg,
+      color-mix(in srgb, var(--green), transparent 87%),
+      color-mix(in srgb, var(--cyan), transparent 95%) 72%,
+      var(--panel)
+    );
+}
+
 .month-documents-cell-content {
   display: flex;
   align-items: center;
