@@ -24,6 +24,25 @@ const tariff = {
   updated_at: '2026-06-07T00:00:00+00:00',
 }
 
+const greenTariffReport = {
+  account: 'synthetic-account',
+  eic: '00X0000000000000',
+  actDate: '2026-05-31',
+  energy: {
+    grid: { importKwh: 286, exportKwh: 2440 },
+    payable: { consumerKwh: 0, supplierKwh: 2154 },
+  },
+  purchase: {
+    greenTariff: { kwh: 2154, priceKopPerKwh: 669.44, amountUah: 14419.74 },
+    weightedPrice: { kwh: 0, priceKopPerKwh: 0, amountUah: 0 },
+  },
+  payment: {
+    grossUah: 14419.74,
+    taxes: { personalIncomeUah: 2595.55, militaryLevyUah: 720.99 },
+    netUah: 11103.2,
+  },
+}
+
 describe('Supabase data mapping', () => {
   it('uses the latest positive daily USD rate in a month before manual fallback', () => {
     const loaded = toLoadedPlant({
@@ -117,6 +136,44 @@ describe('Supabase data mapping', () => {
     })
 
     expect(loaded.rows[0].usdRate).toBe(42.55)
+  })
+
+  it('maps valid parsed document metadata into the receipt', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [{
+        ...month('2026-05-01'),
+        files: [{
+          path: 'bondas/green-tariff-receipt/2026-05',
+          size: 1234,
+          mime: 'application/pdf',
+          metadata: { month: '2026-05', report: greenTariffReport },
+        }],
+      }],
+      days: [day('2026-05-31', 43)],
+      tariffs: [],
+    })
+
+    expect(loaded.rows[0].receipt?.report).toEqual(greenTariffReport)
+  })
+
+  it('omits malformed parsed document metadata', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [{
+        ...month('2026-05-01'),
+        files: [{
+          path: 'bondas/green-tariff-receipt/2026-05',
+          size: 1234,
+          mime: 'application/pdf',
+          metadata: { report: { account: 'incomplete' } },
+        }],
+      }],
+      days: [day('2026-05-31', 43)],
+      tariffs: [],
+    })
+
+    expect(loaded.rows[0].receipt?.report).toBeUndefined()
   })
 
   it('falls back to latest positive daily rate when neither month daily nor manual rate exists', () => {

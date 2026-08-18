@@ -237,11 +237,12 @@ declare global {
     namespace Upload {
       type Type = typeof UPLOAD_TYPES[number]
 
-      interface File {
+      interface File<T extends object = object> {
         readonly type: Type
         readonly path: string
         readonly size: number
         readonly mime: string
+        readonly metadata: T
       }
     }
   }

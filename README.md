@@ -192,7 +192,7 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026
 
 ### Monthly documents
 
-Selecting a month in the monthly data table opens its read-only document manager. Existing green-tariff documents can be opened through a short-lived signed URL; missing documents show an empty state. The regular monthly payload includes matching files for each month. Daily rows do not open the document manager.
+Selecting a month in the monthly data table opens its read-only document manager. A green-tariff document has compact actions beneath its size and MIME type. `View` opens the in-app PDF viewer; `Details` opens the validated structured report extracted during email ingestion. The document title itself is not interactive. Missing documents show an empty state, and documents without valid report metadata omit `Details`. The regular monthly payload includes matching files for each month. Daily rows do not open the document manager.
 
 Document writes are email-managed. The dashboard and regular plant-token ingestion route cannot add or replace files. Accepted document and optional signature objects are limited to 20 MiB each and stored in the private `month-docs` bucket. To open a document, the dashboard sends an authorized `GET` request with its storage path in the `document` query parameter. The Edge Function validates plant access and returns a signed URL valid for 60 seconds.
 
@@ -209,7 +209,9 @@ For a recognized report, analysis returns one coupled `document` object containi
 <plant>/<document-type>/<YYYY-MM>-signature
 ```
 
-`UPLOAD_TYPES` is the canonical list of known document types. A signature is an asset of its document, not another document type. Document and signature objects receive the same nested `report` user metadata plus `plantId`, `month`, `type`, and `asset`. Green-tariff report metadata has this structure:
+The dashboard requests a short-lived signed URL only after the document title is selected, then fetches the PDF and lazily loads PDF.js to render it inside the same popup. This avoids unused signed-URL requests, URL expiry before viewing, and iframe, popup, or top-level navigation restrictions in Home Assistant. The preview has an explicit back control for returning to the document list and a close control for returning to the dashboard.
+
+`UPLOAD_TYPES` is the canonical list of known document types. A signature is an asset of its document, not another document type. Both stored objects receive only the routing metadata `plantId` and `month`; the canonical PDF also receives the nested `report` metadata. Document type comes from the storage path, and the optional signature is identified by the `-signature` path suffix, so neither `type` nor `asset` is duplicated in object metadata. Document listings exclude signatures, remove `plantId`, and expose the remaining parsed metadata with each file. Green-tariff report metadata has this structure:
 
 ```text
 report

@@ -2312,6 +2312,79 @@ h2 {
   gap: 14px;
 }
 
+.documents-modal.is-previewing {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  height: min(860px, calc(100vh - 36px));
+  max-height: calc(100vh - 36px);
+  overflow: hidden;
+}
+
+.documents-modal-heading-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.documents-modal-heading-copy h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documents-modal-back {
+  width: 34px;
+  height: 34px;
+}
+
+.documents-modal-body.is-previewing {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--bg), var(--panel) 26%);
+  border-radius: 6px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pdf-preview-pages {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+
+.pdf-preview-page {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 900px;
+  min-height: 120px;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px color-mix(in srgb, #000, transparent 82%);
+}
+
+.pdf-preview-page canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+}
+
+.pdf-preview-status {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  padding: 24px;
+  text-align: center;
+}
+
 .document-item {
   display: flex;
   align-items: center;
@@ -2352,33 +2425,107 @@ h2 {
   font-size: 0.78rem;
 }
 
-.document-title-button {
+.document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.document-action-button {
   display: inline-flex;
   align-items: center;
-  justify-self: start;
+  justify-content: center;
   gap: 6px;
-  max-width: 100%;
-  padding: 0;
+  min-height: 34px;
+  padding: 0 10px;
   color: var(--text);
-  background: transparent;
-  border: 0;
+  background: var(--control);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  text-align: left;
+  cursor: pointer;
 }
 
-.document-title-button:hover,
-.document-title-button:focus-visible {
+.document-action-button:hover,
+.document-action-button:focus-visible {
   color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan), var(--border) 45%);
 }
 
-.document-title-button span {
-  overflow-wrap: anywhere;
+.document-action-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
-.document-title-button svg {
+.document-action-button:active {
+  transform: translateY(1px);
+}
+
+.document-action-button svg {
   flex: 0 0 auto;
+}
+
+.receipt-report {
+  display: grid;
+  gap: 16px;
+}
+
+.receipt-report-section {
+  display: grid;
+  gap: 6px;
+}
+
+.receipt-report-section + .receipt-report-section {
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.receipt-report-section h3,
+.receipt-report-purchase h4 {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.receipt-report-section h3 {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.receipt-report-purchases {
+  display: grid;
+  gap: 12px;
+}
+
+.receipt-report-purchase {
+  display: grid;
+  gap: 3px;
+}
+
+.receipt-report-purchase + .receipt-report-purchase {
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 18%);
+}
+
+.receipt-report-purchase h4 {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.receipt-report-list {
+  gap: 0;
+}
+
+.receipt-report-list div {
+  align-items: baseline;
+}
+
+.receipt-report-list dd {
+  max-width: 68%;
 }
 
 .document-error {
@@ -3488,6 +3635,47 @@ tbody tr:hover {
 
   .info-modal-close-top {
     display: none;
+  }
+
+  .documents-modal .modal-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .documents-modal .info-modal-close-top {
+    display: grid;
+  }
+
+  .documents-modal.is-previewing {
+    height: calc(100vh - 16px);
+    height: calc(100dvh - 16px);
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 12px;
+  }
+
+  .documents-modal.is-previewing .modal-heading {
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+  }
+
+  .documents-modal-body.is-previewing {
+    padding: 6px;
+  }
+
+  .pdf-preview-pages {
+    gap: 8px;
+  }
+
+  .document-action-button {
+    min-height: 38px;
+  }
+
+  .receipt-report-list div {
+    gap: 12px;
+  }
+
+  .receipt-report-list dd {
+    max-width: 60%;
   }
 
   .info-modal-actions {

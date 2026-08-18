@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  ArrowLeft,
   ArrowDownToLine,
   ArrowUpFromLine,
   CalendarClock,
   CheckCircle2,
   CircleAlert,
   CircleDollarSign,
-  ExternalLink,
+  Eye,
   FileText,
   GitCompareArrows,
   Info,
+  List,
   LogOut,
   RefreshCw,
   SunMedium,
@@ -22,7 +24,7 @@ import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
-import type { MonthReceipt } from "./domain/types";
+import type { GreenTariffReport, MonthReceipt } from "./domain/types";
 import {
   capacityAdjustedProductionSurplus,
   capacityDeltaPct,
@@ -37,12 +39,14 @@ import {
   type ImportCostBreakdown,
 } from "./domain/formulas";
 import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
+import { PdfPreview } from "./PdfPreview";
 import "./styles.css";
 
 type RangeKey = "all" | "range";
 type DailyRangeKey = "currentMonth" | "7d" | "14d" | "21d" | "30d" | "range";
 type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly";
+type DocumentsView = "list" | "pdf" | "details";
 const monthRangePresets = [1, 3, 6, 12] as const;
 const dailyRangePresets = [7, 14, 21, 30] as const;
 type Lang = "en" | "uk";
@@ -338,7 +342,33 @@ const i18n = {
     openGreenTariffReceipt: "Open green tariff receipt",
     documentMissing: "No document",
     documentOpenFailed: "Document could not be opened.",
-    documentPopupBlocked: "Allow popups to open this document.",
+    documentLoading: "Loading document...",
+    backToDocuments: "Back to documents",
+    viewDocument: "View",
+    viewReceiptDetails: "Details",
+    receiptDetails: "Receipt details",
+    reportDocument: "Document",
+    reportAccount: "Account",
+    reportEic: "EIC",
+    reportActDate: "Act date",
+    reportEnergy: "Energy",
+    reportGridImport: "Grid import",
+    reportGridExport: "Grid export",
+    reportConsumerPayable: "Consumer payable",
+    reportSupplierPayable: "Supplier payable",
+    reportPurchase: "Purchase",
+    reportGreenTariff: "Green tariff",
+    reportWeightedPrice: "Weighted price",
+    reportQuantity: "Energy",
+    reportPrice: "Price",
+    reportAmount: "Amount",
+    reportPayment: "Payment",
+    reportGross: "Gross",
+    reportPersonalIncomeTax: "Personal income tax",
+    reportMilitaryLevy: "Military levy",
+    reportNet: "Net",
+    kopPerKwh: "kop/kWh",
+    page: "Page",
     tapBar: "Tap a bar to inspect the value",
     tapBarOrDot: "Tap a bar or dot to inspect the value",
   },
@@ -523,7 +553,33 @@ const i18n = {
     openGreenTariffReceipt: "Відкрити акт за зеленим тарифом",
     documentMissing: "Документа немає",
     documentOpenFailed: "Не вдалося відкрити документ.",
-    documentPopupBlocked: "Дозвольте спливні вікна, щоб відкрити документ.",
+    documentLoading: "Завантаження документа...",
+    backToDocuments: "Назад до документів",
+    viewDocument: "Переглянути",
+    viewReceiptDetails: "Дані",
+    receiptDetails: "Дані акта",
+    reportDocument: "Документ",
+    reportAccount: "Особовий рахунок",
+    reportEic: "EIC",
+    reportActDate: "Дата акта",
+    reportEnergy: "Енергія",
+    reportGridImport: "Імпорт з мережі",
+    reportGridExport: "Експорт у мережу",
+    reportConsumerPayable: "До оплати споживачем",
+    reportSupplierPayable: "До оплати постачальником",
+    reportPurchase: "Купівля",
+    reportGreenTariff: "Зелений тариф",
+    reportWeightedPrice: "Середньозважена ціна",
+    reportQuantity: "Обсяг",
+    reportPrice: "Ціна",
+    reportAmount: "Сума",
+    reportPayment: "Оплата",
+    reportGross: "Нараховано",
+    reportPersonalIncomeTax: "ПДФО",
+    reportMilitaryLevy: "Військовий збір",
+    reportNet: "До виплати",
+    kopPerKwh: "коп/кВт·г",
+    page: "Сторінка",
     tapBar: "Торкніться стовпчика, щоб побачити значення",
     tapBarOrDot: "Торкніться стовпчика або точки, щоб побачити значення",
   },
@@ -1600,8 +1656,6 @@ function App({
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
   const [documentsModalRow, setDocumentsModalRow] = useState<MonthRow | null>(null);
-  const [receiptOpening, setReceiptOpening] = useState(false);
-  const [receiptError, setReceiptError] = useState("");
   const [lang, setLang] = useState<Lang>(initialLang);
   const setAppLang = (nextLang: Lang) => {
     setLang(nextLang);
@@ -1728,32 +1782,7 @@ function App({
   );
 
   const openDocumentsModal = (row: MonthRow) => {
-    setReceiptError("");
-    setReceiptOpening(false);
     setDocumentsModalRow(row);
-  };
-
-  const openReceipt = async (receipt: MonthReceipt) => {
-    const popup = window.open("about:blank", "_blank");
-
-    if (!popup) {
-      setReceiptError(t.documentPopupBlocked);
-      return;
-    }
-
-    popup.opener = null;
-    setReceiptOpening(true);
-    setReceiptError("");
-
-    try {
-      const url = await getMonthDocumentUrl(receipt.path);
-      popup.location.replace(url);
-    } catch (error) {
-      popup.close();
-      setReceiptError(error instanceof Error ? error.message : t.documentOpenFailed);
-    } finally {
-      setReceiptOpening(false);
-    }
   };
 
   const plantComparisonMonthOptions = useMemo(
@@ -2749,10 +2778,8 @@ function App({
             row={documentsModalRow}
             document={documentsModalRow.receipt ?? null}
             t={t}
-            isOpening={receiptOpening}
-            error={receiptError}
+            lang={lang}
             onClose={() => setDocumentsModalRow(null)}
-            onOpen={() => documentsModalRow.receipt && void openReceipt(documentsModalRow.receipt)}
           />
         )}
         <footer className="dash-footer">
@@ -6142,58 +6169,141 @@ function DocumentsModal({
   row,
   document,
   t,
-  isOpening,
-  error,
+  lang,
   onClose,
-  onOpen,
 }: {
   readonly row: MonthRow;
   readonly document: MonthReceipt | null;
   readonly t: Record<string, string>;
-  readonly isOpening: boolean;
-  readonly error: string;
+  readonly lang: Lang;
   readonly onClose: () => void;
-  readonly onOpen: () => void;
 }) {
+  const [view, setView] = useState<DocumentsView>("list");
+  const [documentUrl, setDocumentUrl] = useState("");
+  const [isOpening, setIsOpening] = useState(false);
+  const [error, setError] = useState("");
+  const requestIdRef = useRef(0);
+  const isPreviewing = view === "pdf";
+  const isViewingDetails = view === "details";
+
+  const openPreview = async () => {
+    if (!document || isOpening) return;
+
+    const requestId = ++requestIdRef.current;
+    setView("pdf");
+    setDocumentUrl("");
+    setError("");
+    setIsOpening(true);
+
+    try {
+      const url = await getMonthDocumentUrl(document.path);
+      if (requestId === requestIdRef.current) setDocumentUrl(url);
+    } catch (cause) {
+      if (requestId === requestIdRef.current) {
+        setError(cause instanceof Error ? cause.message : t.documentOpenFailed);
+      }
+    } finally {
+      if (requestId === requestIdRef.current) setIsOpening(false);
+    }
+  };
+
+  const closeDocumentView = () => {
+    requestIdRef.current += 1;
+    setView("list");
+    setDocumentUrl("");
+    setError("");
+    setIsOpening(false);
+  };
+
+  const closeModal = () => {
+    requestIdRef.current += 1;
+    onClose();
+  };
+
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
       <section
-        className="info-modal modal-card documents-modal"
+        className={`info-modal modal-card documents-modal${isPreviewing ? " is-previewing" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="documents-modal-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="section-heading modal-heading">
-          <div>
-            <h2 id="documents-modal-title">{t.documents} · {row.month}</h2>
+          <div className="documents-modal-heading-copy">
+            {view !== "list" ? (
+              <button
+                type="button"
+                className="icon-button documents-modal-back"
+                onClick={closeDocumentView}
+                aria-label={t.backToDocuments}
+                title={t.backToDocuments}
+              >
+                <ArrowLeft size={18} />
+              </button>
+            ) : null}
+            <h2 id="documents-modal-title">
+              {isPreviewing
+                ? `${t.greenTariffReceipt} · ${row.month}`
+                : isViewingDetails
+                  ? `${t.receiptDetails} · ${row.month}`
+                  : `${t.documents} · ${row.month}`}
+            </h2>
           </div>
-          <button type="button" className="icon-button info-modal-close-top" onClick={onClose} aria-label={t.close} disabled={isOpening}>
+          <button type="button" className="icon-button info-modal-close-top" onClick={closeModal} aria-label={t.close}>
             <X size={18} />
           </button>
         </div>
-        <div className="info-modal-body documents-modal-body">
-          <div className="document-item">
-            <span className="document-type-icon"><FileText size={20} /></span>
-            <span className="document-item-copy">
-              {document ? (
-                <button
-                  type="button"
-                  className="document-title-button"
-                  onClick={onOpen}
-                  disabled={isOpening}
-                  aria-label={t.openGreenTariffReceipt}
-                >
-                  <span>{t.greenTariffReceipt}</span>
-                  <ExternalLink size={14} />
-                </button>
-              ) : (
-                <strong>{t.greenTariffReceipt}</strong>
-              )}
-              <small>{document ? `${formatFileSize(document.sizeBytes)} · ${document.contentType}` : t.documentMissing}</small>
-            </span>
-          </div>
-          {error ? <p className="document-error">{error}</p> : null}
+        <div className={`info-modal-body documents-modal-body${isPreviewing ? " is-previewing" : ""}`}>
+          {isPreviewing ? (
+            documentUrl ? (
+              <PdfPreview
+                url={documentUrl}
+                errorLabel={t.documentOpenFailed}
+                loadingLabel={t.documentLoading}
+                pageLabel={t.page}
+              />
+            ) : error ? (
+              <p className="document-error pdf-preview-status">{error}</p>
+            ) : (
+              <p className="pdf-preview-status" role="status">{t.documentLoading}</p>
+            )
+          ) : isViewingDetails && document?.report ? (
+            <GreenTariffReportDetails report={document.report} t={t} lang={lang} />
+          ) : (
+            <>
+              <div className="document-item">
+                <span className="document-type-icon"><FileText size={20} /></span>
+                <span className="document-item-copy">
+                  <strong>{t.greenTariffReceipt}</strong>
+                  <small>{document ? `${formatFileSize(document.sizeBytes)} · ${document.contentType}` : t.documentMissing}</small>
+                  {document ? (
+                    <span className="document-actions">
+                      <button
+                        type="button"
+                        className="document-action-button"
+                        onClick={() => void openPreview()}
+                        aria-label={t.openGreenTariffReceipt}
+                      >
+                        <Eye size={14} />
+                        <span>{t.viewDocument}</span>
+                      </button>
+                      {document.report ? (
+                        <button
+                          type="button"
+                          className="document-action-button"
+                          onClick={() => setView("details")}
+                        >
+                          <List size={14} />
+                          <span>{t.viewReceiptDetails}</span>
+                        </button>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </section>
     </div>
@@ -6203,6 +6313,107 @@ function DocumentsModal({
 function formatFileSize(value: number) {
   if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface ReceiptReportRowData {
+  readonly label: string;
+  readonly value: string;
+}
+
+function GreenTariffReportDetails({
+  report,
+  t,
+  lang,
+}: {
+  readonly report: GreenTariffReport;
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+}) {
+  return (
+    <div className="receipt-report">
+      <ReceiptReportSection
+        title={t.reportDocument}
+        rows={[
+          { label: t.reportAccount, value: report.account },
+          { label: t.reportEic, value: report.eic },
+          { label: t.reportActDate, value: formatReportDate(report.actDate, lang) },
+        ]}
+      />
+      <ReceiptReportSection
+        title={t.reportEnergy}
+        rows={[
+          { label: t.reportGridImport, value: formatKwh(report.energy.grid.importKwh, lang) },
+          { label: t.reportGridExport, value: formatKwh(report.energy.grid.exportKwh, lang) },
+          { label: t.reportConsumerPayable, value: formatKwh(report.energy.payable.consumerKwh, lang) },
+          { label: t.reportSupplierPayable, value: formatKwh(report.energy.payable.supplierKwh, lang) },
+        ]}
+      />
+      <section className="receipt-report-section">
+        <h3>{t.reportPurchase}</h3>
+        <div className="receipt-report-purchases">
+          <ReceiptPurchaseDetails title={t.reportGreenTariff} purchase={report.purchase.greenTariff} t={t} lang={lang} />
+          <ReceiptPurchaseDetails title={t.reportWeightedPrice} purchase={report.purchase.weightedPrice} t={t} lang={lang} />
+        </div>
+      </section>
+      <ReceiptReportSection
+        title={t.reportPayment}
+        rows={[
+          { label: t.reportGross, value: formatMoney(report.payment.grossUah, "UAH", lang) },
+          { label: t.reportPersonalIncomeTax, value: formatMoney(report.payment.taxes.personalIncomeUah, "UAH", lang) },
+          { label: t.reportMilitaryLevy, value: formatMoney(report.payment.taxes.militaryLevyUah, "UAH", lang) },
+          { label: t.reportNet, value: formatMoney(report.payment.netUah, "UAH", lang) },
+        ]}
+      />
+    </div>
+  );
+}
+
+function ReceiptPurchaseDetails({
+  title,
+  purchase,
+  t,
+  lang,
+}: {
+  readonly title: string;
+  readonly purchase: GreenTariffReport["purchase"]["greenTariff"];
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+}) {
+  return (
+    <section className="receipt-report-purchase">
+      <h4>{title}</h4>
+      <dl className="info-list receipt-report-list">
+        <ReceiptReportRow label={t.reportQuantity} value={formatKwh(purchase.kwh, lang)} />
+        <ReceiptReportRow label={t.reportPrice} value={`${formatNumber(purchase.priceKopPerKwh, 2, 2)} ${t.kopPerKwh}`} />
+        <ReceiptReportRow label={t.reportAmount} value={formatMoney(purchase.amountUah, "UAH", lang)} />
+      </dl>
+    </section>
+  );
+}
+
+function ReceiptReportSection({ title, rows }: { readonly title: string; readonly rows: readonly ReceiptReportRowData[] }) {
+  return (
+    <section className="receipt-report-section">
+      <h3>{title}</h3>
+      <dl className="info-list receipt-report-list">
+        {rows.map((row) => <ReceiptReportRow key={row.label} {...row} />)}
+      </dl>
+    </section>
+  );
+}
+
+function ReceiptReportRow({ label, value }: ReceiptReportRowData) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function formatReportDate(value: string, lang: Lang) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.valueOf()) ? value : formatDayLabel(date, lang);
 }
 
 function SplitInfo({

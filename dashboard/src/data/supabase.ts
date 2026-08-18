@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
+import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -39,6 +39,10 @@ interface UploadedFileRecord {
   readonly path: string
   readonly size: number
   readonly mime: string
+  readonly metadata?: {
+    readonly month?: string
+    readonly report?: unknown
+  } | null
 }
 
 interface DayRecord extends MonthRecord {
@@ -410,7 +414,47 @@ function toReceipt(row: MonthRecord): MonthReceipt | undefined {
     filename: file.path.split('/').at(-1) ?? file.path,
     contentType: file.mime,
     sizeBytes: file.size,
+    report: isGreenTariffReport(file.metadata?.report) ? file.metadata.report : undefined,
   }
+}
+
+function isGreenTariffReport(value: unknown): value is GreenTariffReport {
+  if (!isRecord(value)) return false
+  const { energy, payment, purchase } = value
+  if (!isRecord(energy) || !isRecord(energy.grid) || !isRecord(energy.payable)) return false
+  if (!isRecord(purchase) || !isPurchaseRow(purchase.greenTariff) || !isPurchaseRow(purchase.weightedPrice)) return false
+  if (!isRecord(payment) || !isRecord(payment.taxes)) return false
+
+  return (
+    typeof value.account === 'string' &&
+    typeof value.eic === 'string' &&
+    typeof value.actDate === 'string' &&
+    hasFiniteNumber(energy.grid, 'importKwh') &&
+    hasFiniteNumber(energy.grid, 'exportKwh') &&
+    hasFiniteNumber(energy.payable, 'consumerKwh') &&
+    hasFiniteNumber(energy.payable, 'supplierKwh') &&
+    hasFiniteNumber(payment, 'grossUah') &&
+    hasFiniteNumber(payment.taxes, 'personalIncomeUah') &&
+    hasFiniteNumber(payment.taxes, 'militaryLevyUah') &&
+    hasFiniteNumber(payment, 'netUah')
+  )
+}
+
+function isPurchaseRow(value: unknown) {
+  return (
+    isRecord(value) &&
+    hasFiniteNumber(value, 'kwh') &&
+    hasFiniteNumber(value, 'priceKopPerKwh') &&
+    hasFiniteNumber(value, 'amountUah')
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function hasFiniteNumber(value: Record<string, unknown>, key: string) {
+  return typeof value[key] === 'number' && Number.isFinite(value[key])
 }
 
 function commercialTransitionTotals(month: string, commercialDate: Date, monthDailyRows?: readonly MonthRow[]) {

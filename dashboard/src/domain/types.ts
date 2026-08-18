@@ -37,6 +37,53 @@ export interface MonthReceipt {
   readonly filename: string
   readonly contentType: string
   readonly sizeBytes: number
+  readonly report?: GreenTariffReport
+}
+
+export interface GreenTariffReport {
+  readonly account: string
+  readonly eic: string
+  readonly actDate: string
+  readonly energy: GreenTariffEnergy
+  readonly purchase: GreenTariffPurchase
+  readonly payment: GreenTariffPayment
+}
+
+export interface GreenTariffEnergy {
+  readonly grid: GreenTariffEnergyFlow
+  readonly payable: GreenTariffPayableEnergy
+}
+
+export interface GreenTariffEnergyFlow {
+  readonly importKwh: number
+  readonly exportKwh: number
+}
+
+export interface GreenTariffPayableEnergy {
+  readonly consumerKwh: number
+  readonly supplierKwh: number
+}
+
+export interface GreenTariffPurchase {
+  readonly greenTariff: GreenTariffPurchaseRow
+  readonly weightedPrice: GreenTariffPurchaseRow
+}
+
+export interface GreenTariffPurchaseRow {
+  readonly kwh: number
+  readonly priceKopPerKwh: number
+  readonly amountUah: number
+}
+
+export interface GreenTariffPayment {
+  readonly grossUah: number
+  readonly taxes: GreenTariffTaxes
+  readonly netUah: number
+}
+
+export interface GreenTariffTaxes {
+  readonly personalIncomeUah: number
+  readonly militaryLevyUah: number
 }
 
 export interface UtilityMeterReconciliation {
