@@ -28,7 +28,7 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
   const documentPath = params.get('document')
 
   if (documentPath) {
-    if (documentPath.split('/')[0] !== plantId) {
+    if (plantId !== token.plant_id || documentPath.split('/')[0] !== plantId) {
       throw new ForbiddenError()
     }
 
@@ -50,7 +50,7 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
   }
 
   return {
-    ...applyAccess(token, await client.getPlant(plantId)),
+    ...applyAccess(token, await client.getPlant(plantId, plantId === token.plant_id)),
     reads: token.reads,
   }
 }
