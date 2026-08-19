@@ -2236,8 +2236,8 @@ h2 {
   background:
     linear-gradient(
       110deg,
-      color-mix(in srgb, var(--green), transparent 87%),
-      color-mix(in srgb, var(--cyan), transparent 95%) 72%,
+      color-mix(in srgb, var(--green) 13%, var(--panel)),
+      color-mix(in srgb, var(--cyan) 5%, var(--panel)) 72%,
       var(--panel)
     );
 }
