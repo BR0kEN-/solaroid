@@ -31,7 +31,7 @@ function month({
     exportPrice: 0,
     exportPriceDay: 0,
     exportPriceNight: 0,
-    exportVat: 0,
+    exportPersonalIncomeTax: 0,
     exportMilitary: 0,
     importPriceDay: 0,
     importPriceNight: 0,

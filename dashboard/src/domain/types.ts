@@ -16,7 +16,7 @@ export interface MonthRow {
   readonly exportPrice: number
   readonly exportPriceDay: number
   readonly exportPriceNight: number
-  readonly exportVat: number
+  readonly exportPersonalIncomeTax: number
   readonly exportMilitary: number
   readonly importPriceDay: number
   readonly importPriceNight: number
@@ -84,6 +84,52 @@ export interface GreenTariffPayment {
 export interface GreenTariffTaxes {
   readonly personalIncomeUah: number
   readonly militaryLevyUah: number
+}
+
+export interface GreenTariffReconciliationValue {
+  readonly receipt: number
+  readonly solaroid: number
+  readonly delta: number
+  readonly deltaPercent?: number
+}
+
+export interface GreenTariffReconciliationSummary {
+  readonly netUah: number
+  readonly supplierPayableKwh: number
+  readonly withheldUah: number
+  readonly effectiveGrossUahPerKwh?: number
+  readonly effectiveNetUahPerKwh?: number
+  readonly withheldTaxPercent?: number
+}
+
+export interface GreenTariffReceiptArithmetic {
+  readonly supplierPayableKwh: GreenTariffReconciliationValue
+  readonly greenTariffAmountUah: GreenTariffReconciliationValue
+  readonly weightedPriceAmountUah: GreenTariffReconciliationValue
+  readonly grossUah: GreenTariffReconciliationValue
+  readonly netUah: GreenTariffReconciliationValue
+}
+
+export interface GreenTariffReceiptReconciliation {
+  readonly summary: GreenTariffReconciliationSummary
+  readonly energySource: 'utility-meter' | 'home-assistant'
+  readonly grid: {
+    readonly importKwh: GreenTariffReconciliationValue
+    readonly exportKwh: GreenTariffReconciliationValue
+  }
+  readonly payable: {
+    readonly consumerKwh: GreenTariffReconciliationValue
+    readonly supplierKwh: GreenTariffReconciliationValue
+  }
+  readonly settlement: {
+    readonly grossUah: GreenTariffReconciliationValue
+    readonly netUah: GreenTariffReconciliationValue
+  }
+  readonly taxes: {
+    readonly personalIncomeUah: GreenTariffReconciliationValue
+    readonly militaryLevyUah: GreenTariffReconciliationValue
+  }
+  readonly arithmetic: GreenTariffReceiptArithmetic
 }
 
 export interface UtilityMeterReconciliation {

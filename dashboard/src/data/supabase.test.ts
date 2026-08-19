@@ -75,7 +75,7 @@ describe('Supabase data mapping', () => {
     expect(loaded.rows[0].consumedTotal).toBe(100)
     expect(loaded.rows[0].importTotal).toBe(30)
     expect(loaded.rows[0].balance).toBe(-10)
-    expect(loaded.rows[0].exportVat).toBe(20)
+    expect(loaded.rows[0].exportPersonalIncomeTax).toBe(20)
     expect(loaded.rows[0].exportMilitary).toBe(5)
     expect(loaded.dailyRows.map((row) => row.usdRate)).toEqual([41, 0, 43])
   })
@@ -173,6 +173,26 @@ describe('Supabase data mapping', () => {
       tariffs: [],
     })
 
+    expect(loaded.rows[0].receipt?.report).toBeUndefined()
+  })
+
+  it('keeps a document without exposing missing report details', () => {
+    const loaded = toLoadedPlant({
+      plant,
+      months: [{
+        ...month('2026-05-01'),
+        files: [{
+          path: 'bondas/green-tariff-receipt/2026-05',
+          size: 1234,
+          mime: 'application/pdf',
+          metadata: { month: '2026-05' },
+        }],
+      }],
+      days: [day('2026-05-31', 43)],
+      tariffs: [],
+    })
+
+    expect(loaded.rows[0].receipt).toBeDefined()
     expect(loaded.rows[0].receipt?.report).toBeUndefined()
   })
 

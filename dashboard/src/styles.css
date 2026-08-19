@@ -2321,6 +2321,10 @@ h2 {
   overflow: hidden;
 }
 
+.documents-modal.is-details {
+  width: min(680px, 100%);
+}
+
 .documents-modal-heading-copy {
   display: flex;
   align-items: center;
@@ -2473,6 +2477,185 @@ h2 {
   gap: 16px;
 }
 
+.receipt-details,
+.receipt-details-tabpanel,
+.receipt-reconciliation {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.segmented.receipt-details-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.receipt-details-tabs button {
+  min-height: 40px;
+  white-space: normal;
+}
+
+.receipt-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.receipt-summary h3,
+.receipt-comparison-section h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.receipt-summary dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.receipt-summary dl div {
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.receipt-summary dl div:nth-child(-n + 2) {
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 18%);
+}
+
+.receipt-summary dl div:nth-child(odd) {
+  padding-right: 12px;
+  border-right: 1px solid color-mix(in srgb, var(--border), transparent 18%);
+}
+
+.receipt-summary dl div:nth-child(even) {
+  padding-left: 12px;
+}
+
+.receipt-summary dt,
+.receipt-summary dd {
+  margin: 0;
+}
+
+.receipt-summary dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.receipt-summary dd {
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.receipt-energy-source {
+  padding: 9px 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--control), var(--panel) 44%);
+  border-radius: 6px;
+}
+
+.receipt-comparison-section {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.receipt-comparison-section + .receipt-comparison-section {
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.receipt-comparison-section h3 {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.receipt-comparison-section h3 span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.receipt-comparison-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  background: transparent;
+}
+
+.receipt-comparison-table th,
+.receipt-comparison-table td {
+  position: static;
+  z-index: auto;
+  width: 33.333%;
+  padding: 8px 6px;
+  color: var(--text);
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.receipt-comparison-table thead th {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.receipt-comparison-table thead th:first-child,
+.receipt-comparison-table tbody th {
+  position: static;
+  z-index: auto;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.receipt-comparison-table tbody th {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.receipt-comparison-table tbody td {
+  text-align: right;
+}
+
+.receipt-comparison-table tbody tr:hover {
+  background: transparent;
+}
+
+.receipt-comparison-table tbody tr.receipt-comparison-delta,
+.receipt-comparison-table tbody tr.receipt-comparison-delta:hover {
+  background: color-mix(in srgb, var(--control), var(--panel) 38%);
+}
+
+.receipt-delta-value {
+  display: grid;
+  gap: 1px;
+  justify-items: end;
+  font: inherit;
+}
+
+.receipt-delta-value > span {
+  font: inherit;
+}
+
 .receipt-report-section {
   display: grid;
   gap: 6px;
@@ -2526,6 +2709,63 @@ h2 {
 
 .receipt-report-list dd {
   max-width: 68%;
+}
+
+.receipt-arithmetic-list {
+  display: grid;
+}
+
+.receipt-arithmetic-check {
+  display: grid;
+  gap: 5px;
+  padding: 11px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 10%);
+}
+
+.receipt-arithmetic-check h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.receipt-arithmetic-check dl {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.receipt-arithmetic-check dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  gap: 12px;
+  align-items: baseline;
+  padding: 5px 0;
+}
+
+.receipt-arithmetic-check dt,
+.receipt-arithmetic-check dd {
+  margin: 0;
+}
+
+.receipt-arithmetic-check dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.receipt-arithmetic-check dd {
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-align: right;
+}
+
+.receipt-arithmetic-check .receipt-arithmetic-delta {
+  padding: 7px 8px;
+  background: color-mix(in srgb, var(--control), var(--panel) 38%);
+  border-radius: 4px;
 }
 
 .document-error {
@@ -3520,7 +3760,7 @@ tbody tr:hover {
     flex: 0 0 46px;
   }
 
-  .segmented:not(.currency):not(.view):not(.daily-tools):not(.plant-comparison-mode):not(.range-segmented) {
+  .segmented:not(.currency):not(.view):not(.daily-tools):not(.plant-comparison-mode):not(.range-segmented):not(.receipt-details-tabs) {
     order: 5;
     flex: 1 1 100%;
     grid-template-columns: repeat(5, minmax(0, 1fr));

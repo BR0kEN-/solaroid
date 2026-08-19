@@ -388,7 +388,7 @@ function toDashboardRow({
     exportPrice: tariff.export,
     exportPriceDay: tariff.export,
     exportPriceNight: tariff.exportNight,
-    exportVat: taxValue(tariff.exportTaxes, 'vat'),
+    exportPersonalIncomeTax: taxValue(tariff.exportTaxes, 'vat'),
     exportMilitary: taxValue(tariff.exportTaxes, 'mil'),
     importPriceDay: tariff.importDay,
     importPriceNight: tariff.importNight,

@@ -19,7 +19,7 @@ function month(electricitySavings: number, date = '2026-01-01', usdRate = 50): M
     exportPrice: 5,
     exportPriceDay: 5,
     exportPriceNight: 0,
-    exportVat: 0,
+    exportPersonalIncomeTax: 0,
     exportMilitary: 0,
     importPriceDay: 4,
     importPriceNight: 2,
