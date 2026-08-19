@@ -340,7 +340,7 @@ function monthKey(date: Date) {
 }
 
 function netExportPrice(row: MonthRow) {
-  return row.exportPriceDay * (1 - taxFraction(row.exportVat) - taxFraction(row.exportMilitary))
+  return row.exportPriceDay * (1 - taxFraction(row.exportPersonalIncomeTax) - taxFraction(row.exportMilitary))
 }
 
 function tariffFromRow(row: MonthRow): Tariff {
@@ -351,7 +351,7 @@ function tariffFromRow(row: MonthRow): Tariff {
     export: row.exportPriceDay,
     exportNight: row.exportPriceNight,
     exportTaxes: [
-      ['vat', row.exportVat],
+      ['vat', row.exportPersonalIncomeTax],
       ['mil', row.exportMilitary],
     ],
   }

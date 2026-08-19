@@ -24,12 +24,13 @@ import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON
 import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
-import type { GreenTariffReport, MonthReceipt } from "./domain/types";
+import type { GreenTariffReconciliationValue, GreenTariffReport, MonthReceipt } from "./domain/types";
 import {
   capacityAdjustedProductionSurplus,
   capacityDeltaPct,
   exportPayout as splitExportPayout,
   exportTotal,
+  greenTariffReceiptReconciliation,
   importCostBreakdown,
   importEnergyCost,
   plantCapacityKwp,
@@ -47,6 +48,7 @@ type DailyRangeKey = "currentMonth" | "7d" | "14d" | "21d" | "30d" | "range";
 type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly";
 type DocumentsView = "list" | "pdf" | "details";
+type ReceiptDetailsTab = "reconciliation" | "data";
 const monthRangePresets = [1, 3, 6, 12] as const;
 const dailyRangePresets = [7, 14, 21, 30] as const;
 type Lang = "en" | "uk";
@@ -216,12 +218,12 @@ const i18n = {
     production: "Production",
     totalProduction: "Total production",
     totalProductionKpi: "Production",
-    totalProductionCostInfoDetails: "This hypothetical value treats every produced kWh as sold at its own month's export price after VAT and military tax. In USD mode, each month is converted using that month's USD/UAH rate.",
+    totalProductionCostInfoDetails: "This hypothetical value treats every produced kWh as sold at its own month's export price after personal income tax and military levy. In USD mode, each month is converted using that month's USD/UAH rate.",
     exported: "export",
     export: "Export",
     totalExport: "Total export",
     totalExportKpi: "Export",
-    totalExportCostInfoDetails: "The payout is calculated from net exported surplus after the monthly import/export balance, using each month's export price after VAT and military tax.",
+    totalExportCostInfoDetails: "The payout is calculated from net exported surplus after the monthly import/export balance, using each month's export price after personal income tax and military levy.",
     latest: "Latest",
     gridImport: "Import",
     totalImport: "Total import",
@@ -250,7 +252,7 @@ const i18n = {
     remainingImport: "Remaining import",
     netSurplus: "Net surplus",
     exportUnpaid: "Export is unpaid before the commercial date",
-    netPaymentLogic: "Net payment is the cash result of monthly import/export balancing. Balance is import minus export. If export is larger than import, the balance is negative and the net surplus is paid using the export price after VAT and military tax. Otherwise, export offsets import proportionally between day and night import, then the remaining day/night import is charged at its own rate.",
+    netPaymentLogic: "Net payment is the cash result of monthly import/export balancing. Balance is import minus export. If export is larger than import, the balance is negative and the net surplus is paid using the export price after personal income tax and military levy. Otherwise, export offsets import proportionally between day and night import, then the remaining day/night import is charged at its own rate.",
     netPaymentInfo: "UAH totals are summed directly. In USD mode, each month is converted using that month's USD/UAH rate, then those converted values are summed. It is not the UAH total divided by the latest rate.",
     usdRateInfo: "Monthly USD/UAH is the latest daily USD/UAH rate stored for that month. If a month has no daily rates, the dashboard uses the manually stored monthly USD/UAH fallback.",
     importPriceInfo: "Import prices are shown as day / night. Day is the rate from 7 AM to 11 PM; night is the rate from 11 PM to 7 AM.",
@@ -326,7 +328,7 @@ const i18n = {
     netExport: "Export",
     grossExportPrice: "Before taxes",
     netExportPrice: "After taxes",
-    vat: "VAT",
+    personalIncomeTax: "Personal income tax",
     militaryTax: "Military",
     importDay: "Import/day",
     importNight: "Import/night",
@@ -347,6 +349,35 @@ const i18n = {
     viewDocument: "View",
     viewReceiptDetails: "Details",
     receiptDetails: "Receipt details",
+    receiptReconciliation: "Reconciliation",
+    receiptData: "Receipt data",
+    receiptSummary: "Receipt summary",
+    receiptNetPayout: "Net payout",
+    receiptPayableEnergy: "Supplier payable",
+    receiptWithheldTaxes: "Withheld taxes",
+    receiptEffectiveNetRate: "Effective net rate",
+    receiptGridEnergy: "Grid energy",
+    receiptPayableBalance: "Payable balance",
+    receiptConsumer: "Consumer",
+    receiptSupplier: "Supplier",
+    receiptSettlement: "Settlement",
+    receiptTaxes: "Taxes",
+    receiptValues: "Receipt",
+    solaroidValues: "Solaroid",
+    receiptEnergyFromMeter: "Solaroid values use the utility-meter readings applied to this month.",
+    receiptEnergyFromHa: "Solaroid values use the Home Assistant telemetry available for this month.",
+    receiptArithmetic: "Receipt arithmetic",
+    receiptPrinted: "Printed",
+    receiptCalculated: "Calculated",
+    receiptSupplierPurchaseEnergy: "Supplier payable vs purchase energy",
+    receiptGreenTariffAmount: "Green tariff amount",
+    receiptWeightedPriceAmount: "Weighted-price amount",
+    receiptGrossAmount: "Gross vs purchase amounts",
+    receiptNetAmount: "Net after withheld taxes",
+    receiptDerived: "Derived values",
+    receiptEffectiveGrossRate: "Effective gross rate",
+    receiptWithheldTaxRate: "Withheld tax rate",
+    uahPerKwh: "UAH/kWh",
     reportDocument: "Document",
     reportAccount: "Account",
     reportEic: "EIC",
@@ -427,12 +458,12 @@ const i18n = {
     production: "Генерація",
     totalProduction: "Загальна генерація",
     totalProductionKpi: "Генерація",
-    totalProductionCostInfoDetails: "Це умовне значення рахує кожну згенеровану кВт·г як продану за ціною експорту свого місяця після ПДВ і військового збору. У режимі USD кожен місяць конвертується за його курсом USD/UAH.",
+    totalProductionCostInfoDetails: "Це умовне значення рахує кожну згенеровану кВт·г як продану за ціною експорту свого місяця після ПДФО і військового збору. У режимі USD кожен місяць конвертується за його курсом USD/UAH.",
     exported: "експорт",
     export: "Експорт",
     totalExport: "Загальний експорт",
     totalExportKpi: "Експорт",
-    totalExportCostInfoDetails: "Виплата рахується з чистого експортного надлишку після місячного балансу імпорту/експорту, за ціною експорту кожного місяця після ПДВ і військового збору.",
+    totalExportCostInfoDetails: "Виплата рахується з чистого експортного надлишку після місячного балансу імпорту/експорту, за ціною експорту кожного місяця після ПДФО і військового збору.",
     latest: "Останнє",
     gridImport: "Імпорт",
     totalImport: "Загальний імпорт",
@@ -461,7 +492,7 @@ const i18n = {
     remainingImport: "Залишок імпорту",
     netSurplus: "Чистий надлишок",
     exportUnpaid: "До комерційної дати експорт не оплачується",
-    netPaymentLogic: "Баланс оплати — це грошовий результат місячного балансу імпорту й експорту. Баланс рахується як імпорт мінус експорт. Якщо експорт більший за імпорт, баланс відʼємний і чистий надлишок оплачується за ціною експорту після ПДВ і військового збору. Інакше експорт пропорційно покриває денний і нічний імпорт, а залишок денного/нічного імпорту оплачується за відповідним тарифом.",
+    netPaymentLogic: "Баланс оплати — це грошовий результат місячного балансу імпорту й експорту. Баланс рахується як імпорт мінус експорт. Якщо експорт більший за імпорт, баланс відʼємний і чистий надлишок оплачується за ціною експорту після ПДФО і військового збору. Інакше експорт пропорційно покриває денний і нічний імпорт, а залишок денного/нічного імпорту оплачується за відповідним тарифом.",
     netPaymentInfo: "Суми в гривнях додаються напряму. У режимі USD кожен місяць конвертується за його курсом, а потім конвертовані значення додаються. Це не сума в гривнях, поділена на останній курс.",
     usdRateInfo: "Місячний курс USD/UAH — це останній денний курс USD/UAH, збережений за цей місяць. Якщо в місяці немає денних курсів, дашборд використовує вручну збережений місячний резервний курс USD/UAH.",
     importPriceInfo: "Ціни імпорту показані як день / ніч. День — тариф з 7:00 до 23:00; ніч — тариф з 23:00 до 7:00.",
@@ -537,7 +568,7 @@ const i18n = {
     netExport: "Експорт",
     grossExportPrice: "До податків",
     netExportPrice: "Після податків",
-    vat: "ПДВ",
+    personalIncomeTax: "ПДФО",
     militaryTax: "Військовий збір",
     importDay: "Імпорт/день",
     importNight: "Імпорт/ніч",
@@ -558,6 +589,35 @@ const i18n = {
     viewDocument: "Переглянути",
     viewReceiptDetails: "Дані",
     receiptDetails: "Дані акта",
+    receiptReconciliation: "Звірка",
+    receiptData: "Дані акта",
+    receiptSummary: "Підсумок акта",
+    receiptNetPayout: "До виплати",
+    receiptPayableEnergy: "До оплати постачальником",
+    receiptWithheldTaxes: "Утримано податків",
+    receiptEffectiveNetRate: "Ефективна чиста ціна",
+    receiptGridEnergy: "Обмін з мережею",
+    receiptPayableBalance: "Баланс до оплати",
+    receiptConsumer: "Споживач",
+    receiptSupplier: "Постачальник",
+    receiptSettlement: "Розрахунок",
+    receiptTaxes: "Податки",
+    receiptValues: "Акт",
+    solaroidValues: "Solaroid",
+    receiptEnergyFromMeter: "Значення Solaroid взято з показів лічильника, застосованих до цього місяця.",
+    receiptEnergyFromHa: "Значення Solaroid взято з телеметрії Home Assistant, доступної за цей місяць.",
+    receiptArithmetic: "Арифметика акта",
+    receiptPrinted: "Надруковано",
+    receiptCalculated: "Розраховано",
+    receiptSupplierPurchaseEnergy: "До оплати постачальником і обсяг купівлі",
+    receiptGreenTariffAmount: "Сума за зеленим тарифом",
+    receiptWeightedPriceAmount: "Сума за середньозваженою ціною",
+    receiptGrossAmount: "Нараховано і суми купівлі",
+    receiptNetAmount: "До виплати після податків",
+    receiptDerived: "Похідні значення",
+    receiptEffectiveGrossRate: "Ефективна ціна до податків",
+    receiptWithheldTaxRate: "Частка утриманих податків",
+    uahPerKwh: "грн/кВт·г",
     reportDocument: "Документ",
     reportAccount: "Особовий рахунок",
     reportEic: "EIC",
@@ -1136,7 +1196,7 @@ function tariffFromRow(row: MonthRow): Tariff {
     export: row.exportPrice,
     exportNight: row.exportPriceNight,
     exportTaxes: [
-      ["vat", row.exportVat],
+      ["vat", row.exportPersonalIncomeTax],
       ["mil", row.exportMilitary],
     ],
   };
@@ -1147,11 +1207,11 @@ function taxFraction(value: number) {
 }
 
 function netExportRate(row: MonthRow) {
-  return row.exportPrice * (1 - taxFraction(row.exportVat) - taxFraction(row.exportMilitary));
+  return row.exportPrice * (1 - taxFraction(row.exportPersonalIncomeTax) - taxFraction(row.exportMilitary));
 }
 
 function netExportNightRate(row: MonthRow) {
-  return row.exportPriceNight * (1 - taxFraction(row.exportVat) - taxFraction(row.exportMilitary));
+  return row.exportPriceNight * (1 - taxFraction(row.exportPersonalIncomeTax) - taxFraction(row.exportMilitary));
 }
 
 function exportPayoutKwh(row: MonthRow) {
@@ -2082,7 +2142,7 @@ function App({
             grossNight={formatDisplayMoney(grossNightPrice, currency, lang)}
             netDay={formatDisplayMoney(netDayPrice, currency, lang)}
             netNight={formatDisplayMoney(netNightPrice, currency, lang)}
-            vat={`${formatNumber(row.exportVat, 2, 2)}%`}
+            personalIncomeTax={`${formatNumber(row.exportPersonalIncomeTax, 2, 2)}%`}
             military={`${formatNumber(row.exportMilitary, 2, 2)}%`}
           />
         ),
@@ -6223,7 +6283,7 @@ function DocumentsModal({
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
       <section
-        className={`info-modal modal-card documents-modal${isPreviewing ? " is-previewing" : ""}`}
+        className={`info-modal modal-card documents-modal${isPreviewing ? " is-previewing" : ""}${isViewingDetails ? " is-details" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="documents-modal-title"
@@ -6269,7 +6329,7 @@ function DocumentsModal({
               <p className="pdf-preview-status" role="status">{t.documentLoading}</p>
             )
           ) : isViewingDetails && document?.report ? (
-            <GreenTariffReportDetails report={document.report} t={t} lang={lang} />
+            <GreenTariffReportDetails row={row} report={document.report} t={t} lang={lang} />
           ) : (
             <>
               <div className="document-item">
@@ -6321,11 +6381,220 @@ interface ReceiptReportRowData {
 }
 
 function GreenTariffReportDetails({
+  row,
   report,
   t,
   lang,
 }: {
+  readonly row: MonthRow;
   readonly report: GreenTariffReport;
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+}) {
+  const [tab, setTab] = useState<ReceiptDetailsTab>("reconciliation");
+  const reconciliation = useMemo(() => greenTariffReceiptReconciliation(row, report), [report, row]);
+
+  return (
+    <div className="receipt-details">
+      <div className="segmented receipt-details-tabs" role="tablist" aria-label={t.receiptDetails}>
+        <button
+          type="button"
+          role="tab"
+          id="receipt-reconciliation-tab"
+          aria-controls="receipt-details-panel"
+          aria-selected={tab === "reconciliation"}
+          className={tab === "reconciliation" ? "selected" : ""}
+          onClick={() => setTab("reconciliation")}
+        >
+          {t.receiptReconciliation}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="receipt-data-tab"
+          aria-controls="receipt-details-panel"
+          aria-selected={tab === "data"}
+          className={tab === "data" ? "selected" : ""}
+          onClick={() => setTab("data")}
+        >
+          {t.receiptData}
+        </button>
+      </div>
+      <div
+        id="receipt-details-panel"
+        className="receipt-details-tabpanel"
+        role="tabpanel"
+        aria-labelledby={tab === "reconciliation" ? "receipt-reconciliation-tab" : "receipt-data-tab"}
+      >
+        {tab === "reconciliation" ? (
+          <GreenTariffReconciliationDetails reconciliation={reconciliation} t={t} lang={lang} />
+        ) : (
+          <GreenTariffReportData report={report} reconciliation={reconciliation} t={t} lang={lang} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GreenTariffReconciliationDetails({
+  reconciliation,
+  t,
+  lang,
+}: {
+  readonly reconciliation: ReturnType<typeof greenTariffReceiptReconciliation>;
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+}) {
+  const summary = reconciliation.summary;
+  const formatEnergy = (value: number) => formatNumber(value, 2, 2);
+  const formatMoneyValue = (value: number) => formatNumber(value, 2, 2);
+
+  return (
+    <div className="receipt-reconciliation">
+      <section className="receipt-summary">
+        <h3>{t.receiptSummary}</h3>
+        <dl>
+          <div>
+            <dt>{t.receiptNetPayout}</dt>
+            <dd>{formatMoney(summary.netUah, "UAH", lang)}</dd>
+          </div>
+          <div>
+            <dt>{t.receiptPayableEnergy}</dt>
+            <dd>{formatKwh(summary.supplierPayableKwh, lang)}</dd>
+          </div>
+          <div>
+            <dt>{t.receiptWithheldTaxes}</dt>
+            <dd>{formatMoney(summary.withheldUah, "UAH", lang)}</dd>
+          </div>
+          <div>
+            <dt>{t.receiptEffectiveNetRate}</dt>
+            <dd>{formatOptionalRate(summary.effectiveNetUahPerKwh, t)}</dd>
+          </div>
+        </dl>
+      </section>
+      <p className="receipt-energy-source">
+        {reconciliation.energySource === "utility-meter" ? t.receiptEnergyFromMeter : t.receiptEnergyFromHa}
+      </p>
+      <ReceiptComparisonTable
+        title={t.receiptGridEnergy}
+        unit={energyUnit(lang)}
+        columns={[
+          { label: t.import, value: reconciliation.grid.importKwh },
+          { label: t.export, value: reconciliation.grid.exportKwh },
+        ]}
+        formatValue={formatEnergy}
+        t={t}
+      />
+      <ReceiptComparisonTable
+        title={t.receiptPayableBalance}
+        unit={energyUnit(lang)}
+        columns={[
+          { label: t.receiptConsumer, value: reconciliation.payable.consumerKwh },
+          { label: t.receiptSupplier, value: reconciliation.payable.supplierKwh },
+        ]}
+        formatValue={formatEnergy}
+        t={t}
+      />
+      <ReceiptComparisonTable
+        title={t.receiptSettlement}
+        unit="UAH"
+        columns={[
+          { label: t.reportGross, value: reconciliation.settlement.grossUah },
+          { label: t.reportNet, value: reconciliation.settlement.netUah },
+        ]}
+        formatValue={formatMoneyValue}
+        t={t}
+      />
+      <ReceiptComparisonTable
+        title={t.receiptTaxes}
+        unit="UAH"
+        columns={[
+          { label: t.reportPersonalIncomeTax, value: reconciliation.taxes.personalIncomeUah },
+          { label: t.reportMilitaryLevy, value: reconciliation.taxes.militaryLevyUah },
+        ]}
+        formatValue={formatMoneyValue}
+        t={t}
+      />
+    </div>
+  );
+}
+
+interface ReceiptComparisonColumn {
+  readonly label: string;
+  readonly value: GreenTariffReconciliationValue;
+}
+
+function ReceiptComparisonTable({
+  title,
+  unit,
+  columns,
+  formatValue,
+  t,
+}: {
+  readonly title: string;
+  readonly unit: string;
+  readonly columns: readonly [ReceiptComparisonColumn, ReceiptComparisonColumn];
+  readonly formatValue: (value: number) => string;
+  readonly t: Record<string, string>;
+}) {
+  return (
+    <section className="receipt-comparison-section">
+      <h3>{title}<span>{unit}</span></h3>
+      <table className="receipt-comparison-table">
+        <thead>
+          <tr>
+            <th />
+            {columns.map((column) => <th key={column.label}>{column.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>{t.receiptValues}</th>
+            {columns.map((column) => <td key={column.label}>{formatValue(column.value.receipt)}</td>)}
+          </tr>
+          <tr>
+            <th>{t.solaroidValues}</th>
+            {columns.map((column) => <td key={column.label}>{formatValue(column.value.solaroid)}</td>)}
+          </tr>
+          <tr className="receipt-comparison-delta">
+            <th>{t.delta}</th>
+            {columns.map((column) => (
+              <td key={column.label}>
+                <ReceiptDelta value={column.value} formatValue={formatValue} />
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function ReceiptDelta({
+  value,
+  formatValue,
+}: {
+  readonly value: GreenTariffReconciliationValue;
+  readonly formatValue: (value: number) => string;
+}) {
+  const normalizedDelta = Math.abs(value.delta) < 0.000001 ? 0 : value.delta;
+
+  return (
+    <span className="receipt-delta-value">
+      <span>{normalizedDelta > 0 ? "+" : ""}{formatValue(normalizedDelta)}</span>
+      <span>{value.deltaPercent === undefined ? "—" : `${formatNumber(value.deltaPercent, 2, 2)}%`}</span>
+    </span>
+  );
+}
+
+function GreenTariffReportData({
+  report,
+  reconciliation,
+  t,
+  lang,
+}: {
+  readonly report: GreenTariffReport;
+  readonly reconciliation: ReturnType<typeof greenTariffReceiptReconciliation>;
   readonly t: Record<string, string>;
   readonly lang: Lang;
 }) {
@@ -6364,8 +6633,60 @@ function GreenTariffReportDetails({
           { label: t.reportNet, value: formatMoney(report.payment.netUah, "UAH", lang) },
         ]}
       />
+      <ReceiptReportSection
+        title={t.receiptDerived}
+        rows={[
+          { label: t.receiptEffectiveGrossRate, value: formatOptionalRate(reconciliation.summary.effectiveGrossUahPerKwh, t) },
+          { label: t.receiptEffectiveNetRate, value: formatOptionalRate(reconciliation.summary.effectiveNetUahPerKwh, t) },
+          { label: t.receiptWithheldTaxRate, value: reconciliation.summary.withheldTaxPercent === undefined ? "—" : `${formatNumber(reconciliation.summary.withheldTaxPercent, 2, 2)}%` },
+        ]}
+      />
+      <ReceiptArithmeticDetails arithmetic={reconciliation.arithmetic} t={t} lang={lang} />
     </div>
   );
+}
+
+function ReceiptArithmeticDetails({
+  arithmetic,
+  t,
+  lang,
+}: {
+  readonly arithmetic: ReturnType<typeof greenTariffReceiptReconciliation>["arithmetic"];
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+}) {
+  const checks = [
+    { label: t.receiptSupplierPurchaseEnergy, value: arithmetic.supplierPayableKwh, format: (value: number) => formatKwh(value, lang) },
+    { label: t.receiptGreenTariffAmount, value: arithmetic.greenTariffAmountUah, format: (value: number) => formatMoney(value, "UAH", lang) },
+    { label: t.receiptWeightedPriceAmount, value: arithmetic.weightedPriceAmountUah, format: (value: number) => formatMoney(value, "UAH", lang) },
+    { label: t.receiptGrossAmount, value: arithmetic.grossUah, format: (value: number) => formatMoney(value, "UAH", lang) },
+    { label: t.receiptNetAmount, value: arithmetic.netUah, format: (value: number) => formatMoney(value, "UAH", lang) },
+  ];
+
+  return (
+    <section className="receipt-report-section receipt-arithmetic">
+      <h3>{t.receiptArithmetic}</h3>
+      <div className="receipt-arithmetic-list">
+        {checks.map((check) => (
+          <section key={check.label} className="receipt-arithmetic-check">
+            <h4>{check.label}</h4>
+            <dl>
+              <div><dt>{t.receiptPrinted}</dt><dd>{check.format(check.value.receipt)}</dd></div>
+              <div><dt>{t.receiptCalculated}</dt><dd>{check.format(check.value.solaroid)}</dd></div>
+              <div className="receipt-arithmetic-delta">
+                <dt>{t.delta}</dt>
+                <dd><ReceiptDelta value={check.value} formatValue={check.format} /></dd>
+              </div>
+            </dl>
+          </section>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function formatOptionalRate(value: number | undefined, t: Record<string, string>) {
+  return value === undefined ? "—" : `${formatNumber(value, 2, 2)} ${t.uahPerKwh}`;
 }
 
 function ReceiptPurchaseDetails({
@@ -6566,7 +6887,7 @@ function ExportPriceInfo({
   grossNight,
   netDay,
   netNight,
-  vat,
+  personalIncomeTax,
   military,
 }: {
   readonly t: Record<string, string>;
@@ -6574,7 +6895,7 @@ function ExportPriceInfo({
   readonly grossNight: string;
   readonly netDay: string;
   readonly netNight: string;
-  readonly vat: string;
+  readonly personalIncomeTax: string;
   readonly military: string;
 }) {
   return (
@@ -6586,7 +6907,7 @@ function ExportPriceInfo({
           label: t.taxes,
           value: (
             <span className="tax-inline-values">
-              <span>{vat} {t.vat}</span>
+              <span>{personalIncomeTax} {t.personalIncomeTax}</span>
               {", "}
               <span>{military} {t.militaryTax}</span>
             </span>
@@ -7013,7 +7334,7 @@ function NetPaymentInfo({
           grossNight={displayMoney(row.exportPriceNight)}
           netDay={displayMoney(netExportPrice(row))}
           netNight={displayMoney(netExportNightPrice(row))}
-          vat={`${formatNumber(row.exportVat, 2, 2)}%`}
+          personalIncomeTax={`${formatNumber(row.exportPersonalIncomeTax, 2, 2)}%`}
           military={`${formatNumber(row.exportMilitary, 2, 2)}%`}
         />
       ),

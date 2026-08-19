@@ -1,4 +1,12 @@
-import type { EnergySnapshot, PlantMetadata, Tariff } from './types'
+import type {
+  EnergySnapshot,
+  GreenTariffReconciliationValue,
+  GreenTariffReport,
+  GreenTariffReceiptReconciliation,
+  MonthRow,
+  PlantMetadata,
+  Tariff,
+} from './types'
 
 export const PERCENT_DIVISOR = 100
 export const ELECTRIC_HEATING_REGULAR_PRICE_MULTIPLIER = 4.32 / 2.64
@@ -70,6 +78,104 @@ export function exportPayout(row: EnergySnapshot, tariff: Tariff) {
   const paidDay = surplus * (row.exportDay / totalExport)
   const paidNight = surplus - paidDay
   return paidDay * netExportPrice(tariff) + paidNight * netExportNightPrice(tariff)
+}
+
+export function grossExportPayout(row: EnergySnapshot, tariff: Tariff) {
+  const surplus = Math.max(0, -commercialBalance(row, true))
+  const totalExport = exportTotal(row)
+  if (surplus <= 0 || totalExport <= 0) return 0
+
+  const paidDay = surplus * (row.exportDay / totalExport)
+  const paidNight = surplus - paidDay
+  return paidDay * tariff.export + paidNight * tariff.exportNight
+}
+
+export function reconciliationValue(receipt: number, solaroid: number): GreenTariffReconciliationValue {
+  const delta = receipt - solaroid
+  const deltaPercent = solaroid === 0
+    ? delta === 0 ? 0 : undefined
+    : Math.abs(delta / solaroid) * PERCENT_DIVISOR
+
+  return { receipt, solaroid, delta, deltaPercent }
+}
+
+export function greenTariffReceiptReconciliation(
+  row: MonthRow,
+  report: GreenTariffReport,
+): GreenTariffReceiptReconciliation {
+  const tariff: Tariff = {
+    importDay: row.importPriceDay,
+    importNight: row.importPriceNight,
+    electricHeatingThresholdKwh: row.electricHeatingThresholdKwh,
+    export: row.exportPriceDay,
+    exportNight: row.exportPriceNight,
+    exportTaxes: [
+      ['vat', row.exportPersonalIncomeTax],
+      ['mil', row.exportMilitary],
+    ],
+  }
+  const solaroidGrossUah = grossExportPayout(row, tariff)
+  const personalIncomeRate = percentageRate(row.exportPersonalIncomeTax)
+  const militaryLevyRate = percentageRate(row.exportMilitary)
+  const solaroidPersonalIncomeUah = solaroidGrossUah * personalIncomeRate
+  const solaroidMilitaryLevyUah = solaroidGrossUah * militaryLevyRate
+  const solaroidNetUah = solaroidGrossUah - solaroidPersonalIncomeUah - solaroidMilitaryLevyUah
+  const solaroidConsumerKwh = Math.max(row.balance, 0)
+  const solaroidSupplierKwh = Math.max(-row.balance, 0)
+  const purchaseKwh = report.purchase.greenTariff.kwh + report.purchase.weightedPrice.kwh
+  const greenTariffCalculatedUah = purchaseAmount(report.purchase.greenTariff.kwh, report.purchase.greenTariff.priceKopPerKwh)
+  const weightedPriceCalculatedUah = purchaseAmount(report.purchase.weightedPrice.kwh, report.purchase.weightedPrice.priceKopPerKwh)
+  const purchaseAmountUah = report.purchase.greenTariff.amountUah + report.purchase.weightedPrice.amountUah
+  const withheldUah = report.payment.taxes.personalIncomeUah + report.payment.taxes.militaryLevyUah
+  const calculatedNetUah = report.payment.grossUah - withheldUah
+  const supplierPayableKwh = report.energy.payable.supplierKwh
+
+  return {
+    summary: {
+      netUah: report.payment.netUah,
+      supplierPayableKwh,
+      withheldUah,
+      effectiveGrossUahPerKwh: ratio(report.payment.grossUah, supplierPayableKwh),
+      effectiveNetUahPerKwh: ratio(report.payment.netUah, supplierPayableKwh),
+      withheldTaxPercent: ratio(withheldUah * PERCENT_DIVISOR, report.payment.grossUah),
+    },
+    energySource: row.utilityMeter ? 'utility-meter' : 'home-assistant',
+    grid: {
+      importKwh: reconciliationValue(report.energy.grid.importKwh, row.importTotal),
+      exportKwh: reconciliationValue(report.energy.grid.exportKwh, exportTotal(row)),
+    },
+    payable: {
+      consumerKwh: reconciliationValue(report.energy.payable.consumerKwh, solaroidConsumerKwh),
+      supplierKwh: reconciliationValue(supplierPayableKwh, solaroidSupplierKwh),
+    },
+    settlement: {
+      grossUah: reconciliationValue(report.payment.grossUah, solaroidGrossUah),
+      netUah: reconciliationValue(report.payment.netUah, solaroidNetUah),
+    },
+    taxes: {
+      personalIncomeUah: reconciliationValue(report.payment.taxes.personalIncomeUah, solaroidPersonalIncomeUah),
+      militaryLevyUah: reconciliationValue(report.payment.taxes.militaryLevyUah, solaroidMilitaryLevyUah),
+    },
+    arithmetic: {
+      supplierPayableKwh: reconciliationValue(supplierPayableKwh, purchaseKwh),
+      greenTariffAmountUah: reconciliationValue(report.purchase.greenTariff.amountUah, greenTariffCalculatedUah),
+      weightedPriceAmountUah: reconciliationValue(report.purchase.weightedPrice.amountUah, weightedPriceCalculatedUah),
+      grossUah: reconciliationValue(report.payment.grossUah, purchaseAmountUah),
+      netUah: reconciliationValue(report.payment.netUah, calculatedNetUah),
+    },
+  }
+}
+
+function percentageRate(value: number) {
+  return value > 1 ? value / PERCENT_DIVISOR : value
+}
+
+function purchaseAmount(kwh: number, priceKopPerKwh: number) {
+  return kwh * priceKopPerKwh / PERCENT_DIVISOR
+}
+
+function ratio(value: number, base: number) {
+  return base === 0 ? undefined : value / base
 }
 
 function hasElectricHeatingTier(tariff: Tariff) {

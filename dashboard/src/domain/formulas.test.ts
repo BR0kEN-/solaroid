@@ -8,6 +8,8 @@ import {
   consumedTotal,
   exportPayout,
   exportTaxRate,
+  greenTariffReceiptReconciliation,
+  grossExportPayout,
   importCostBreakdown,
   importTotal,
   netExportPrice,
@@ -15,12 +17,13 @@ import {
   payment,
   plantCapacityKwp,
   productionYieldKwhPerKwp,
+  reconciliationValue,
   savings,
   selfConsumed,
   selfConsumptionSavings,
   weightedImportPrice,
 } from './formulas'
-import type { EnergySnapshot, Tariff } from './types'
+import type { EnergySnapshot, GreenTariffReport, MonthRow, Tariff } from './types'
 
 const tariff: Tariff = {
   importDay: 4.32,
@@ -217,5 +220,149 @@ describe('payment and savings', () => {
 
   it('calculates commercial savings as consumed price plus net payment', () => {
     expect(savings({ ...row, exportDay: 15, exportNight: 0 }, tariff, true)).toBe(334.8)
+  })
+})
+
+describe('green tariff receipt reconciliation', () => {
+  const receiptRow: MonthRow = {
+    month: 'May 2026',
+    date: new Date('2026-05-01T00:00:00'),
+    production: 300,
+    exportDay: 180,
+    exportNight: 20,
+    importDay: 40,
+    importNight: 10,
+    consumedDay: 100,
+    consumedNight: 50,
+    consumedTotal: 150,
+    importTotal: 50,
+    balance: -150,
+    exportPrice: 6,
+    exportPriceDay: 6,
+    exportPriceNight: 4,
+    exportPersonalIncomeTax: 18,
+    exportMilitary: 5,
+    importPriceDay: 4.32,
+    importPriceNight: 2.16,
+    consumedPayment: 0,
+    electricityPayment: 669.9,
+    electricitySavings: 0,
+    usdRate: 40,
+    roiUsd: 0,
+    isCommercial: true,
+  }
+  const report: GreenTariffReport = {
+    account: 'synthetic-account',
+    eic: '00X0000000000000',
+    actDate: '2026-05-31',
+    energy: {
+      grid: { importKwh: 50, exportKwh: 200 },
+      payable: { consumerKwh: 0, supplierKwh: 150 },
+    },
+    purchase: {
+      greenTariff: { kwh: 135, priceKopPerKwh: 600, amountUah: 810 },
+      weightedPrice: { kwh: 15, priceKopPerKwh: 400, amountUah: 60 },
+    },
+    payment: {
+      grossUah: 870,
+      taxes: { personalIncomeUah: 156.6, militaryLevyUah: 43.5 },
+      netUah: 669.9,
+    },
+  }
+
+  it('reconciles matching grid, payable, split-price payout, and taxes', () => {
+    const result = greenTariffReceiptReconciliation(receiptRow, report)
+
+    expect(result.grid.importKwh.delta).toBe(0)
+    expect(result.grid.exportKwh.delta).toBe(0)
+    expect(result.payable.consumerKwh.delta).toBe(0)
+    expect(result.payable.supplierKwh.delta).toBe(0)
+    expect(result.settlement.grossUah.solaroid).toBeCloseTo(870)
+    expect(result.settlement.netUah.solaroid).toBeCloseTo(669.9)
+    expect(result.taxes.personalIncomeUah.solaroid).toBeCloseTo(156.6)
+    expect(result.taxes.militaryLevyUah.solaroid).toBeCloseTo(43.5)
+    expect(result.summary.withheldUah).toBeCloseTo(200.1)
+    expect(result.summary.effectiveGrossUahPerKwh).toBeCloseTo(5.8)
+    expect(result.summary.effectiveNetUahPerKwh).toBeCloseTo(4.466)
+    expect(result.summary.withheldTaxPercent).toBeCloseTo(23)
+    expect(result.energySource).toBe('home-assistant')
+  })
+
+  it('calculates receipt-minus-Solaroid deltas and unsigned percentages', () => {
+    const result = greenTariffReceiptReconciliation(receiptRow, {
+      ...report,
+      energy: {
+        grid: { importKwh: 51, exportKwh: 198 },
+        payable: { consumerKwh: 2, supplierKwh: 155 },
+      },
+    })
+
+    expect(result.grid.importKwh.delta).toBe(1)
+    expect(result.grid.importKwh.deltaPercent).toBe(2)
+    expect(result.grid.exportKwh.delta).toBe(-2)
+    expect(result.grid.exportKwh.deltaPercent).toBe(1)
+    expect(result.payable.supplierKwh.delta).toBe(5)
+    expect(result.payable.supplierKwh.deltaPercent).toBeCloseTo(3.3333)
+  })
+
+  it('checks purchase rows, totals, and net arithmetic without tolerance states', () => {
+    const result = greenTariffReceiptReconciliation(receiptRow, {
+      ...report,
+      purchase: {
+        greenTariff: { kwh: 135, priceKopPerKwh: 600, amountUah: 811 },
+        weightedPrice: { kwh: 15, priceKopPerKwh: 400, amountUah: 60 },
+      },
+      payment: {
+        ...report.payment,
+        grossUah: 872,
+        netUah: 670,
+      },
+    })
+
+    expect(result.arithmetic.supplierPayableKwh.delta).toBe(0)
+    expect(result.arithmetic.greenTariffAmountUah.delta).toBe(1)
+    expect(result.arithmetic.weightedPriceAmountUah.delta).toBe(0)
+    expect(result.arithmetic.grossUah.delta).toBe(1)
+    expect(result.arithmetic.netUah.delta).toBeCloseTo(-1.9)
+  })
+
+  it('preserves small purchase rounding differences', () => {
+    const result = greenTariffReceiptReconciliation(receiptRow, {
+      ...report,
+      purchase: {
+        ...report.purchase,
+        weightedPrice: { kwh: 3, priceKopPerKwh: 333.33, amountUah: 10 },
+      },
+    })
+
+    expect(result.arithmetic.weightedPriceAmountUah.solaroid).toBeCloseTo(9.9999)
+    expect(result.arithmetic.weightedPriceAmountUah.delta).toBeCloseTo(0.0001)
+  })
+
+  it('handles zero comparison baselines', () => {
+    expect(reconciliationValue(0, 0).deltaPercent).toBe(0)
+    expect(reconciliationValue(5, 0).deltaPercent).toBeUndefined()
+  })
+
+  it('calculates gross split-price payout before taxes', () => {
+    expect(grossExportPayout(receiptRow, {
+      importDay: 4.32,
+      importNight: 2.16,
+      export: 6,
+      exportNight: 4,
+      exportTaxes: [],
+    })).toBeCloseTo(870)
+  })
+
+  it('identifies utility-meter energy as the Solaroid source', () => {
+    const result = greenTariffReceiptReconciliation({
+      ...receiptRow,
+      utilityMeter: {
+        ha: { importDay: 39, importNight: 10, exportDay: 179, exportNight: 20 },
+        utility: { importDay: 40, importNight: 10, exportDay: 180, exportNight: 20 },
+      },
+    }, report)
+
+    expect(result.energySource).toBe('utility-meter')
   })
 })
