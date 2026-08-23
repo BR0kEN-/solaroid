@@ -3,6 +3,7 @@ import type {
   GreenTariffReconciliationValue,
   GreenTariffReport,
   GreenTariffReceiptReconciliation,
+  MonthTariffScenario,
   MonthRow,
   PlantMetadata,
   Tariff,
@@ -308,4 +309,88 @@ export function savings(row: EnergySnapshot, tariff: Tariff, isCommercial = true
   if (!isCommercial) return selfConsumptionSavings(row, tariff)
 
   return consumedPrice(row, tariff) + payment(row, tariff, isCommercial)
+}
+
+export function tariffFromMonthRow(row: MonthRow): Tariff {
+  return {
+    importDay: row.importPriceDay,
+    importNight: row.importPriceNight,
+    electricHeatingThresholdKwh: row.electricHeatingThresholdKwh,
+    export: row.exportPriceDay,
+    exportNight: row.exportPriceNight,
+    exportTaxes: [
+      ['vat', row.exportPersonalIncomeTax],
+      ['mil', row.exportMilitary],
+    ],
+  }
+}
+
+export function repriceMonthRow(
+  row: MonthRow,
+  scenario: MonthTariffScenario,
+  transitionDailyRows: readonly MonthRow[] = [],
+): MonthRow {
+  const baseTariff = tariffFromMonthRow(row)
+  const baseNetExportDay = netExportPrice(baseTariff)
+  const exportScale = baseNetExportDay > 0
+    ? scenario.netExportDayUahPerKwh / baseNetExportDay
+    : 1
+  const tariff: Tariff = {
+    ...baseTariff,
+    importDay: scenario.importDayUahPerKwh,
+    importNight: scenario.importNightUahPerKwh,
+    export: baseTariff.export * exportScale,
+    exportNight: baseTariff.exportNight * exportScale,
+  }
+  const repriced = repriceFinancials(row, tariff, scenario.usdRate)
+  const hasCommercialTransition = transitionDailyRows.some((dailyRow) => dailyRow.isCommercial)
+    && transitionDailyRows.some((dailyRow) => !dailyRow.isCommercial)
+
+  if (!hasCommercialTransition) return repriced
+
+  const transitionFinancials = transitionDailyRows.reduce(
+    (totals, dailyRow) => {
+      const dailyTariff = tariffFromMonthRow(dailyRow)
+      const adjustedDailyTariff: Tariff = {
+        ...dailyTariff,
+        importDay: scenario.importDayUahPerKwh,
+        importNight: scenario.importNightUahPerKwh,
+        export: dailyTariff.export * exportScale,
+        exportNight: dailyTariff.exportNight * exportScale,
+      }
+      const adjustedDailyRow = repriceFinancials(dailyRow, adjustedDailyTariff)
+      return {
+        electricityPayment: totals.electricityPayment + adjustedDailyRow.electricityPayment,
+        electricitySavings: totals.electricitySavings + adjustedDailyRow.electricitySavings,
+      }
+    },
+    { electricityPayment: 0, electricitySavings: 0 },
+  )
+
+  return {
+    ...repriced,
+    electricityPayment: transitionFinancials.electricityPayment,
+    electricitySavings: transitionFinancials.electricitySavings,
+    roiUsd: scenario.usdRate ? transitionFinancials.electricitySavings / scenario.usdRate : 0,
+  }
+}
+
+function repriceFinancials(row: MonthRow, tariff: Tariff, usdRate = row.usdRate): MonthRow {
+  const consumedPayment = consumedPrice(row, tariff)
+  const electricityPayment = payment(row, tariff, row.isCommercial)
+  const electricitySavings = savings(row, tariff, row.isCommercial)
+
+  return {
+    ...row,
+    exportPrice: tariff.export,
+    exportPriceDay: tariff.export,
+    exportPriceNight: tariff.exportNight,
+    importPriceDay: tariff.importDay,
+    importPriceNight: tariff.importNight,
+    consumedPayment,
+    electricityPayment,
+    electricitySavings,
+    usdRate,
+    roiUsd: usdRate ? electricitySavings / usdRate : 0,
+  }
 }

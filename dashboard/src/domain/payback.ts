@@ -45,6 +45,11 @@ export interface CommercialRecoveryDetails {
   readonly commercialEndDate: Date
 }
 
+interface CommercialMonthOverride {
+  readonly tariff: Tariff
+  readonly usdRate: number
+}
+
 const DEFAULT_ANNUAL_SELF_CONSUMPTION_KWH = 17_000
 const SELF_CONSUMPTION_DAY_SHARE = 2 / 3
 const ROI_FORECAST_MAX_YEARS = 60
@@ -87,6 +92,7 @@ export function calculateCommercialEndRecovery({
   launchDate,
   endDate,
   projection,
+  tariffOverrides,
   today = new Date(),
 }: {
   readonly rows: readonly MonthRow[]
@@ -96,6 +102,7 @@ export function calculateCommercialEndRecovery({
   readonly launchDate?: Date
   readonly endDate: Date
   readonly projection?: ProductionProjection | null
+  readonly tariffOverrides?: ReadonlyMap<string, CommercialMonthOverride>
   readonly today?: Date
 }): CommercialEndRecoveryResult {
   if (!commercialDate || !launchDate || endDate <= launchDate) {
@@ -112,6 +119,7 @@ export function calculateCommercialEndRecovery({
     investment: payback.investment,
     currency,
     projection,
+    tariffOverrides,
     today,
   })
 }
@@ -124,6 +132,7 @@ function projectedRecovery({
   investment,
   currency,
   projection,
+  tariffOverrides,
   today,
 }: {
   readonly rows: readonly MonthRow[]
@@ -133,6 +142,7 @@ function projectedRecovery({
   readonly investment: number
   readonly currency: Currency
   readonly projection?: ProductionProjection | null
+  readonly tariffOverrides?: ReadonlyMap<string, CommercialMonthOverride>
   readonly today: Date
 }) {
   const forecastEnd = addMonths(commercialEndDate, ROI_FORECAST_MAX_YEARS * 12)
@@ -144,7 +154,7 @@ function projectedRecovery({
   let roiDate: Date | null = null
 
   for (const month of monthsBetween(launchDate, forecastEnd)) {
-    const value = projectedMonthRecovery(rows, month, launchDate, commercialDate, commercialEndDate, forecastEnd, currency, productionBasis.kwh, consumptionBasis.totalKwh)
+    const value = projectedMonthRecovery(rows, month, launchDate, commercialDate, commercialEndDate, forecastEnd, currency, productionBasis.kwh, consumptionBasis.totalKwh, tariffOverrides)
 
     if (month < commercialEndDate) {
       recoveredAtCommercialEnd += value
@@ -174,6 +184,7 @@ function projectedMonthRecovery(
   currency: Currency,
   annualProductionKwh: number,
   annualConsumptionKwh: number,
+  tariffOverrides?: ReadonlyMap<string, CommercialMonthOverride>,
 ) {
   const rowsByMonth = new Map(rows.map((row) => [monthKey(row.date), row]))
   const activeShare = monthOverlapShare(month, launchDate, forecastEnd)
@@ -182,16 +193,19 @@ function projectedMonthRecovery(
   const row = tariffRowForMonth(rows, month) ?? rowsByMonth.get(monthKey(month))
   if (!row) return 0
 
+  const override = tariffOverrides?.get(monthKey(month))
+  const tariff = override?.tariff ?? tariffFromRow(row)
+
   const commercialShare = monthOverlapShare(month, commercialDate, commercialEndDate)
   const selfConsumption = (annualConsumptionKwh / 12) * activeShare
   const paidExport = annualPaidExport(annualProductionKwh, annualConsumptionKwh) / 12 * commercialShare
   const selfConsumptionDay = selfConsumption * SELF_CONSUMPTION_DAY_SHARE
   const selfConsumptionNight = selfConsumption - selfConsumptionDay
   const recovery =
-    paidExport * netExportPrice(row) +
-    importEnergyCost(selfConsumptionDay, selfConsumptionNight, tariffFromRow(row))
+    paidExport * netExportPrice(tariff) +
+    importEnergyCost(selfConsumptionDay, selfConsumptionNight, tariff)
 
-  return moneyFromUah(recovery, currency, row.usdRate)
+  return moneyFromUah(recovery, currency, override?.usdRate ?? row.usdRate)
 }
 
 function annualPaidExport(annualProduction: number, annualSelfConsumption: number) {
@@ -317,7 +331,7 @@ function annualSurplusValue(rows: readonly MonthRow[], annualProduction: number,
     const row = tariffRowForMonthIndex(rows, monthIndex)
     if (!row) continue
 
-    value += moneyFromUah(monthlySurplus * netExportPrice(row), currency, row.usdRate)
+    value += moneyFromUah(monthlySurplus * netExportPrice(tariffFromRow(row)), currency, row.usdRate)
   }
 
   return value
@@ -339,8 +353,8 @@ function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
-function netExportPrice(row: MonthRow) {
-  return row.exportPriceDay * (1 - taxFraction(row.exportPersonalIncomeTax) - taxFraction(row.exportMilitary))
+function netExportPrice(tariff: Tariff) {
+  return tariff.export * (1 - tariff.exportTaxes.reduce((sum, [, value]) => sum + taxFraction(value), 0))
 }
 
 function tariffFromRow(row: MonthRow): Tariff {

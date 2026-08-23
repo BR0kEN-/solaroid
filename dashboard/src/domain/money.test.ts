@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   moneyFromUah,
   moneyFromUsd,
+  moneyToUah,
   rowRoiMoney,
   sumRowsFromUah,
   sumRowsRoiMoney,
@@ -46,6 +47,11 @@ describe('currency conversion', () => {
     expect(moneyFromUah(1000, 'USD', 0)).toBe(0)
     expect(moneyFromUsd(25, 'USD', 40)).toBe(25)
     expect(moneyFromUsd(25, 'UAH', 40)).toBe(1000)
+  })
+
+  it('converts a selected-currency input back to canonical UAH', () => {
+    expect(moneyToUah(4.32, 'UAH', 40)).toBe(4.32)
+    expect(moneyToUah(0.108, 'USD', 40)).toBeCloseTo(4.32)
   })
 })
 

@@ -31,6 +31,13 @@ export interface MonthRow {
   readonly receipt?: MonthReceipt
 }
 
+export interface MonthTariffScenario {
+  readonly netExportDayUahPerKwh: number
+  readonly importDayUahPerKwh: number
+  readonly importNightUahPerKwh: number
+  readonly usdRate: number
+}
+
 export interface MonthReceipt {
   readonly id?: string
   readonly path: string
