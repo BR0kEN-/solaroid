@@ -306,4 +306,94 @@ describe('payback', () => {
     expect(result.roiPhase).toBe('post-commercial')
     expect(dateKey(result.roiDate)).toBe('2030-01-20')
   })
+
+  it('applies a tariff override to its exact month without leaking forward', () => {
+    const rows = [month(0, '2026-01-01')]
+    const payback = calculatePayback({
+      rows,
+      investmentUsd: 1_000_000,
+      currency: 'UAH',
+      launchUsdRate: 1,
+      launchDate: new Date('2026-01-01T00:00:00'),
+      today: new Date('2026-01-01T00:00:00'),
+    })
+    const common = {
+      rows,
+      payback: payback!,
+      currency: 'UAH' as const,
+      commercialDate: new Date('2026-01-01T00:00:00'),
+      launchDate: new Date('2026-01-01T00:00:00'),
+      endDate: new Date('2026-03-01T00:00:00'),
+      projection: {
+        monthlyKwh: Array.from({ length: 12 }, () => 2_000),
+        dailyKwh: Array.from({ length: 12 }, () => 1),
+      },
+      today: new Date('2026-01-01T00:00:00'),
+    }
+    const baseline = calculateCommercialEndRecovery(common)
+    const adjusted = calculateCommercialEndRecovery({
+      ...common,
+      tariffOverrides: new Map([[
+        '2026-01',
+        {
+          tariff: {
+            importDay: 4,
+            importNight: 2,
+            export: 10,
+            exportNight: 0,
+            exportTaxes: [],
+          },
+          usdRate: 50,
+        },
+      ]]),
+    })
+
+    expect(adjusted.recovered - baseline.recovered).toBeCloseTo((7_000 / 12) * 5)
+  })
+
+  it('uses an exact-month USD rate override without leaking it forward', () => {
+    const rows = [month(0, '2026-01-01', 50)]
+    const payback = calculatePayback({
+      rows,
+      investmentUsd: 1_000_000,
+      currency: 'USD',
+      launchUsdRate: 50,
+      launchDate: new Date('2026-01-01T00:00:00'),
+      today: new Date('2026-01-01T00:00:00'),
+    })
+    const common = {
+      rows,
+      payback: payback!,
+      currency: 'USD' as const,
+      commercialDate: new Date('2026-01-01T00:00:00'),
+      launchDate: new Date('2026-01-01T00:00:00'),
+      endDate: new Date('2026-03-01T00:00:00'),
+      projection: {
+        monthlyKwh: Array.from({ length: 12 }, () => 2_000),
+        dailyKwh: Array.from({ length: 12 }, () => 1),
+      },
+      today: new Date('2026-01-01T00:00:00'),
+    }
+    const baseline = calculateCommercialEndRecovery(common)
+    const adjusted = calculateCommercialEndRecovery({
+      ...common,
+      tariffOverrides: new Map([[
+        '2026-01',
+        {
+          tariff: {
+            importDay: 4,
+            importNight: 2,
+            export: 5,
+            exportNight: 0,
+            exportTaxes: [],
+          },
+          usdRate: 100,
+        },
+      ]]),
+    })
+
+    const overriddenMonthRecoveryUah = (7_000 / 12) * 5
+      + (17_000 / 12) * ((2 / 3) * 4 + (1 / 3) * 2)
+    expect(baseline.recovered - adjusted.recovered).toBeCloseTo(overriddenMonthRecoveryUah / 100)
+  })
 })

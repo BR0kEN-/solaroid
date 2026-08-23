@@ -18,12 +18,13 @@ import {
   plantCapacityKwp,
   productionYieldKwhPerKwp,
   reconciliationValue,
+  repriceMonthRow,
   savings,
   selfConsumed,
   selfConsumptionSavings,
   weightedImportPrice,
 } from './formulas'
-import type { EnergySnapshot, GreenTariffReport, MonthRow, Tariff } from './types'
+import type { EnergySnapshot, GreenTariffReport, MonthRow, MonthTariffScenario, Tariff } from './types'
 
 const tariff: Tariff = {
   importDay: 4.32,
@@ -364,5 +365,125 @@ describe('green tariff receipt reconciliation', () => {
     }, report)
 
     expect(result.energySource).toBe('utility-meter')
+  })
+})
+
+describe('monthly tariff what-if', () => {
+  const baseRow: MonthRow = {
+    month: 'May 2026',
+    date: new Date('2026-05-01T00:00:00'),
+    production: 300,
+    exportDay: 180,
+    exportNight: 20,
+    importDay: 40,
+    importNight: 10,
+    consumedDay: 100,
+    consumedNight: 50,
+    consumedTotal: 150,
+    importTotal: 50,
+    balance: -150,
+    exportPrice: 6,
+    exportPriceDay: 6,
+    exportPriceNight: 4,
+    exportPersonalIncomeTax: 18,
+    exportMilitary: 5,
+    importPriceDay: 4.32,
+    importPriceNight: 2.16,
+    consumedPayment: 540,
+    electricityPayment: 669.9,
+    electricitySavings: 1_209.9,
+    usdRate: 40,
+    roiUsd: 30.2475,
+    isCommercial: true,
+  }
+  const scenario: MonthTariffScenario = {
+    netExportDayUahPerKwh: 9.24,
+    importDayUahPerKwh: 8.64,
+    importNightUahPerKwh: 4.32,
+    usdRate: 40,
+  }
+
+  it('scales both gross export zones proportionally and recalculates commercial values', () => {
+    const result = repriceMonthRow(baseRow, scenario)
+
+    expect(result.exportPriceDay).toBeCloseTo(12)
+    expect(result.exportPriceNight).toBeCloseTo(8)
+    expect(result.importPriceDay).toBeCloseTo(8.64)
+    expect(result.importPriceNight).toBeCloseTo(4.32)
+    expect(result.consumedPayment).toBeCloseTo(1_080)
+    expect(result.electricityPayment).toBeCloseTo(1_339.8)
+    expect(result.electricitySavings).toBeCloseTo(2_419.8)
+    expect(result.roiUsd).toBeCloseTo(60.495)
+  })
+
+  it('recalculates non-commercial import payment without paying export', () => {
+    const result = repriceMonthRow({
+      ...baseRow,
+      exportDay: 30,
+      exportNight: 0,
+      importDay: 20,
+      importNight: 10,
+      balance: 0,
+      isCommercial: false,
+    }, scenario)
+
+    expect(result.electricityPayment).toBeCloseTo(-216)
+    expect(result.electricitySavings).toBeCloseTo(864)
+  })
+
+  it('preserves the electric-heating threshold calculation', () => {
+    const heatingRow: MonthRow = {
+      ...baseRow,
+      production: 0,
+      exportDay: 0,
+      exportNight: 0,
+      importDay: 1_164.35,
+      importNight: 895.65,
+      consumedDay: 1_164.35,
+      consumedNight: 895.65,
+      importTotal: 2_060,
+      consumedTotal: 2_060,
+      balance: 2_060,
+      electricHeatingThresholdKwh: 2_000,
+    }
+    const result = repriceMonthRow(heatingRow, {
+      ...scenario,
+      importDayUahPerKwh: 2.64,
+      importNightUahPerKwh: 1.32,
+    })
+
+    expect(result.electricityPayment).toBeCloseTo(-importCostBreakdown(1_164.35, 895.65, electricHeatingTariff).total)
+  })
+
+  it('aggregates repriced daily values for a commercial transition month', () => {
+    const before = { ...baseRow, month: '2026-05-10', date: new Date('2026-05-10T00:00:00'), isCommercial: false }
+    const after = { ...baseRow, month: '2026-05-20', date: new Date('2026-05-20T00:00:00'), isCommercial: true }
+    const expectedBefore = repriceMonthRow(before, scenario)
+    const expectedAfter = repriceMonthRow(after, scenario)
+    const result = repriceMonthRow(baseRow, scenario, [before, after])
+
+    expect(result.electricityPayment).toBeCloseTo(expectedBefore.electricityPayment + expectedAfter.electricityPayment)
+    expect(result.electricitySavings).toBeCloseTo(expectedBefore.electricitySavings + expectedAfter.electricitySavings)
+  })
+
+  it('does not invent a proportional export price from a zero baseline', () => {
+    const result = repriceMonthRow({ ...baseRow, exportPrice: 0, exportPriceDay: 0, exportPriceNight: 0 }, scenario)
+
+    expect(result.exportPriceDay).toBe(0)
+    expect(result.exportPriceNight).toBe(0)
+  })
+
+  it('changes USD ROI without changing canonical UAH financial values', () => {
+    const result = repriceMonthRow(baseRow, {
+      netExportDayUahPerKwh: 4.62,
+      importDayUahPerKwh: 4.32,
+      importNightUahPerKwh: 2.16,
+      usdRate: 50,
+    })
+
+    expect(result.electricityPayment).toBeCloseTo(669.9)
+    expect(result.electricitySavings).toBeCloseTo(1_209.9)
+    expect(result.usdRate).toBe(50)
+    expect(result.roiUsd).toBeCloseTo(24.198)
   })
 })

@@ -15,16 +15,17 @@ import {
   List,
   LogOut,
   RefreshCw,
+  RotateCcw,
   SunMedium,
   WalletCards,
   X,
 } from "lucide-react";
 import { configureDashboardAccess, getMonthDocumentUrl, loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
 import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
-import { moneyFromUah, moneyFromUsd, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
+import { moneyFromUah, moneyFromUsd, moneyToUah, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
-import type { GreenTariffReconciliationValue, GreenTariffReport, MonthReceipt } from "./domain/types";
+import type { GreenTariffReconciliationValue, GreenTariffReport, MonthReceipt, MonthTariffScenario } from "./domain/types";
 import {
   capacityAdjustedProductionSurplus,
   capacityDeltaPct,
@@ -35,6 +36,7 @@ import {
   importEnergyCost,
   plantCapacityKwp,
   productionYieldKwhPerKwp,
+  repriceMonthRow,
   regularImportDayPrice,
   regularImportNightPrice,
   type ImportCostBreakdown,
@@ -49,6 +51,7 @@ type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly";
 type DocumentsView = "list" | "pdf" | "details";
 type ReceiptDetailsTab = "reconciliation" | "data";
+type TariffScenarioCell = "export" | "import" | "usdRate";
 const monthRangePresets = [1, 3, 6, 12] as const;
 const dailyRangePresets = [7, 14, 21, 30] as const;
 type Lang = "en" | "uk";
@@ -312,6 +315,16 @@ const i18n = {
     electricityPayment: "Electricity payment",
     payment: "Payment",
     table: "Data table",
+    whatIf: "What if",
+    whatIfNetExport: "Export, net",
+    whatIfImportDay: "Import, day",
+    whatIfImportNight: "Import, night",
+    whatIfUsdRate: "USD/UAH rate",
+    whatIfUnavailable: "No positive export baseline to scale",
+    original: "Original",
+    apply: "Apply",
+    reset: "Reset",
+    resetAll: "Reset all",
     filterMonth: "Filter month",
     range: "Range",
     currentMonth: "Current month",
@@ -377,7 +390,6 @@ const i18n = {
     receiptDerived: "Derived values",
     receiptEffectiveGrossRate: "Effective gross rate",
     receiptWithheldTaxRate: "Withheld tax rate",
-    uahPerKwh: "UAH/kWh",
     reportDocument: "Document",
     reportAccount: "Account",
     reportEic: "EIC",
@@ -552,6 +564,16 @@ const i18n = {
     electricityPayment: "Оплата електрики",
     payment: "Оплата",
     table: "Таблиця даних",
+    whatIf: "Що, якби",
+    whatIfNetExport: "Експорт, після податків",
+    whatIfImportDay: "Імпорт, день",
+    whatIfImportNight: "Імпорт, ніч",
+    whatIfUsdRate: "Курс USD/UAH",
+    whatIfUnavailable: "Немає додатної базової ціни експорту для масштабування",
+    original: "Початково",
+    apply: "Застосувати",
+    reset: "Скинути",
+    resetAll: "Скинути все",
     filterMonth: "Фільтр місяця",
     range: "Діапазон",
     currentMonth: "Поточний місяць",
@@ -617,7 +639,6 @@ const i18n = {
     receiptDerived: "Похідні значення",
     receiptEffectiveGrossRate: "Ефективна ціна до податків",
     receiptWithheldTaxRate: "Частка утриманих податків",
-    uahPerKwh: "грн/кВт·г",
     reportDocument: "Документ",
     reportAccount: "Особовий рахунок",
     reportEic: "EIC",
@@ -1716,6 +1737,8 @@ function App({
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
   const [documentsModalRow, setDocumentsModalRow] = useState<MonthRow | null>(null);
+  const [tariffScenarios, setTariffScenarios] = useState<Readonly<Record<string, MonthTariffScenario>>>({});
+  const [whatIfEditorMonth, setWhatIfEditorMonth] = useState("");
   const [lang, setLang] = useState<Lang>(initialLang);
   const setAppLang = (nextLang: Lang) => {
     setLang(nextLang);
@@ -1813,15 +1836,16 @@ function App({
   };
 
   useEffect(() => {
-    if (!infoModal && !documentsModalRow) return undefined;
+    if (!infoModal && !documentsModalRow && !whatIfEditorMonth) return undefined;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setInfoModal(null);
       setDocumentsModalRow(null);
+      setWhatIfEditorMonth("");
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [infoModal, documentsModalRow]);
+  }, [infoModal, documentsModalRow, whatIfEditorMonth]);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -1832,9 +1856,51 @@ function App({
     setLang(initialLang);
   }, [initialLang]);
 
+  const dailyRowsByMonth = useMemo(() => {
+    const grouped = new Map<string, MonthRow[]>();
+    dataState.dailyRows.forEach((row) => {
+      const key = monthKey(row.date);
+      grouped.set(key, [...grouped.get(key) ?? [], row]);
+    });
+    return grouped;
+  }, [dataState.dailyRows]);
+  const repricedRows = useMemo(
+    () => dataState.rows.map((row) => {
+      const key = monthKey(row.date);
+      const scenario = tariffScenarios[key];
+      return scenario ? repriceMonthRow(row, scenario, dailyRowsByMonth.get(key)) : row;
+    }),
+    [dailyRowsByMonth, dataState.rows, tariffScenarios],
+  );
+  const monthlySourceRows = repricedRows;
   const rows = useMemo(() => {
-    return filteredMonthlyRows(dataState.rows, range, rangeFromMonth, rangeToMonth);
-  }, [dataState.rows, range, rangeFromMonth, rangeToMonth]);
+    return filteredMonthlyRows(monthlySourceRows, range, rangeFromMonth, rangeToMonth);
+  }, [monthlySourceRows, range, rangeFromMonth, rangeToMonth]);
+  const tariffOverrideMonths = useMemo(() => new Set(Object.keys(tariffScenarios)), [tariffScenarios]);
+  const tariffScenarioCells = useMemo(() => {
+    const sourceRows = new Map(dataState.rows.map((row) => [monthKey(row.date), row]));
+    return new Map(Object.entries(tariffScenarios).map(([key, scenario]) => {
+      const sourceRow = sourceRows.get(key);
+      const cells = new Set<TariffScenarioCell>();
+      if (!sourceRow) return [key, cells] as const;
+
+      if (!nearlyEqual(scenario.netExportDayUahPerKwh, netExportPrice(sourceRow))) cells.add("export");
+      if (
+        !nearlyEqual(scenario.importDayUahPerKwh, sourceRow.importPriceDay)
+        || !nearlyEqual(scenario.importNightUahPerKwh, sourceRow.importPriceNight)
+      ) cells.add("import");
+      if (!nearlyEqual(scenario.usdRate, sourceRow.usdRate)) cells.add("usdRate");
+      return [key, cells] as const;
+    }));
+  }, [dataState.rows, tariffScenarios]);
+  const tariffOverrides = useMemo(() => {
+    if (tariffOverrideMonths.size === 0) return undefined;
+    return new Map(
+      repricedRows
+        .filter((row) => tariffOverrideMonths.has(monthKey(row.date)))
+        .map((row) => [monthKey(row.date), { tariff: tariffFromRow(row), usdRate: row.usdRate }] as const),
+    );
+  }, [repricedRows, tariffOverrideMonths]);
   const productionProjection = dataState.projection ?? null;
   const dailyDateBounds = useMemo(
     () => [dataState.dailyRows[0] ? dateKey(dataState.dailyRows[0].date) : "", dataState.dailyRows.at(-1) ? dateKey(dataState.dailyRows.at(-1)!.date) : ""] as const,
@@ -1842,7 +1908,31 @@ function App({
   );
 
   const openDocumentsModal = (row: MonthRow) => {
-    setDocumentsModalRow(row);
+    setDocumentsModalRow(dataState.rows.find((sourceRow) => monthKey(sourceRow.date) === monthKey(row.date)) ?? row);
+  };
+
+  const applyTariffScenario = (key: string, scenario: MonthTariffScenario) => {
+    const sourceRow = dataState.rows.find((row) => monthKey(row.date) === key);
+    if (!sourceRow) return;
+    const isOriginal = nearlyEqual(scenario.netExportDayUahPerKwh, netExportPrice(sourceRow))
+      && nearlyEqual(scenario.importDayUahPerKwh, sourceRow.importPriceDay)
+      && nearlyEqual(scenario.importNightUahPerKwh, sourceRow.importPriceNight)
+      && nearlyEqual(scenario.usdRate, sourceRow.usdRate);
+
+    setTariffScenarios((current) => {
+      if (!isOriginal) return { ...current, [key]: scenario };
+      const { [key]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    setWhatIfEditorMonth("");
+  };
+
+  const resetTariffScenario = (key: string) => {
+    setTariffScenarios((current) => {
+      const { [key]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    setWhatIfEditorMonth("");
   };
 
   const plantComparisonMonthOptions = useMemo(
@@ -1962,7 +2052,7 @@ function App({
     const roi = rows.reduce((sum, row) => sum + row.roiUsd, 0);
     const roiDisplay = sumRowsRoiMoney(rows, currency);
     const latest = rows.at(-1);
-    const latestRow = dataState.rows.at(-1);
+    const latestRow = monthlySourceRows.at(-1);
     const latestDisplayRow = latestRow;
     const latestPaymentDisplay = latestRow ? moneyFromUah(latestRow.electricityPayment, currency, latestRow.usdRate) : 0;
     const production = rows.reduce((sum, row) => sum + row.production, 0);
@@ -1985,7 +2075,7 @@ function App({
     const launchDate = dataState.launchDate ?? rows[0]?.date;
     const activeDuration = launchDate ? fullDurationBetween(launchDate, new Date()) : { months: 0, days: 0 };
     const usdRate = latest?.usdRate || [...rows].reverse().find((row) => row.usdRate > 0)?.usdRate || 1;
-    const launchUsdRate = launchDate ? dataState.rows.find((row) => sameMonth(row.date, launchDate))?.usdRate || usdRate : usdRate;
+    const launchUsdRate = launchDate ? monthlySourceRows.find((row) => sameMonth(row.date, launchDate))?.usdRate || usdRate : usdRate;
     return {
       roi,
       roiDisplay,
@@ -2015,7 +2105,7 @@ function App({
       usdRate,
       launchUsdRate,
     };
-  }, [currency, dataState.dailyRows, dataState.launchDate, dataState.rows, rows]);
+  }, [currency, dataState.launchDate, monthlySourceRows, rows]);
 
   const payback = useMemo(() => {
     return calculatePayback({
@@ -2037,20 +2127,21 @@ function App({
       launchDate: totals.launchDate,
       endDate: COMMERCIAL_PERIOD_END_DATE,
       projection: dataState.projection,
+      tariffOverrides,
     });
-  }, [currency, dataState.commercialDate, dataState.projection, dataState.rows, payback, totals.launchDate]);
+  }, [currency, dataState.commercialDate, dataState.projection, dataState.rows, payback, tariffOverrides, totals.launchDate]);
 
   const forecast = useMemo(() => {
     const today = new Date();
     const forecastAsOf = dataState.sheetUpdatedAt ?? today;
     return calculateForecast({
-      rows: dataState.rows,
+      rows: monthlySourceRows,
       currency,
       today,
       projectMonthValue: (value, date) => forecastMonthValue(value, date, forecastAsOf),
-      projectProductionValue: (value, date) => forecastProductionValue(value, date, forecastAsOf, dataState.projection, dataState.rows),
+      projectProductionValue: (value, date) => forecastProductionValue(value, date, forecastAsOf, dataState.projection, monthlySourceRows),
     });
-  }, [currency, dataState.projection, dataState.rows, dataState.sheetUpdatedAt]);
+  }, [currency, dataState.projection, dataState.sheetUpdatedAt, monthlySourceRows]);
 
   const showPlaceholders = dataState.isLoading;
   const infoModalContent = useMemo(() => {
@@ -2778,6 +2869,23 @@ function App({
             <div>
               <h2>{t.table}</h2>
             </div>
+            <div
+              className={`what-if-controls${!showPlaceholders && tariffOverrideMonths.size > 0 ? "" : " is-hidden"}`}
+              aria-hidden={showPlaceholders || tariffOverrideMonths.size === 0}
+            >
+              <button
+                type="button"
+                className="ghost-button what-if-reset-all"
+                disabled={showPlaceholders || tariffOverrideMonths.size === 0}
+                onClick={() => {
+                  setTariffScenarios({});
+                  setWhatIfEditorMonth("");
+                }}
+              >
+                <RotateCcw size={14} />
+                <span>{t.resetAll}</span>
+              </button>
+            </div>
           </div>
           {showPlaceholders ? (
             <DataTableSkeleton />
@@ -2802,6 +2910,8 @@ function App({
               onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
               onUtilityMeterInfo={(row) => setInfoModal({ kind: "utilityMeter", row })}
               onDocumentsInfo={openDocumentsModal}
+              scenarioCells={tariffScenarioCells}
+              onWhatIfEdit={(row) => setWhatIfEditorMonth(monthKey(row.date))}
             />
           )}
         </section>
@@ -2839,9 +2949,27 @@ function App({
             document={documentsModalRow.receipt ?? null}
             t={t}
             lang={lang}
+            currency={currency}
             onClose={() => setDocumentsModalRow(null)}
           />
         )}
+        {whatIfEditorMonth ? (() => {
+          const sourceRow = dataState.rows.find((row) => monthKey(row.date) === whatIfEditorMonth);
+          if (!sourceRow) return null;
+          return (
+            <TariffWhatIfModal
+              key={`${whatIfEditorMonth}-${currency}-${sourceRow.usdRate}`}
+              row={sourceRow}
+              scenario={tariffScenarios[whatIfEditorMonth]}
+              t={t}
+              lang={lang}
+              currency={currency}
+              onApply={(scenario) => applyTariffScenario(whatIfEditorMonth, scenario)}
+              onReset={() => resetTariffScenario(whatIfEditorMonth)}
+              onClose={() => setWhatIfEditorMonth("")}
+            />
+          );
+        })() : null}
         <footer className="dash-footer">
           <span>
             {showPlaceholders ? (
@@ -6008,6 +6136,8 @@ function DataTable({
   onRoiValueInfo,
   onUtilityMeterInfo,
   onDocumentsInfo,
+  scenarioCells = new Map<string, ReadonlySet<TariffScenarioCell>>(),
+  onWhatIfEdit,
 }: {
   readonly rows: readonly MonthRow[];
   readonly period: "monthly" | "daily";
@@ -6028,6 +6158,8 @@ function DataTable({
   readonly onRoiValueInfo: (row: MonthRow) => void;
   readonly onUtilityMeterInfo?: (row: MonthRow) => void;
   readonly onDocumentsInfo?: (row: MonthRow) => void;
+  readonly scenarioCells?: ReadonlyMap<string, ReadonlySet<TariffScenarioCell>>;
+  readonly onWhatIfEdit?: (row: MonthRow) => void;
 }) {
   const newestFirst = [...rows].sort((a, b) => b.date.getTime() - a.date.getTime());
   const kwh = energyUnit(lang);
@@ -6074,7 +6206,15 @@ function DataTable({
           </tr>
         </thead>
         <tbody>
-          {newestFirst.map((row) => (
+          {newestFirst.map((row) => {
+            const scenarioKey = monthKey(row.date);
+            const changedCells = scenarioCells.get(scenarioKey);
+            const exportPriceValue = hasSplitExportPrice(row)
+              ? `${formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang)} / ${formatTableMoney(moneyFromUah(netExportNightPrice(row), currency, row.usdRate), currency, lang)}`
+              : formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang);
+            const importPriceValue = `${formatTableMoney(moneyFromUah(row.importPriceDay, currency, row.usdRate), currency, lang)} / ${formatTableMoney(moneyFromUah(row.importPriceNight, currency, row.usdRate), currency, lang)}`;
+
+            return (
             <tr key={row.month}>
               <th
                 className={period === "monthly" && onDocumentsInfo
@@ -6106,18 +6246,20 @@ function DataTable({
               <td className={row.balance < 0 ? "positive" : row.balance > 0 ? "negative" : "muted"}>
                 {formatNumber(row.balance, 2, 2)}
               </td>
-              <td>
+              <td className={`what-if-price-cell${changedCells?.has("export") ? " has-scenario" : ""}`}>
                 <TableValueInfo
-                  value={
-                    hasSplitExportPrice(row)
-                      ? `${formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang)} / ${formatTableMoney(moneyFromUah(netExportNightPrice(row), currency, row.usdRate), currency, lang)}`
-                      : formatTableMoney(moneyFromUah(netExportPrice(row), currency, row.usdRate), currency, lang)
-                  }
+                  value={onWhatIfEdit ? (
+                    <TariffPriceEditButton value={exportPriceValue} label={`${t.whatIf}: ${t.whatIfNetExport}`} onClick={() => onWhatIfEdit(row)} />
+                  ) : exportPriceValue}
                   label={t.exportPrice}
                   onInfo={() => onExportPriceInfo(row)}
                 />
               </td>
-              <td>{formatTableMoney(moneyFromUah(row.importPriceDay, currency, row.usdRate), currency, lang)} / {formatTableMoney(moneyFromUah(row.importPriceNight, currency, row.usdRate), currency, lang)}</td>
+              <td className={`what-if-price-cell${changedCells?.has("import") ? " has-scenario" : ""}`}>
+                {onWhatIfEdit ? (
+                  <TariffPriceEditButton value={importPriceValue} label={`${t.whatIf}: ${t.importPrices}`} onClick={() => onWhatIfEdit(row)} />
+                ) : importPriceValue}
+              </td>
               <td className={row.electricityPayment >= 0 ? "positive" : "negative"}>
                 <TableValueInfo
                   value={formatTableMoney(moneyFromUah(row.electricityPayment, currency, row.usdRate), currency, lang)}
@@ -6132,9 +6274,18 @@ function DataTable({
                   onInfo={() => onRoiValueInfo(row)}
                 />
               </td>
-              <td>{formatNumber(row.usdRate, 2, 2)}</td>
+              <td className={`what-if-price-cell${changedCells?.has("usdRate") ? " has-scenario" : ""}`}>
+                {onWhatIfEdit ? (
+                  <TariffPriceEditButton
+                    value={formatNumber(row.usdRate, 2, 2)}
+                    label={`${t.whatIf}: ${t.whatIfUsdRate}`}
+                    onClick={() => onWhatIfEdit(row)}
+                  />
+                ) : formatNumber(row.usdRate, 2, 2)}
+              </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
         <tfoot>
           <tr>
@@ -6168,7 +6319,7 @@ function TableValueInfo({
   label,
   onInfo,
 }: {
-  readonly value: string;
+  readonly value: React.ReactNode;
   readonly label: string;
   readonly onInfo: () => void;
 }) {
@@ -6180,6 +6331,230 @@ function TableValueInfo({
       </button>
     </span>
   );
+}
+
+function TariffPriceEditButton({
+  value,
+  label,
+  onClick,
+}: {
+  readonly value: string;
+  readonly label: string;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button type="button" className="tariff-price-edit-button" onClick={onClick} aria-label={label}>
+      {value}
+    </button>
+  );
+}
+
+function TariffWhatIfModal({
+  row,
+  scenario,
+  t,
+  lang,
+  currency,
+  onApply,
+  onReset,
+  onClose,
+}: {
+  readonly row: MonthRow;
+  readonly scenario?: MonthTariffScenario;
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly currency: Currency;
+  readonly onApply: (scenario: MonthTariffScenario) => void;
+  readonly onReset: () => void;
+  readonly onClose: () => void;
+}) {
+  const originalNetExport = netExportPrice(row);
+  const current = scenario ?? {
+    netExportDayUahPerKwh: originalNetExport,
+    importDayUahPerKwh: row.importPriceDay,
+    importNightUahPerKwh: row.importPriceNight,
+    usdRate: row.usdRate,
+  };
+  const [netExportDay, setNetExportDay] = useState(() => editableTariffPrice(current.netExportDayUahPerKwh, currency, current.usdRate));
+  const [importDay, setImportDay] = useState(() => editableTariffPrice(current.importDayUahPerKwh, currency, current.usdRate));
+  const [importNight, setImportNight] = useState(() => editableTariffPrice(current.importNightUahPerKwh, currency, current.usdRate));
+  const [usdRate, setUsdRate] = useState(() => String(Number(current.usdRate.toFixed(4))));
+  const [netExportTouched, setNetExportTouched] = useState(false);
+  const [importDayTouched, setImportDayTouched] = useState(false);
+  const [importNightTouched, setImportNightTouched] = useState(false);
+  const parsedNetExportDay = parseTariffPrice(netExportDay);
+  const parsedImportDay = parseTariffPrice(importDay);
+  const parsedImportNight = parseTariffPrice(importNight);
+  const parsedUsdRate = parseUsdRate(usdRate);
+  const exportAvailable = originalNetExport > 0;
+  const isValid = parsedUsdRate !== undefined
+    && (!exportAvailable || parsedNetExportDay !== undefined)
+    && parsedImportDay !== undefined
+    && parsedImportNight !== undefined;
+  const unit = `${currencyUnit(currency)}/${energyUnit(lang)}`;
+  const originalValue = (value: number) => `${formatUahMoney(value, currency, lang, row.usdRate)} / ${energyUnit(lang)}`;
+
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isValid || parsedImportDay === undefined || parsedImportNight === undefined || parsedUsdRate === undefined) return;
+
+    onApply({
+      netExportDayUahPerKwh: exportAvailable && parsedNetExportDay !== undefined && netExportTouched
+        ? moneyToUah(parsedNetExportDay, currency, parsedUsdRate)
+        : current.netExportDayUahPerKwh,
+      importDayUahPerKwh: importDayTouched
+        ? moneyToUah(parsedImportDay, currency, parsedUsdRate)
+        : current.importDayUahPerKwh,
+      importNightUahPerKwh: importNightTouched
+        ? moneyToUah(parsedImportNight, currency, parsedUsdRate)
+        : current.importNightUahPerKwh,
+      usdRate: parsedUsdRate,
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="info-modal modal-card what-if-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="what-if-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="section-heading modal-heading">
+          <div><h2 id="what-if-modal-title">{t.whatIf} · {row.month}</h2></div>
+          <button type="button" className="icon-button info-modal-close-top" onClick={onClose} aria-label={t.close}>
+            <X size={18} />
+          </button>
+        </div>
+        <form className="what-if-form" onSubmit={submit}>
+          <div className="what-if-fields">
+            <TariffWhatIfField
+              label={t.whatIfNetExport}
+              unit={unit}
+              originalLabel={t.original}
+              original={originalValue(originalNetExport)}
+              value={netExportDay}
+              disabled={!exportAvailable}
+              invalid={exportAvailable && parsedNetExportDay === undefined}
+              unavailable={exportAvailable ? undefined : t.whatIfUnavailable}
+              onChange={(value) => {
+                setNetExportTouched(true);
+                setNetExportDay(value);
+              }}
+            />
+            <TariffWhatIfField
+              label={t.whatIfImportDay}
+              unit={unit}
+              originalLabel={t.original}
+              original={originalValue(row.importPriceDay)}
+              value={importDay}
+              invalid={parsedImportDay === undefined}
+              onChange={(value) => {
+                setImportDayTouched(true);
+                setImportDay(value);
+              }}
+            />
+            <TariffWhatIfField
+              label={t.whatIfImportNight}
+              unit={unit}
+              originalLabel={t.original}
+              original={originalValue(row.importPriceNight)}
+              value={importNight}
+              invalid={parsedImportNight === undefined}
+              onChange={(value) => {
+                setImportNightTouched(true);
+                setImportNight(value);
+              }}
+            />
+            <TariffWhatIfField
+              label={t.whatIfUsdRate}
+              unit="USD/UAH"
+              originalLabel={t.original}
+              original={formatNumber(row.usdRate, 4, 2)}
+              value={usdRate}
+              invalid={parsedUsdRate === undefined}
+              onChange={setUsdRate}
+            />
+          </div>
+          <div className="what-if-actions">
+            {scenario ? (
+              <button type="button" className="ghost-button" onClick={onReset}>
+                <RotateCcw size={16} />
+                <span>{t.reset}</span>
+              </button>
+            ) : <span />}
+            <button type="submit" className="primary-button" disabled={!isValid}>{t.apply}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function TariffWhatIfField({
+  label,
+  unit,
+  originalLabel,
+  original,
+  value,
+  disabled = false,
+  invalid,
+  unavailable,
+  onChange,
+}: {
+  readonly label: string;
+  readonly unit: string;
+  readonly originalLabel: string;
+  readonly original: string;
+  readonly value: string;
+  readonly disabled?: boolean;
+  readonly invalid: boolean;
+  readonly unavailable?: string;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <label className={`what-if-field${invalid ? " is-invalid" : ""}`}>
+      <span className="what-if-field-heading">
+        <strong>{label}</strong>
+        <small>{originalLabel}: {original}</small>
+      </span>
+      <span className="what-if-input-wrap">
+        <input
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          value={value}
+          disabled={disabled}
+          aria-invalid={invalid}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <span>{unit}</span>
+      </span>
+      {unavailable ? <small className="what-if-unavailable">{unavailable}</small> : null}
+    </label>
+  );
+}
+
+function editableTariffPrice(valueUah: number, currency: Currency, usdRate: number) {
+  const value = moneyFromUah(valueUah, currency, usdRate);
+  return String(Number(value.toFixed(4)));
+}
+
+function parseTariffPrice(value: string) {
+  const normalized = value.trim().replace(",", ".");
+  if (!normalized) return undefined;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function parseUsdRate(value: string) {
+  const parsed = parseTariffPrice(value);
+  return parsed !== undefined && parsed > 0 ? parsed : undefined;
+}
+
+function nearlyEqual(first: number, second: number) {
+  return Math.abs(first - second) < 0.000001;
 }
 
 function MonthTableCell({
@@ -6230,12 +6605,14 @@ function DocumentsModal({
   document,
   t,
   lang,
+  currency,
   onClose,
 }: {
   readonly row: MonthRow;
   readonly document: MonthReceipt | null;
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly currency: Currency;
   readonly onClose: () => void;
 }) {
   const [view, setView] = useState<DocumentsView>("list");
@@ -6329,7 +6706,7 @@ function DocumentsModal({
               <p className="pdf-preview-status" role="status">{t.documentLoading}</p>
             )
           ) : isViewingDetails && document?.report ? (
-            <GreenTariffReportDetails row={row} report={document.report} t={t} lang={lang} />
+            <GreenTariffReportDetails row={row} report={document.report} t={t} lang={lang} currency={currency} />
           ) : (
             <>
               <div className="document-item">
@@ -6385,11 +6762,13 @@ function GreenTariffReportDetails({
   report,
   t,
   lang,
+  currency,
 }: {
   readonly row: MonthRow;
   readonly report: GreenTariffReport;
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly currency: Currency;
 }) {
   const [tab, setTab] = useState<ReceiptDetailsTab>("reconciliation");
   const reconciliation = useMemo(() => greenTariffReceiptReconciliation(row, report), [report, row]);
@@ -6427,9 +6806,22 @@ function GreenTariffReportDetails({
         aria-labelledby={tab === "reconciliation" ? "receipt-reconciliation-tab" : "receipt-data-tab"}
       >
         {tab === "reconciliation" ? (
-          <GreenTariffReconciliationDetails reconciliation={reconciliation} t={t} lang={lang} />
+          <GreenTariffReconciliationDetails
+            reconciliation={reconciliation}
+            t={t}
+            lang={lang}
+            currency={currency}
+            usdRate={row.usdRate}
+          />
         ) : (
-          <GreenTariffReportData report={report} reconciliation={reconciliation} t={t} lang={lang} />
+          <GreenTariffReportData
+            report={report}
+            reconciliation={reconciliation}
+            t={t}
+            lang={lang}
+            currency={currency}
+            usdRate={row.usdRate}
+          />
         )}
       </div>
     </div>
@@ -6440,14 +6832,18 @@ function GreenTariffReconciliationDetails({
   reconciliation,
   t,
   lang,
+  currency,
+  usdRate,
 }: {
   readonly reconciliation: ReturnType<typeof greenTariffReceiptReconciliation>;
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly currency: Currency;
+  readonly usdRate: number;
 }) {
   const summary = reconciliation.summary;
   const formatEnergy = (value: number) => formatNumber(value, 2, 2);
-  const formatMoneyValue = (value: number) => formatNumber(value, 2, 2);
+  const formatMoneyValue = (value: number) => formatNumber(moneyFromUah(value, currency, usdRate), 2, 2);
 
   return (
     <div className="receipt-reconciliation">
@@ -6456,7 +6852,7 @@ function GreenTariffReconciliationDetails({
         <dl>
           <div>
             <dt>{t.receiptNetPayout}</dt>
-            <dd>{formatMoney(summary.netUah, "UAH", lang)}</dd>
+            <dd>{formatUahMoney(summary.netUah, currency, lang, usdRate)}</dd>
           </div>
           <div>
             <dt>{t.receiptPayableEnergy}</dt>
@@ -6464,11 +6860,11 @@ function GreenTariffReconciliationDetails({
           </div>
           <div>
             <dt>{t.receiptWithheldTaxes}</dt>
-            <dd>{formatMoney(summary.withheldUah, "UAH", lang)}</dd>
+            <dd>{formatUahMoney(summary.withheldUah, currency, lang, usdRate)}</dd>
           </div>
           <div>
             <dt>{t.receiptEffectiveNetRate}</dt>
-            <dd>{formatOptionalRate(summary.effectiveNetUahPerKwh, t)}</dd>
+            <dd>{formatOptionalRate(summary.effectiveNetUahPerKwh, currency, lang, usdRate)}</dd>
           </div>
         </dl>
       </section>
@@ -6497,7 +6893,7 @@ function GreenTariffReconciliationDetails({
       />
       <ReceiptComparisonTable
         title={t.receiptSettlement}
-        unit="UAH"
+        unit={currency}
         columns={[
           { label: t.reportGross, value: reconciliation.settlement.grossUah },
           { label: t.reportNet, value: reconciliation.settlement.netUah },
@@ -6507,7 +6903,7 @@ function GreenTariffReconciliationDetails({
       />
       <ReceiptComparisonTable
         title={t.receiptTaxes}
-        unit="UAH"
+        unit={currency}
         columns={[
           { label: t.reportPersonalIncomeTax, value: reconciliation.taxes.personalIncomeUah },
           { label: t.reportMilitaryLevy, value: reconciliation.taxes.militaryLevyUah },
@@ -6592,11 +6988,15 @@ function GreenTariffReportData({
   reconciliation,
   t,
   lang,
+  currency,
+  usdRate,
 }: {
   readonly report: GreenTariffReport;
   readonly reconciliation: ReturnType<typeof greenTariffReceiptReconciliation>;
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly currency: Currency;
+  readonly usdRate: number;
 }) {
   return (
     <div className="receipt-report">
@@ -6620,28 +7020,28 @@ function GreenTariffReportData({
       <section className="receipt-report-section">
         <h3>{t.reportPurchase}</h3>
         <div className="receipt-report-purchases">
-          <ReceiptPurchaseDetails title={t.reportGreenTariff} purchase={report.purchase.greenTariff} t={t} lang={lang} />
-          <ReceiptPurchaseDetails title={t.reportWeightedPrice} purchase={report.purchase.weightedPrice} t={t} lang={lang} />
+          <ReceiptPurchaseDetails title={t.reportGreenTariff} purchase={report.purchase.greenTariff} t={t} lang={lang} currency={currency} usdRate={usdRate} />
+          <ReceiptPurchaseDetails title={t.reportWeightedPrice} purchase={report.purchase.weightedPrice} t={t} lang={lang} currency={currency} usdRate={usdRate} />
         </div>
       </section>
       <ReceiptReportSection
         title={t.reportPayment}
         rows={[
-          { label: t.reportGross, value: formatMoney(report.payment.grossUah, "UAH", lang) },
-          { label: t.reportPersonalIncomeTax, value: formatMoney(report.payment.taxes.personalIncomeUah, "UAH", lang) },
-          { label: t.reportMilitaryLevy, value: formatMoney(report.payment.taxes.militaryLevyUah, "UAH", lang) },
-          { label: t.reportNet, value: formatMoney(report.payment.netUah, "UAH", lang) },
+          { label: t.reportGross, value: formatUahMoney(report.payment.grossUah, currency, lang, usdRate) },
+          { label: t.reportPersonalIncomeTax, value: formatUahMoney(report.payment.taxes.personalIncomeUah, currency, lang, usdRate) },
+          { label: t.reportMilitaryLevy, value: formatUahMoney(report.payment.taxes.militaryLevyUah, currency, lang, usdRate) },
+          { label: t.reportNet, value: formatUahMoney(report.payment.netUah, currency, lang, usdRate) },
         ]}
       />
       <ReceiptReportSection
         title={t.receiptDerived}
         rows={[
-          { label: t.receiptEffectiveGrossRate, value: formatOptionalRate(reconciliation.summary.effectiveGrossUahPerKwh, t) },
-          { label: t.receiptEffectiveNetRate, value: formatOptionalRate(reconciliation.summary.effectiveNetUahPerKwh, t) },
+          { label: t.receiptEffectiveGrossRate, value: formatOptionalRate(reconciliation.summary.effectiveGrossUahPerKwh, currency, lang, usdRate) },
+          { label: t.receiptEffectiveNetRate, value: formatOptionalRate(reconciliation.summary.effectiveNetUahPerKwh, currency, lang, usdRate) },
           { label: t.receiptWithheldTaxRate, value: reconciliation.summary.withheldTaxPercent === undefined ? "—" : `${formatNumber(reconciliation.summary.withheldTaxPercent, 2, 2)}%` },
         ]}
       />
-      <ReceiptArithmeticDetails arithmetic={reconciliation.arithmetic} t={t} lang={lang} />
+      <ReceiptArithmeticDetails arithmetic={reconciliation.arithmetic} t={t} lang={lang} currency={currency} usdRate={usdRate} />
     </div>
   );
 }
@@ -6650,17 +7050,21 @@ function ReceiptArithmeticDetails({
   arithmetic,
   t,
   lang,
+  currency,
+  usdRate,
 }: {
   readonly arithmetic: ReturnType<typeof greenTariffReceiptReconciliation>["arithmetic"];
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly currency: Currency;
+  readonly usdRate: number;
 }) {
   const checks = [
     { label: t.receiptSupplierPurchaseEnergy, value: arithmetic.supplierPayableKwh, format: (value: number) => formatKwh(value, lang) },
-    { label: t.receiptGreenTariffAmount, value: arithmetic.greenTariffAmountUah, format: (value: number) => formatMoney(value, "UAH", lang) },
-    { label: t.receiptWeightedPriceAmount, value: arithmetic.weightedPriceAmountUah, format: (value: number) => formatMoney(value, "UAH", lang) },
-    { label: t.receiptGrossAmount, value: arithmetic.grossUah, format: (value: number) => formatMoney(value, "UAH", lang) },
-    { label: t.receiptNetAmount, value: arithmetic.netUah, format: (value: number) => formatMoney(value, "UAH", lang) },
+    { label: t.receiptGreenTariffAmount, value: arithmetic.greenTariffAmountUah, format: (value: number) => formatUahMoney(value, currency, lang, usdRate) },
+    { label: t.receiptWeightedPriceAmount, value: arithmetic.weightedPriceAmountUah, format: (value: number) => formatUahMoney(value, currency, lang, usdRate) },
+    { label: t.receiptGrossAmount, value: arithmetic.grossUah, format: (value: number) => formatUahMoney(value, currency, lang, usdRate) },
+    { label: t.receiptNetAmount, value: arithmetic.netUah, format: (value: number) => formatUahMoney(value, currency, lang, usdRate) },
   ];
 
   return (
@@ -6685,8 +7089,8 @@ function ReceiptArithmeticDetails({
   );
 }
 
-function formatOptionalRate(value: number | undefined, t: Record<string, string>) {
-  return value === undefined ? "—" : `${formatNumber(value, 2, 2)} ${t.uahPerKwh}`;
+function formatOptionalRate(value: number | undefined, currency: Currency, lang: Lang, usdRate: number) {
+  return value === undefined ? "—" : `${formatUahMoney(value, currency, lang, usdRate)} / ${energyUnit(lang)}`;
 }
 
 function ReceiptPurchaseDetails({
@@ -6694,19 +7098,28 @@ function ReceiptPurchaseDetails({
   purchase,
   t,
   lang,
+  currency,
+  usdRate,
 }: {
   readonly title: string;
   readonly purchase: GreenTariffReport["purchase"]["greenTariff"];
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly currency: Currency;
+  readonly usdRate: number;
 }) {
   return (
     <section className="receipt-report-purchase">
       <h4>{title}</h4>
       <dl className="info-list receipt-report-list">
         <ReceiptReportRow label={t.reportQuantity} value={formatKwh(purchase.kwh, lang)} />
-        <ReceiptReportRow label={t.reportPrice} value={`${formatNumber(purchase.priceKopPerKwh, 2, 2)} ${t.kopPerKwh}`} />
-        <ReceiptReportRow label={t.reportAmount} value={formatMoney(purchase.amountUah, "UAH", lang)} />
+        <ReceiptReportRow
+          label={t.reportPrice}
+          value={currency === "UAH"
+            ? `${formatNumber(purchase.priceKopPerKwh, 2, 2)} ${t.kopPerKwh}`
+            : `${formatUahMoney(purchase.priceKopPerKwh / 100, currency, lang, usdRate)} / ${energyUnit(lang)}`}
+        />
+        <ReceiptReportRow label={t.reportAmount} value={formatUahMoney(purchase.amountUah, currency, lang, usdRate)} />
       </dl>
     </section>
   );

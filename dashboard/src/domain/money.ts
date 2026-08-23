@@ -12,6 +12,11 @@ export function moneyFromUsd(value: number, currency: Currency, usdRate: number)
   return value * usdRate
 }
 
+export function moneyToUah(value: number, currency: Currency, usdRate: number) {
+  if (currency === 'UAH') return value
+  return value * usdRate
+}
+
 export function rowRoiMoney(row: MonthRow, currency: Currency) {
   if (currency === 'UAH') return row.electricitySavings
   return row.roiUsd || moneyFromUah(row.electricitySavings, currency, row.usdRate)
