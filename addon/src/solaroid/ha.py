@@ -47,6 +47,19 @@ def get_entity_state(entity_id: str) -> float:
         raise HomeAssistantError(f"Failed to read {entity_id}") from error
 
 
+def get_instance_name() -> str:
+    try:
+        data = _ha_request("get", "/config").json()
+        name = data.get("location_name")
+
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("location_name is missing")
+
+        return name.strip()
+    except Exception as error:
+        raise HomeAssistantError("Failed to read Home Assistant instance name") from error
+
+
 def call_service(service: str, data: dict[str, Any]) -> None:
     try:
         domain, name = service.split(".", 1)

@@ -6,6 +6,96 @@ import { HttpError, MethodNotAllowedError, UnauthorizedError } from './errors.ts
 
 const BEARER_PREFIX = 'Bearer '
 
+interface ProviderErrorDetails {
+  readonly code: string
+  readonly message: string
+  readonly details: unknown
+  readonly hint: unknown
+}
+
+interface ErrorResponse {
+  readonly status: number
+  readonly body: Solaroid.Supabase.Json
+}
+
+function getProviderError(error: unknown): ProviderErrorDetails | undefined {
+  const seen = new Set<unknown>()
+  let current = error
+
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current)
+    const candidate = current as {
+      readonly cause?: unknown
+      readonly code?: unknown
+      readonly details?: unknown
+      readonly hint?: unknown
+      readonly message?: unknown
+    }
+
+    if (typeof candidate.code === 'string' && typeof candidate.message === 'string') {
+      return {
+        code: candidate.code,
+        message: candidate.message,
+        details: candidate.details ?? null,
+        hint: candidate.hint ?? null,
+      }
+    }
+
+    current = candidate.cause
+  }
+
+  return undefined
+}
+
+function isTransientProviderError(error: ProviderErrorDetails | undefined): boolean {
+  if (!error) return false
+
+  return /^PGRST00[0-3]$/.test(error.code)
+    || /^(08|53)/.test(error.code)
+    || (error.code === 'PGRST303' && error.message === 'JWT issued at future')
+}
+
+function errorResponse(error: unknown): ErrorResponse {
+  if (error instanceof HttpError) {
+    return {
+      status: error.code,
+      body: { ok: false, message: error.message },
+    }
+  }
+
+  if (error instanceof z.ZodError) {
+    return {
+      status: 422,
+      body: {
+        ok: false,
+        message: 'Invalid payload',
+        issues: error.issues,
+      },
+    }
+  }
+
+  if (isTransientProviderError(getProviderError(error))) {
+    return {
+      status: 503,
+      body: { ok: false, message: 'Temporary backend failure' },
+    }
+  }
+
+  return {
+    status: 500,
+    body: { ok: false, message: 'Internal server error' },
+  }
+}
+
+function logError(error: unknown) {
+  const provider = getProviderError(error)
+  console.error('Ingest request failed', {
+    operation: error instanceof Error ? error.message : 'Unknown error',
+    provider,
+    stack: error instanceof Error ? error.stack : undefined,
+  })
+}
+
 class Responder {
   protected readonly methods!: string
 
@@ -32,27 +122,8 @@ class Responder {
   }
 
   error(error: unknown) {
-    let status = 400
-    let data
-
-    if (error instanceof HttpError) {
-      status = error.code
-    } else if (error instanceof z.ZodError) {
-      status = 422
-      data = {
-        ok: false,
-        message: 'Invalid payload',
-        issues: error.issues,
-      }
-    }
-
-    return this.json(
-      data || {
-        ok: false,
-        message: error instanceof Error ? error.message : 'Unknown error',
-      },
-      status,
-    )
+    const response = errorResponse(error)
+    return this.json(response.body, response.status)
   }
 }
 
@@ -98,12 +169,15 @@ function serve(
 
       return responder.json({ ok: true, ...await handler(request, accessToken, client) })
     } catch (error) {
-      console.error(error)
+      logError(error)
       return responder.error(error)
     }
   })
 }
 
 export {
+  errorResponse,
+  getProviderError,
+  isTransientProviderError,
   serve,
 }

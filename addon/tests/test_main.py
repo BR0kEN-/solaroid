@@ -1,6 +1,10 @@
 import json
 from datetime import datetime
 
+import pytest
+import requests
+
+from solaroid import solaroid as solaroid_client
 from solaroid.config import DtekConfig, NotificationsConfig, SolaroidConfig, load_config
 from solaroid.main import (
     UTILITY_METER_FAILURE_NOTIFICATION_ID,
@@ -9,7 +13,10 @@ from solaroid.main import (
     run_once,
     run_with_ingest_failure_notification,
 )
+from solaroid.solaroid import post_payload
 from solaroid.utility import UtilityMeterFetchError, UtilityMeterStaleError, UtilityMeter
+
+INSTANCE_NAME = "Bondas"
 
 
 def config() -> SolaroidConfig:
@@ -64,6 +71,7 @@ def test_first_failure_notifies_and_posts_without_utility() -> None:
         read_state=lambda _entity_id: 10,
         post=post,
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert [service for service, _data in service_calls] == [
@@ -72,6 +80,7 @@ def test_first_failure_notifies_and_posts_without_utility() -> None:
         "notify.mobile_app_phone",
     ]
     assert service_calls[0][1]["notification_id"] == UTILITY_METER_FAILURE_NOTIFICATION_ID
+    assert service_calls[0][1]["title"] == "Solaroid (Bondas): Utility Meter fetch failed"
     assert "utility" not in posts[0]["thisMonth"]  # type: ignore[operator]
 
 
@@ -84,6 +93,7 @@ def test_repeated_failure_updates_persistent_notification_only() -> None:
         read_state=lambda _entity_id: 10,
         post=lambda _url, _token, _payload: {"ok": True},
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert [service for service, _data in service_calls] == ["persistent_notification.create"]
@@ -103,6 +113,7 @@ def test_stale_utility_data_posts_without_utility_and_does_not_notify() -> None:
         read_state=lambda _entity_id: 10,
         post=post,
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert service_calls == []
@@ -121,6 +132,7 @@ def test_stale_utility_data_after_failure_dismisses_persistent_notification() ->
         read_state=lambda _entity_id: 10,
         post=lambda _url, _token, _payload: {"ok": True},
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert service_calls == [("persistent_notification.dismiss", {"notification_id": UTILITY_METER_FAILURE_NOTIFICATION_ID})]
@@ -138,6 +150,7 @@ def test_success_dismisses_persistent_notification() -> None:
         read_state=lambda _entity_id: 10,
         post=lambda _url, _token, _payload: {"ok": True},
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert service_calls == [("persistent_notification.dismiss", {"notification_id": UTILITY_METER_FAILURE_NOTIFICATION_ID})]
@@ -152,6 +165,7 @@ def test_ingest_failure_notifies_and_returns_false() -> None:
         read_state=lambda _entity_id: 10,
         post=lambda _url, _token, _payload: (_ for _ in ()).throw(RuntimeError("backend down")),
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert result is False
@@ -159,7 +173,7 @@ def test_ingest_failure_notifies_and_returns_false() -> None:
         "notify.notify_admins",
         "notify.mobile_app_phone",
     ]
-    assert service_calls[0][1]["title"] == "Solaroid: Ingest failed"
+    assert service_calls[0][1]["title"] == "Solaroid (Bondas): Ingest failed"
 
 
 def test_ingest_success_does_not_notify() -> None:
@@ -171,10 +185,81 @@ def test_ingest_success_does_not_notify() -> None:
         read_state=lambda _entity_id: 10,
         post=lambda _url, _token, _payload: {"ok": True},
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert result is True
     assert service_calls == []
+
+
+def test_recovered_post_retry_does_not_notify(monkeypatch: pytest.MonkeyPatch) -> None:
+    service_calls: list[tuple[str, dict[str, object]]] = []
+    responses = [requests.Response(), requests.Response()]
+    responses[0].status_code = 503
+    responses[0]._content = b'{"ok":false}'
+    responses[1].status_code = 200
+    responses[1]._content = b'{"ok":true}'
+    post_calls = 0
+    sleeps: list[float] = []
+
+    def request_post(*_args: object, **_kwargs: object) -> requests.Response:
+        nonlocal post_calls
+        response = responses[post_calls]
+        post_calls += 1
+        return response
+
+    monkeypatch.setattr(solaroid_client.requests, "post", request_post)
+    monkeypatch.setattr(solaroid_client.random, "uniform", lambda _minimum, _maximum: 1.0)
+    monkeypatch.setattr(solaroid_client.time, "sleep", sleeps.append)
+
+    result = run_with_ingest_failure_notification(
+        FakeDtek(),
+        config(),
+        read_state=lambda _entity_id: 10,
+        post=post_payload,
+        service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
+    )
+
+    assert result is True
+    assert post_calls == 2
+    assert sleeps == [20]
+    assert service_calls == []
+
+
+def test_exhausted_post_retries_notify_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    service_calls: list[tuple[str, dict[str, object]]] = []
+    post_calls = 0
+    sleeps: list[float] = []
+
+    def request_post(*_args: object, **_kwargs: object) -> requests.Response:
+        nonlocal post_calls
+        post_calls += 1
+        response = requests.Response()
+        response.status_code = 503
+        response._content = b'{"ok":false}'
+        return response
+
+    monkeypatch.setattr(solaroid_client.requests, "post", request_post)
+    monkeypatch.setattr(solaroid_client.random, "uniform", lambda _minimum, _maximum: 1.0)
+    monkeypatch.setattr(solaroid_client.time, "sleep", sleeps.append)
+
+    result = run_with_ingest_failure_notification(
+        FakeDtek(),
+        config(),
+        read_state=lambda _entity_id: 10,
+        post=post_payload,
+        service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
+    )
+
+    assert result is False
+    assert post_calls == 3
+    assert sleeps == [20, 70]
+    assert [service for service, _data in service_calls] == [
+        "notify.notify_admins",
+        "notify.mobile_app_phone",
+    ]
 
 
 def test_cached_success_does_not_dismiss_persistent_notification() -> None:
@@ -186,6 +271,7 @@ def test_cached_success_does_not_dismiss_persistent_notification() -> None:
         read_state=lambda _entity_id: 10,
         post=lambda _url, _token, _payload: {"ok": True},
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert service_calls == []
@@ -200,6 +286,7 @@ def test_disabled_utility_meter_dismisses_persistent_notification() -> None:
         read_state=lambda _entity_id: 10,
         post=lambda _url, _token, _payload: {"ok": True},
         service_call=lambda service, data: service_calls.append((service, data)),
+        instance_name=INSTANCE_NAME,
     )
 
     assert service_calls == [("persistent_notification.dismiss", {"notification_id": UTILITY_METER_FAILURE_NOTIFICATION_ID})]

@@ -4,7 +4,7 @@ from datetime import datetime, time as datetime_time, timedelta
 from typing import Any, Callable
 
 from .config import load_config, SolaroidConfig
-from .ha import call_service, get_entity_state, HomeAssistantError, CallService
+from .ha import call_service, get_entity_state, get_instance_name, HomeAssistantError, CallService
 from .solaroid import build_payload, post_payload
 from .utility import Dtek, UtilityMeterFetchError, UtilityMeterStaleError, UtilityMeter
 
@@ -18,13 +18,18 @@ INGEST_ANCHOR_HOUR = 23
 INGEST_ANCHOR_MINUTE = 59
 INGEST_ANCHOR_SECOND = 50
 INGEST_SLOTS_PER_DAY = 24 * 60 * 60 // INGEST_INTERVAL_SECONDS
+DEFAULT_INSTANCE_NAME = "Home Assistant"
 
 
-def utility_meter_failure_message(error: UtilityMeterFetchError) -> dict[str, str]:
+def failure_title(instance_name: str, subject: str) -> str:
+    return f"Solaroid ({instance_name}): {subject}"
+
+
+def utility_meter_failure_message(error: UtilityMeterFetchError, instance_name: str) -> dict[str, str]:
     last_success = time.strftime(DATETIME_FORMAT, time.localtime(error.last_success_at)) if error.last_success_at else "never"
 
     return {
-        "title": "Solaroid: Utility Meter fetch failed",
+        "title": failure_title(instance_name, "Utility Meter fetch failed"),
         "message": (
             f"{error.message}\n"
             f"Failures: {error.failure_count}\n"
@@ -36,9 +41,10 @@ def utility_meter_failure_message(error: UtilityMeterFetchError) -> dict[str, st
 def utility_meter_notify_failure(
     error: UtilityMeterFetchError,
     config: SolaroidConfig,
+    instance_name: str,
     service_call: CallService = call_service,
 ) -> None:
-    message = utility_meter_failure_message(error)
+    message = utility_meter_failure_message(error, instance_name)
 
     try:
         service_call(
@@ -68,9 +74,9 @@ def utility_meter_dismiss_failure_notification(service_call: CallService = call_
         logging.warning("Utility Meter: Failure notification dismiss failed")
 
 
-def ingest_failure_message(error: Exception) -> dict[str, str]:
+def ingest_failure_message(error: Exception, instance_name: str) -> dict[str, str]:
     return {
-        "title": "Solaroid: Ingest failed",
+        "title": failure_title(instance_name, "Ingest failed"),
         "message": f"{error.__class__.__name__}: {error}",
     }
 
@@ -78,11 +84,12 @@ def ingest_failure_message(error: Exception) -> dict[str, str]:
 def notify_ingest_failure(
     error: Exception,
     config: SolaroidConfig,
+    instance_name: str,
     service_call: CallService = call_service,
 ) -> None:
     try:
         for service in config.notifications.mobileServices:
-            service_call(service, ingest_failure_message(error))
+            service_call(service, ingest_failure_message(error, instance_name))
     except HomeAssistantError:
         logging.exception("Ingest failure notification failed")
 
@@ -116,6 +123,8 @@ def run_once(
     read_state: Callable[[str], float] = get_entity_state,
     post: Callable[[str, str, dict[str, Any]], dict[str, Any]] = post_payload,
     service_call: CallService = call_service,
+    *,
+    instance_name: str,
 ) -> None:
     utility = None
 
@@ -127,7 +136,7 @@ def run_once(
         utility_meter_dismiss_recovered_failure(um, service_call)
     except UtilityMeterFetchError as error:
         logging.warning("Utility meter fetch failed; posting HA values only: %s", error.message)
-        utility_meter_notify_failure(error, config, service_call)
+        utility_meter_notify_failure(error, config, instance_name, service_call)
 
     payload = build_payload(config.payload, read_state, utility)
     result = post(config.url, config.token, payload)
@@ -148,13 +157,15 @@ def run_with_ingest_failure_notification(
     read_state: Callable[[str], float] = get_entity_state,
     post: Callable[[str, str, dict[str, Any]], dict[str, Any]] = post_payload,
     service_call: CallService = call_service,
+    *,
+    instance_name: str,
 ) -> bool:
     try:
-        run_once(um, config, read_state, post, service_call)
+        run_once(um, config, read_state, post, service_call, instance_name=instance_name)
         return True
     except Exception as error:
         logging.exception("Sync failed")
-        notify_ingest_failure(error, config, service_call)
+        notify_ingest_failure(error, config, instance_name, service_call)
         return False
 
 
@@ -163,10 +174,18 @@ def main() -> None:
     um = Dtek(config.dtek)
     slot = datetime.now()
 
+    try:
+        instance_name = get_instance_name()
+    except HomeAssistantError:
+        logging.exception("Home Assistant instance name lookup failed")
+        instance_name = DEFAULT_INSTANCE_NAME
+
+    logging.info("Home Assistant instance: %s", instance_name)
+
     while True:
         shot_at = datetime.now()
         logging.info("Ingest shot at %s (drift %.3fs)", shot_at.strftime(DATETIME_FORMAT), (shot_at - slot).total_seconds())
-        run_with_ingest_failure_notification(um, config)
+        run_with_ingest_failure_notification(um, config, instance_name=instance_name)
 
         slot = next_ingest_slot(datetime.now())
         logging.info("Next ingest shot planned at %s", slot.strftime(DATETIME_FORMAT))
