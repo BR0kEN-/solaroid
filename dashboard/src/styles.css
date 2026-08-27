@@ -3852,6 +3852,11 @@ tbody tr:hover {
     gap: 10px;
   }
 
+  .data-section > .section-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
   .plant-comparison-mode {
     justify-self: start;
     width: 100%;
@@ -3861,10 +3866,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 520px) {
-  .data-section > .section-heading {
-    align-items: center;
-  }
-
   .what-if-controls {
     gap: 4px;
   }
