@@ -18,6 +18,7 @@ solaroid/
 Main dashboard files:
 
 - `dashboard/src/main.tsx`: UI, charts, tables, popups, view state, portal auth shell.
+- `dashboard/src/Guide.tsx`: bilingual in-product guide, reference content, and view tours.
 - `dashboard/src/data/supabase.ts`: API client and Supabase response mapping.
 - `dashboard/src/domain/formulas.ts`: canonical electricity, payment, and ROI formulas.
 - `dashboard/src/domain/types.ts`: shared dashboard domain interfaces.
@@ -152,6 +153,8 @@ Writes/upserts:
 - today snapshot into `days`
 - current month snapshot into `months`
 - current month tariffs into `month_tariffs` with first-insert-wins behavior
+
+Ingest errors use HTTP status by ownership. Authentication, authorization, and payload failures remain `4xx`. Unknown function failures return `500`. Recognized transient Supabase Data API failures return `503`, including PostgREST connection errors and the API Gateway `PGRST303: JWT issued at future` failure. Responses expose only a generic server message; provider code, message, details, and hint stay in Edge Function logs.
 
 Payload shape:
 
@@ -295,6 +298,16 @@ Dashboard modes:
 - Monthly: ROI, finance, production, import, consumption, inverter losses, forecast, monthly data table.
 - Daily: daily KPIs, daily charts, daily data table with month selector and inverter losses.
 - Comparison: compares two readable plants by selected daily or monthly period.
+
+### In-product guide
+
+The Help icon beside Refresh opens a replayable guide in both HA and portal modes. It never opens automatically and stores no completion state. The guide hub maps Monthly, Daily, and Comparison workflows, then offers separate references for calculations and Solaroid's capability boundaries. Each view has a short spotlight tour over the live UI; selecting a tour can switch views but preserves currency, filters, and temporary What-if scenarios.
+
+The calculation reference explains the core energy totals, balance, consumed cost, commercial payment, taxes, ROI, forecast, payback, utility-meter reconciliation, and USD conversion. It does not calculate a second set of values. Existing Info popups remain the detailed source for the actual inputs and arithmetic of a selected period.
+
+Its compact reference uses `consumed = consumed_day + consumed_night`, `import = import_day + import_night`, `export = export_day + export_night`, `losses = losses_day + losses_night`, and `balance = import - export`. Consumed cost applies the configured day/night import prices to the matching consumption zones. Commercial payment offsets import against export before charging remaining import or paying remaining export; pre-commercial export is unpaid. Net export prices remove configured personal-income and military taxes from gross prices. ROI, forecast, and payback remain derived estimates rather than separate stored measurements.
+
+The guide states that Refresh reloads stored Supabase data rather than triggering Home Assistant measurements. Normal HA ingestion is approximately every 20 minutes, and the footer timestamp is the freshness source. It also documents that Solaroid cannot control the plant, observe losses beyond the inverter, guarantee forecasts or payback, verify preserved document signatures, persist What-if scenarios, upload documents from the dashboard, or compare plants without assigned read access. Receipt extraction remains non-authoritative and never replaces telemetry or financial calculations.
 
 Dashboard access behavior:
 
@@ -542,6 +555,10 @@ Do not run local Supabase tests unless the user asks. The user normally applies 
                value: 5
    ```
 5. Start and check logs to ensure it's running.
+
+The addon posts on the existing anchored 20-minute schedule. Each shot reads Home Assistant and utility-meter values once, builds one payload, and sends it up to three times when the request fails with a connection/timeout error, HTTP `408`/`429`, or any `5xx`. The two retry delays are approximately 20 and 70 seconds with bounded jitter. Every attempt reuses the identical payload, which is safe because the telemetry writes are idempotent upserts or updates. Ordinary `4xx` responses are not retried. A recovered retry is logged without creating a Home Assistant notification; notifications are sent only after the retry budget is exhausted.
+
+Failure-notification titles include the Home Assistant instance name from `Settings -> System -> General`, for example `Solaroid (Bondas): Ingest failed`. Give each Home Assistant instance a distinct name so notifications sent to the same device remain identifiable. The addon reads the name once at startup; a temporary lookup failure does not stop ingestion and uses `Home Assistant` as the fallback label until restart.
 
 > [!NOTE]
 > The `dtek.endpoint` is expected to return the same structure as `POST https://ok.dtek-dnem.com.ua/api/get-common`. Include any proxy path, account alias, department, or query parameters directly in the endpoint URL. Due to the Incapsula endpoints protection, querying it is not as simple as sending the request. A decent proxy-server is a solution.
