@@ -249,7 +249,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
       this.#getPlantRows(plantId, 'days'),
       this.#getPlantRows(plantId, 'months'),
       this.#getPlantRows(plantId, 'month_tariffs'),
-      includePrivateData ? { spendings: this.#getPlantSpendings(plantId) } : Promise.resolve({}),
+      includePrivateData ? this.#getPlantSpendings(plantId) : Promise.resolve(undefined),
     ])
 
     return {
@@ -268,7 +268,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
           }
         }),
       ) : months,
-      ...spendings,
+      ...(spendings ? { spendings } : {}),
     }
   }
 

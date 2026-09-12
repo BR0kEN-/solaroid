@@ -245,7 +245,7 @@ async function fetchDashboardData(
     tariffs: data.tariffs ?? [],
     reads: data.reads ?? {},
     projection: data.projection ?? null,
-    spendings: data.spendings ?? [],
+    spendings: Array.isArray(data.spendings) ? data.spendings : [],
   }
 }
 
