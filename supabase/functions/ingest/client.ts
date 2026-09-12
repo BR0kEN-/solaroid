@@ -249,7 +249,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
       this.#getPlantRows(plantId, 'days'),
       this.#getPlantRows(plantId, 'months'),
       this.#getPlantRows(plantId, 'month_tariffs'),
-      includePrivateData ? this.#getPlantSpendings(plantId) : Promise.resolve({}),
+      includePrivateData ? { spendings: this.#getPlantSpendings(plantId) } : Promise.resolve({}),
     ])
 
     return {
