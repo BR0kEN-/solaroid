@@ -9,25 +9,33 @@ const token: Solaroid.Supabase.Access.Token = {
   reads: { levched: [] },
 }
 
-Deno.test('read includes files for the token plant regardless of query', async () => {
-  const includeFiles: boolean[] = []
-  const client = plantClient(includeFiles)
+Deno.test('read includes private data for the token plant regardless of query', async () => {
+  const includePrivateData: boolean[] = []
+  const client = plantClient(includePrivateData)
 
-  await read(new Request('https://example.test/ingest?files=false'), token, client)
+  const data = await read(new Request('https://example.test/ingest?files=false'), token, client)
 
-  if (includeFiles.length !== 1 || includeFiles[0] !== true) {
-    throw new Error('token plant files should be included')
+  if (includePrivateData.length !== 1 || includePrivateData[0] !== true) {
+    throw new Error('token plant private data should be included')
+  }
+
+  if (!('spendings' in data) || JSON.stringify(data.spendings) !== JSON.stringify(spendings)) {
+    throw new Error('token plant spendings should preserve the ordered wire shape')
   }
 })
 
-Deno.test('read excludes files for a comparison plant regardless of query', async () => {
-  const includeFiles: boolean[] = []
-  const client = plantClient(includeFiles)
+Deno.test('read excludes private data for a comparison plant regardless of query', async () => {
+  const includePrivateData: boolean[] = []
+  const client = plantClient(includePrivateData)
 
-  await read(new Request('https://example.test/ingest?plant=levched&files=true'), token, client)
+  const data = await read(new Request('https://example.test/ingest?plant=levched&files=true'), token, client)
 
-  if (includeFiles.length !== 1 || includeFiles[0] !== false) {
-    throw new Error('comparison plant files should be excluded')
+  if (includePrivateData.length !== 1 || includePrivateData[0] !== false) {
+    throw new Error('comparison plant private data should be excluded')
+  }
+
+  if ('spendings' in data) {
+    throw new Error('comparison plant spendings should be omitted')
   }
 })
 
@@ -56,16 +64,37 @@ Deno.test('read forbids document URLs for comparison plants', async () => {
   }
 })
 
-function plantClient(includeFiles: boolean[]) {
+const spendings: readonly Solaroid.Supabase.Plant.Spending.Record[] = [
+  {
+    id: 1,
+    plant_id: 'bondas',
+    date: '2026-08-20',
+    type: 'damage_replacement',
+    amount_usd: 2_000,
+    created_at: '2026-08-20 00:00:00.000+00',
+    updated_at: '2026-08-20 00:00:00.000+00',
+  },
+  {
+    id: 2,
+    plant_id: 'bondas',
+    date: '2026-08-20',
+    type: 'damage_replacement',
+    amount_usd: 500,
+    created_at: '2026-08-21 00:00:00.000+00',
+    updated_at: '2026-08-21 00:00:00.000+00',
+  },
+]
+
+function plantClient(includePrivateData: boolean[]) {
   return {
     getPlant: (plantId: string, include = true) => {
-      includeFiles.push(include)
-      return Promise.resolve(plantData(plantId))
+      includePrivateData.push(include)
+      return Promise.resolve(plantData(plantId, include))
     },
   } as unknown as SupabaseClient
 }
 
-function plantData(id: string) {
+function plantData(id: string, includePrivateData: boolean) {
   return {
     plant: {
       id,
@@ -81,5 +110,6 @@ function plantData(id: string) {
     months: [],
     tariffs: [],
     projection: null,
+    ...(includePrivateData ? { spendings } : {}),
   }
 }

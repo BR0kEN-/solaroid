@@ -66,6 +66,7 @@ Canonical tables:
 - `days`: daily cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and daily currency rates.
 - `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
+- `plant_spendings`: dated additional plant costs. The only supported type is currently `damage_replacement`; amounts are stored in USD.
 - `dam_prices`: hourly day-ahead market prices cached by market date, stored as UAH/kWh in `hour1` through `hour24`.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
@@ -77,6 +78,7 @@ Important auth model:
 - Supabase Auth users can never write ingestion data.
 - Dashboard users can list and open green-tariff documents only for the token's primary `plant_id`, but cannot upload or replace them.
 - Extra comparison/read access never grants document listing or signed-URL access.
+- Plant spending records are returned only for the token's primary plant and are omitted from comparison-plant responses.
 - Raw access tokens are still used for Home Assistant ingestion.
 - Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
 - Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
@@ -414,13 +416,25 @@ Important naming:
 - Negative balance means export surplus. This is good in the UI.
 - `payment`/`electricityPayment` is cash net payment.
 - `savings`/ROI is effective investment recovery, not simply `production * export_price`.
+- Damage-replacement spending does not change monthly operational ROI. It increases deployed investment from its calendar month onward, reducing recovery progress and delaying payback forecasts.
 
 Currency rules:
 
 - UAH values are native and summed directly.
 - USD monthly totals convert each month using that month's USD/UAH rate.
 - Monthly USD/UAH uses the latest available daily rate from that month first. If a month has no daily rates, `months.uah_usd_rate` can be filled manually as the fallback.
-- Investment is stored in USD. In UAH mode it is converted using the launch month USD/UAH rate.
+- Initial investment and additional spending are stored in USD. In UAH mode, initial investment uses the launch-month USD/UAH rate while each spending uses its own month's rate. A missing spending-month rate falls back to the latest positive plant rate. A matching What-if USD-rate override affects only that month's conversion.
+
+### Damage-replacement spending
+
+The dashboard is read-only for plant spending. Add an already-incurred cost through Supabase SQL or the table editor:
+
+```sql
+insert into public.plant_spendings (plant_id, date, type, amount_usd)
+values ('bondas', '2026-08-20', 'damage_replacement', 2000);
+```
+
+The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated damage replacement, the conversion rate used in UAH mode, and the total. The ROI trajectory keeps prior months on their original investment basis and applies spending from its month onward. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, and dashboard editing are not supported.
 
 ## UI Conventions
 

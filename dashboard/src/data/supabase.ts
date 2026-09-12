@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
+import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, PlantSpending, PlantSpendingType, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -45,6 +45,14 @@ interface UploadedFileRecord {
   } | null
 }
 
+interface PlantSpendingRecord {
+  readonly id: number
+  readonly plant_id: string
+  readonly date: string
+  readonly type: PlantSpendingType
+  readonly amount_usd: number
+}
+
 interface DayRecord extends MonthRecord {
   readonly uah_usd_rate: number
   readonly uah_eur_rate: number
@@ -72,6 +80,7 @@ interface ApiResponse {
   readonly reads?: Readonly<Record<string, readonly string[]>> | readonly string[]
   readonly records?: readonly DayRecord[] | readonly MonthRecord[]
   readonly projection?: ProductionProjection | null
+  readonly spendings?: readonly PlantSpendingRecord[]
 }
 
 interface DashboardAccess {
@@ -107,7 +116,7 @@ export async function getMonthDocumentUrl(path: string): Promise<string> {
 export async function loadDashboardData(): Promise<LoadedData> {
   assertConfig()
 
-  const { plant, months, days, tariffs, reads, projection } = await fetchDashboardData()
+  const { plant, months, days, tariffs, reads, projection, spendings } = await fetchDashboardData()
   const readablePlantScopes = normalizeReadablePlantScopes(reads)
   const loaded = toLoadedPlant({ plant, months, days, tariffs, projection })
 
@@ -116,6 +125,7 @@ export async function loadDashboardData(): Promise<LoadedData> {
     readablePlantIds: readablePlantIds(readablePlantScopes, plant.id),
     readablePlantScopes,
     scopes: currentPlantScopes(readablePlantScopes, plant.id),
+    spendings: spendings.map(toPlantSpending),
   }
 }
 
@@ -235,6 +245,16 @@ async function fetchDashboardData(
     tariffs: data.tariffs ?? [],
     reads: data.reads ?? {},
     projection: data.projection ?? null,
+    spendings: data.spendings ?? [],
+  }
+}
+
+export function toPlantSpending(record: PlantSpendingRecord): PlantSpending {
+  return {
+    id: record.id,
+    date: parseDate(record.date),
+    type: record.type,
+    amountUsd: record.amount_usd,
   }
 }
 

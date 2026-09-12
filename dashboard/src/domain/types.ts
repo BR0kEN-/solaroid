@@ -38,6 +38,15 @@ export interface MonthTariffScenario {
   readonly usdRate: number
 }
 
+export type PlantSpendingType = 'damage_replacement'
+
+export interface PlantSpending {
+  readonly id: number
+  readonly date: Date
+  readonly type: PlantSpendingType
+  readonly amountUsd: number
+}
+
 export interface MonthReceipt {
   readonly id?: string
   readonly path: string
@@ -168,6 +177,7 @@ export interface DataState {
   readonly readablePlantScopes: Readonly<Record<string, readonly string[]>>
   readonly scopes: readonly string[]
   readonly investmentUsd: number
+  readonly spendings: readonly PlantSpending[]
   readonly launchDate?: Date
   readonly commercialDate?: Date
   readonly metadata?: PlantMetadata | null

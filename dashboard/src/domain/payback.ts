@@ -1,6 +1,6 @@
-import { moneyFromUah, moneyFromUsd, sumRowsRoiMoney, type Currency } from './money'
-import { importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice } from './formulas'
-import type { MonthRow, ProductionProjection, Tariff } from './types'
+import { moneyFromUah, sumRowsRoiMoney, type Currency } from './money'
+import { importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, totalInvestmentMoney, totalInvestmentUsd } from './formulas'
+import type { MonthRow, PlantSpending, ProductionProjection, Tariff } from './types'
 
 export interface PaybackResult {
   readonly recovered: number
@@ -60,6 +60,8 @@ export function calculatePayback({
   currency,
   launchUsdRate,
   launchDate,
+  spendings = [],
+  spendingUsdRate,
   today = new Date(),
 }: {
   readonly rows: readonly MonthRow[]
@@ -67,11 +69,20 @@ export function calculatePayback({
   readonly currency: Currency
   readonly launchUsdRate: number
   readonly launchDate?: Date
+  readonly spendings?: readonly PlantSpending[]
+  readonly spendingUsdRate?: (spending: PlantSpending) => number
   readonly today?: Date
 }): PaybackResult | null {
-  if (!investmentUsd) return null
+  const totalInvestment = totalInvestmentUsd(investmentUsd, spendings)
+  if (!totalInvestment) return null
 
-  const investment = moneyFromUsd(investmentUsd, currency, launchUsdRate)
+  const investment = totalInvestmentMoney({
+    initialInvestmentUsd: investmentUsd,
+    launchUsdRate,
+    spendings,
+    currency,
+    spendingUsdRate: spendingUsdRate ?? (() => launchUsdRate),
+  })
   const recovered = sumRowsRoiMoney(rows, currency)
   const remaining = Math.max(0, investment - recovered)
   const progress = Math.min(100, Math.max(0, (recovered / investment) * 100))
@@ -81,7 +92,7 @@ export function calculatePayback({
   const daysLeft = remaining <= 0 ? 0 : dailyAverage > 0 ? Math.ceil(remaining / dailyAverage) : null
   const payoffDuration = daysLeft === null ? null : fullDurationBetween(today, addDays(today, daysLeft))
 
-  return { recovered, progress, dailyAverage, remaining, daysLeft, payoffDuration, investment, investmentUsd }
+  return { recovered, progress, dailyAverage, remaining, daysLeft, payoffDuration, investment, investmentUsd: totalInvestment }
 }
 
 export function calculateCommercialEndRecovery({

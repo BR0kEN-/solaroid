@@ -45,6 +45,65 @@ describe('date durations', () => {
 })
 
 describe('payback', () => {
+  it('adds damage replacement to payback while keeping monthly operational ROI unchanged', () => {
+    const rows = [month(5_000, '2026-08-01', 50)]
+    const result = calculatePayback({
+      rows,
+      investmentUsd: 100,
+      spendings: [
+        { id: 1, date: new Date('2026-08-20T00:00:00'), type: 'damage_replacement', amountUsd: 50 },
+      ],
+      spendingUsdRate: () => 50,
+      currency: 'USD',
+      launchUsdRate: 40,
+      launchDate: new Date('2026-01-01T00:00:00'),
+      today: new Date('2026-08-31T00:00:00'),
+    })
+
+    expect(rows[0].roiUsd).toBe(100)
+    expect(result?.investmentUsd).toBe(150)
+    expect(result?.investment).toBe(150)
+    expect(result?.recovered).toBe(100)
+    expect(result?.remaining).toBe(50)
+    expect(result?.progress).toBeCloseTo(66.67, 2)
+  })
+
+  it('delays the commercial recovery forecast by the added spending', () => {
+    const rows = [month(0, '2029-12-01')]
+    const common = {
+      rows,
+      investmentUsd: 155,
+      currency: 'UAH' as const,
+      launchUsdRate: 100,
+      launchDate: new Date('2029-12-01T00:00:00'),
+      today: new Date('2029-12-01T00:00:00'),
+    }
+    const baselinePayback = calculatePayback(common)!
+    const adjustedPayback = calculatePayback({
+      ...common,
+      spendings: [
+        { id: 1, date: new Date('2029-12-15T00:00:00'), type: 'damage_replacement' as const, amountUsd: 10 },
+      ],
+      spendingUsdRate: () => 100,
+    })!
+    const projection = {
+      monthlyKwh: Array.from({ length: 12 }, () => 3_000),
+      dailyKwh: Array.from({ length: 12 }, () => 1),
+    }
+    const forecastInput = {
+      rows,
+      currency: 'UAH' as const,
+      commercialDate: new Date('2029-12-01T00:00:00'),
+      launchDate: new Date('2029-12-01T00:00:00'),
+      endDate: new Date('2030-01-01T00:00:00'),
+      projection,
+    }
+    const baseline = calculateCommercialEndRecovery({ ...forecastInput, payback: baselinePayback })
+    const adjusted = calculateCommercialEndRecovery({ ...forecastInput, payback: adjustedPayback })
+
+    expect(adjusted.roiDate!.getTime()).toBeGreaterThan(baseline.roiDate!.getTime())
+  })
+
   it('uses each mode currency basis for recovered value and payback', () => {
     const rows = [month(1000, '2026-01-01', 40), month(3000, '2026-02-01', 60)]
     const common = {
