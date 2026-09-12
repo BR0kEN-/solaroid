@@ -243,18 +243,21 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     if (error) throw new Error('DAM price upsert failed', { cause: error })
   }
 
-  async getPlant(plantId: Solaroid.Supabase.Plant.Id, includeFiles = true) {
+  async getPlant(plantId: Solaroid.Supabase.Plant.Id, includePrivateData = true) {
     const plant = await this.#getPlantMetadata(plantId)
-    const [days, months, tariffs] = await Promise.all(
-      ['days', 'months', 'month_tariffs'].map((table) => this.#getPlantRows(plantId, table)),
-    )
+    const [days, months, tariffs, spendings] = await Promise.all([
+      this.#getPlantRows(plantId, 'days'),
+      this.#getPlantRows(plantId, 'months'),
+      this.#getPlantRows(plantId, 'month_tariffs'),
+      includePrivateData ? this.#getPlantSpendings(plantId) : Promise.resolve({}),
+    ])
 
     return {
       plant,
       days,
       tariffs,
       projection: await this.#getPvgisProjection(plant),
-      months: includeFiles ? await Promise.all(
+      months: includePrivateData ? await Promise.all(
         months.map(async (row) => {
           // @ts-expect-error TS18046
           const [y, m] = row.date.split('-')
@@ -265,6 +268,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
           }
         }),
       ) : months,
+      ...spendings,
     }
   }
 
@@ -333,6 +337,21 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
       .order('date', { ascending: true })
 
     if (error) throw new Error(`${table} lookup failed`, { cause: error })
+
+    return data
+  }
+
+  async #getPlantSpendings(
+    plantId: Solaroid.Supabase.Plant.Id,
+  ): Promise<readonly Solaroid.Supabase.Plant.Spending.Record[]> {
+    const { data, error } = await this.client
+      .from('plant_spendings')
+      .select('*')
+      .eq('plant_id', plantId)
+      .order('date', { ascending: true })
+      .order('id', { ascending: true })
+
+    if (error) throw new Error('plant spendings lookup failed', { cause: error })
 
     return data
   }

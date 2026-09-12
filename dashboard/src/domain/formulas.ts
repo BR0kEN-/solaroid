@@ -6,11 +6,96 @@ import type {
   MonthTariffScenario,
   MonthRow,
   PlantMetadata,
+  PlantSpending,
   Tariff,
 } from './types'
+import type { Currency } from './money'
 
 export const PERCENT_DIVISOR = 100
 export const ELECTRIC_HEATING_REGULAR_PRICE_MULTIPLIER = 4.32 / 2.64
+
+export interface TotalInvestmentMoneyInput {
+  readonly initialInvestmentUsd: number
+  readonly launchUsdRate: number
+  readonly spendings: readonly PlantSpending[]
+  readonly currency: Currency
+  readonly spendingUsdRate: (spending: PlantSpending) => number
+  readonly throughMonth?: Date
+}
+
+export interface MonthlyUsdRate {
+  readonly date: Date
+  readonly usdRate: number
+}
+
+function monthIndex(date: Date) {
+  return date.getFullYear() * 12 + date.getMonth()
+}
+
+function spendingApplies(spending: PlantSpending, throughMonth?: Date) {
+  return !throughMonth || monthIndex(spending.date) <= monthIndex(throughMonth)
+}
+
+export function totalInvestmentUsd(
+  initialInvestmentUsd: number,
+  spendings: readonly PlantSpending[],
+  throughMonth?: Date,
+) {
+  return initialInvestmentUsd + spendings.reduce(
+    (sum, spending) => sum + (spendingApplies(spending, throughMonth) ? spending.amountUsd : 0),
+    0,
+  )
+}
+
+export function totalInvestmentMoney({
+  initialInvestmentUsd,
+  launchUsdRate,
+  spendings,
+  currency,
+  spendingUsdRate,
+  throughMonth,
+}: TotalInvestmentMoneyInput) {
+  if (currency === 'USD') return totalInvestmentUsd(initialInvestmentUsd, spendings, throughMonth)
+
+  return initialInvestmentUsd * launchUsdRate + spendings.reduce(
+    (sum, spending) => sum + (
+      spendingApplies(spending, throughMonth)
+        ? spending.amountUsd * spendingUsdRate(spending)
+        : 0
+    ),
+    0,
+  )
+}
+
+export function investmentUsdRateForDate(
+  date: Date,
+  rows: readonly MonthlyUsdRate[],
+  fallbackUsdRate = 1,
+) {
+  const matchingRate = rows.find((row) => monthIndex(row.date) === monthIndex(date))?.usdRate
+  if (matchingRate && matchingRate > 0) return matchingRate
+
+  let latestMonth = Number.NEGATIVE_INFINITY
+  let latestRate: number | undefined
+  rows.forEach((row) => {
+    const rowMonth = monthIndex(row.date)
+    if (row.usdRate > 0 && rowMonth >= latestMonth) {
+      latestMonth = rowMonth
+      latestRate = row.usdRate
+    }
+  })
+
+  if (latestRate) return latestRate
+
+  return fallbackUsdRate > 0 ? fallbackUsdRate : 1
+}
+
+export function spendingUsdInMonth(spendings: readonly PlantSpending[], month: Date) {
+  return spendings.reduce(
+    (sum, spending) => sum + (monthIndex(spending.date) === monthIndex(month) ? spending.amountUsd : 0),
+    0,
+  )
+}
 
 export function consumedTotal(row: EnergySnapshot) {
   return row.consumedDay + row.consumedNight

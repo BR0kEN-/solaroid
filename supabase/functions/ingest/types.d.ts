@@ -29,6 +29,20 @@ declare global {
     namespace Plant {
       type Id = string
 
+      namespace Spending {
+        type Type = 'damage_replacement'
+
+        interface Record {
+          readonly id: number
+          readonly plant_id: Id
+          readonly date: Date.Ymd
+          readonly type: Type
+          readonly amount_usd: number
+          readonly created_at: Date.Iso8601
+          readonly updated_at: Date.Iso8601
+        }
+      }
+
       namespace Pv {
         interface Field {
           readonly azimuth: number

@@ -12,6 +12,7 @@ import {
   grossExportPayout,
   importCostBreakdown,
   importTotal,
+  investmentUsdRateForDate,
   netExportPrice,
   netExportNightPrice,
   payment,
@@ -22,9 +23,12 @@ import {
   savings,
   selfConsumed,
   selfConsumptionSavings,
+  spendingUsdInMonth,
+  totalInvestmentMoney,
+  totalInvestmentUsd,
   weightedImportPrice,
 } from './formulas'
-import type { EnergySnapshot, GreenTariffReport, MonthRow, MonthTariffScenario, Tariff } from './types'
+import type { EnergySnapshot, GreenTariffReport, MonthRow, MonthTariffScenario, PlantSpending, Tariff } from './types'
 
 const tariff: Tariff = {
   importDay: 4.32,
@@ -53,6 +57,43 @@ const electricHeatingTariff: Tariff = {
   importNight: 1.32,
   electricHeatingThresholdKwh: 2000,
 }
+
+const spendings: readonly PlantSpending[] = [
+  { id: 1, date: new Date('2026-08-20T00:00:00'), type: 'damage_replacement', amountUsd: 2_000 },
+  { id: 2, date: new Date('2026-10-01T00:00:00'), type: 'damage_replacement', amountUsd: 500 },
+]
+
+describe('plant investment', () => {
+  it('adds spendings only from their month onward', () => {
+    expect(totalInvestmentUsd(10_000, spendings, new Date('2026-07-01T00:00:00'))).toBe(10_000)
+    expect(totalInvestmentUsd(10_000, spendings, new Date('2026-08-01T00:00:00'))).toBe(12_000)
+    expect(totalInvestmentUsd(10_000, spendings)).toBe(12_500)
+    expect(spendingUsdInMonth(spendings, new Date('2026-08-01T00:00:00'))).toBe(2_000)
+  })
+
+  it('converts the initial investment and each spending with its own rate', () => {
+    const result = totalInvestmentMoney({
+      initialInvestmentUsd: 10_000,
+      launchUsdRate: 40,
+      spendings,
+      currency: 'UAH',
+      spendingUsdRate: (spending) => spending.id === 1 ? 42 : 44,
+    })
+
+    expect(result).toBe(506_000)
+  })
+
+  it('uses a matching What-if rate and otherwise falls back to the latest positive rate', () => {
+    const rows = [
+      { date: new Date('2026-08-01T00:00:00'), usdRate: 50 },
+      { date: new Date('2026-07-01T00:00:00'), usdRate: 40 },
+    ]
+
+    expect(investmentUsdRateForDate(spendings[0].date, rows)).toBe(50)
+    expect(investmentUsdRateForDate(new Date('2026-09-01T00:00:00'), rows)).toBe(50)
+    expect(investmentUsdRateForDate(new Date('2026-09-01T00:00:00'), [], 43)).toBe(43)
+  })
+})
 
 describe('energy totals', () => {
   it('calculates consumption, import, and grid balance', () => {

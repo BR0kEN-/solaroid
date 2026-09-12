@@ -34,14 +34,17 @@ import {
   greenTariffReceiptReconciliation,
   importCostBreakdown,
   importEnergyCost,
+  investmentUsdRateForDate,
   plantCapacityKwp,
   productionYieldKwhPerKwp,
   repriceMonthRow,
   regularImportDayPrice,
   regularImportNightPrice,
+  spendingUsdInMonth,
+  totalInvestmentMoney,
   type ImportCostBreakdown,
 } from "./domain/formulas";
-import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
+import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, PlantSpending, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
 import { PdfPreview } from "./PdfPreview";
 import "./styles.css";
 
@@ -263,6 +266,8 @@ const i18n = {
     savings: "Savings",
     plantWorks: "Plant works",
     sinceLaunch: "since",
+    date: "Date",
+    amount: "Amount",
     launchDate: "Launch date",
     commercialDate: "Commercial date",
     commercialEndDate: "Commercial period end",
@@ -295,7 +300,10 @@ const i18n = {
     expectedPostCommercialSelfConsumption: "Post-commercial self-consumption",
     projectedRoiDate: "Projected ROI date",
     postCommercialNetBilling: "Post-commercial net billing",
-    investmentInfo: "The USD value is the stored plant investment. In UAH mode, the dashboard converts that USD investment using the USD/UAH rate from the plant launch month, because that represents the original hryvnia cost basis.",
+    investmentInfo: "The initial investment uses the launch-month USD/UAH rate. Each additional spending uses its own month's rate. Damage-replacement spending affects payback from that month onward but does not change operational monthly ROI.",
+    investmentBreakdown: "breakdown",
+    initialInvestment: "Initial investment",
+    damageReplacement: "Damage replacement",
     payback: "Payback",
     recovered: "recovered",
     remaining: "remaining",
@@ -512,6 +520,8 @@ const i18n = {
     savings: "Економія",
     plantWorks: "Станція працює",
     sinceLaunch: "з",
+    date: "Дата",
+    amount: "Сума",
     launchDate: "Дата запуску",
     commercialDate: "Комерційна дата",
     commercialEndDate: "Кінець комерційного періоду",
@@ -544,7 +554,10 @@ const i18n = {
     expectedPostCommercialSelfConsumption: "Власне споживання після комерційного періоду",
     projectedRoiDate: "Прогнозована дата окупності",
     postCommercialNetBilling: "Net billing після комерційного періоду",
-    investmentInfo: "Значення в USD — це збережена вартість станції. У режимі UAH дашборд конвертує цю суму за курсом USD/UAH з місяця запуску станції, бо саме він відображає початкову вартість у гривні.",
+    investmentInfo: "Початкова інвестиція використовує курс USD/UAH місяця запуску. Кожна додаткова витрата використовує курс свого місяця. Витрати на заміну пошкодженого впливають на окупність з цього місяця, але не змінюють операційне місячне ПІ.",
+    investmentBreakdown: "складові",
+    initialInvestment: "Початкова інвестиція",
+    damageReplacement: "Заміна пошкодженого обладнання",
     payback: "Окупність",
     recovered: "повернуто",
     remaining: "залишилось",
@@ -1615,6 +1628,7 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
     scopes: initialData?.scopes ?? [],
     plantId: initialData?.plantId ?? "",
     investmentUsd: initialData?.investmentUsd ?? 0,
+    spendings: initialData?.spendings ?? [],
     launchDate: initialData?.launchDate,
     commercialDate: initialData?.commercialDate,
     metadata: initialData?.metadata,
@@ -1873,6 +1887,13 @@ function App({
     [dailyRowsByMonth, dataState.rows, tariffScenarios],
   );
   const monthlySourceRows = repricedRows;
+  const spendingUsdRateById = useMemo(
+    () => new Map(dataState.spendings.map((spending) => [
+      spending.id,
+      investmentUsdRateForDate(spending.date, monthlySourceRows),
+    ] as const)),
+    [dataState.spendings, monthlySourceRows],
+  );
   const rows = useMemo(() => {
     return filteredMonthlyRows(monthlySourceRows, range, rangeFromMonth, rangeToMonth);
   }, [monthlySourceRows, range, rangeFromMonth, rangeToMonth]);
@@ -2107,6 +2128,36 @@ function App({
     };
   }, [currency, dataState.launchDate, monthlySourceRows, rows]);
 
+  const investmentDisplay = useMemo(() => totalInvestmentMoney({
+    initialInvestmentUsd: dataState.investmentUsd,
+    launchUsdRate: totals.launchUsdRate,
+    spendings: dataState.spendings,
+    currency,
+    spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
+  }), [currency, dataState.investmentUsd, dataState.spendings, spendingUsdRateById, totals.launchUsdRate]);
+
+  const investmentByMonth = useMemo(() => new Map(rows.map((row) => [
+    row.month,
+    totalInvestmentMoney({
+      initialInvestmentUsd: dataState.investmentUsd,
+      launchUsdRate: totals.launchUsdRate,
+      spendings: dataState.spendings,
+      currency,
+      spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
+      throughMonth: row.date,
+    }),
+  ] as const)), [currency, dataState.investmentUsd, dataState.spendings, rows, spendingUsdRateById, totals.launchUsdRate]);
+
+  const spendingMoneyByMonth = useMemo(() => new Map(rows.flatMap((row) => {
+    const amountUsd = spendingUsdInMonth(dataState.spendings, row.date);
+    if (!amountUsd) return [];
+
+    return [[
+      row.month,
+      moneyFromUsd(amountUsd, currency, investmentUsdRateForDate(row.date, monthlySourceRows)),
+    ] as const];
+  })), [currency, dataState.spendings, monthlySourceRows, rows]);
+
   const payback = useMemo(() => {
     return calculatePayback({
       rows,
@@ -2114,8 +2165,10 @@ function App({
       currency,
       launchUsdRate: totals.launchUsdRate,
       launchDate: totals.launchDate,
+      spendings: dataState.spendings,
+      spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
     });
-  }, [currency, dataState.investmentUsd, rows, totals.launchDate, totals.launchUsdRate]);
+  }, [currency, dataState.investmentUsd, dataState.spendings, rows, spendingUsdRateById, totals.launchDate, totals.launchUsdRate]);
 
   const commercialEndRecovery = useMemo(() => {
     if (!payback) return null;
@@ -2307,7 +2360,24 @@ function App({
         ),
       };
     }
-    if (infoModal === "investment") return { title: t.investment, body: t.investmentInfo };
+    if (infoModal === "investment") {
+      return {
+        title: `${t.investment} · ${t.investmentBreakdown}`,
+        body: (
+          <InvestmentBreakdown
+            t={t}
+            lang={lang}
+            currency={currency}
+            initialInvestmentUsd={dataState.investmentUsd}
+            launchDate={dataState.launchDate}
+            launchUsdRate={totals.launchUsdRate}
+            spendings={dataState.spendings}
+            spendingUsdRateById={spendingUsdRateById}
+            total={investmentDisplay}
+          />
+        ),
+      };
+    }
     if (infoModal === "investmentForecast") {
       const details = commercialEndRecovery?.details;
       const sourceLabel = details?.annualProduction.source === "pvgis"
@@ -2482,9 +2552,14 @@ function App({
     currency,
     dataState.commercialDate,
     dataState.dailyRows,
+    dataState.investmentUsd,
+    dataState.launchDate,
     dataState.metadata,
+    dataState.spendings,
     infoModal,
+    investmentDisplay,
     lang,
+    spendingUsdRateById,
     t,
     commercialEndRecovery,
     totals.exportPayoutDisplay,
@@ -2496,6 +2571,7 @@ function App({
     totals.imported,
     totals.importedDay,
     totals.importedNight,
+    totals.launchUsdRate,
     totals.production,
     totals.productionSoldDisplay,
   ]);
@@ -2530,8 +2606,8 @@ function App({
           setDailyCompareOpen={setDailyCompareOpen}
           investmentValue={showPlaceholders ? (
             <SkeletonText width="92px" height="1rem" />
-          ) : payback ? (
-            formatDisplayMoney(moneyFromUsd(payback.investmentUsd, currency, totals.launchUsdRate), currency, lang)
+          ) : investmentDisplay > 0 ? (
+            formatDisplayMoney(investmentDisplay, currency, lang)
           ) : (
             "-"
           )}
@@ -2804,7 +2880,8 @@ function App({
               <RoiChart
                 rows={rows}
                 currency={currency}
-                investment={payback ? payback.investment : 0}
+                investmentByMonth={investmentByMonth}
+                spendingMoneyByMonth={spendingMoneyByMonth}
               />
             )}
           </ChartPanel>
@@ -3428,7 +3505,7 @@ function DashboardToolbar({
         <img src={`${import.meta.env.BASE_URL}logo-mark.svg`} alt="Solaroid" />
       </div>
       <div className="toolbar">
-        <div className="investment-pill" aria-label={`${t.investment} USD`}>
+        <div className="investment-pill" aria-label={`${t.investment} ${currency}`}>
           <span>{t.investment}</span>
           <strong>{investmentValue}</strong>
           <button type="button" className="investment-info-button" aria-label={t.investment} onClick={onInvestmentInfo} disabled={isLoading || !onInvestmentInfo}>
@@ -5241,25 +5318,29 @@ function ProductionExportChart({
 function RoiChart({
   rows,
   currency,
-  investment,
+  investmentByMonth,
+  spendingMoneyByMonth,
 }: {
   readonly rows: readonly MonthRow[];
   readonly currency: Currency;
-  readonly investment: number;
+  readonly investmentByMonth: ReadonlyMap<string, number>;
+  readonly spendingMoneyByMonth: ReadonlyMap<string, number>;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const chronologicalRows = useMemo(
     () =>
-      rows.reduce<Array<{ row: MonthRow; cumulative: number; cumulativePct: number; monthly: number }>>((items, row) => {
-      const monthly = rowRoiMoney(row, currency);
-      const cumulative = (items.at(-1)?.cumulative ?? 0) + monthly;
-      const cumulativePct = investment > 0 ? (cumulative / investment) * 100 : 0;
-      items.push({ row, monthly, cumulative, cumulativePct });
-      return items;
-    }, []),
-    [currency, investment, rows],
+      rows.reduce<Array<{ row: MonthRow; cumulative: number; cumulativePct: number; investment: number; monthly: number; spending: number }>>((items, row) => {
+        const monthly = rowRoiMoney(row, currency);
+        const cumulative = (items.at(-1)?.cumulative ?? 0) + monthly;
+        const investment = investmentByMonth.get(row.month) ?? 0;
+        const spending = spendingMoneyByMonth.get(row.month) ?? 0;
+        const cumulativePct = investment > 0 ? (cumulative / investment) * 100 : 0;
+        items.push({ row, monthly, cumulative, cumulativePct, investment, spending });
+        return items;
+      }, []),
+    [currency, investmentByMonth, rows, spendingMoneyByMonth],
   );
   const displayRows = useMemo(() => (isMobile ? [...chronologicalRows].reverse() : chronologicalRows), [chronologicalRows, isMobile]);
   const inspectors = useMemo(
@@ -5271,6 +5352,16 @@ function RoiChart({
             month: formatPeriodLabel(item.row, lang),
             items: [
               { label: t.roi, value: formatDisplayMoney(item.monthly, currency, lang), color: colors.green },
+              ...(item.spending > 0 ? [{
+                label: t.damageReplacement,
+                value: formatDisplayMoney(item.spending, currency, lang),
+                color: colors.rose,
+              }] : []),
+              {
+                label: t.investment,
+                value: formatDisplayMoney(item.investment, currency, lang),
+                color: colors.ink,
+              },
               {
                 label: `${t.cumulative} ${t.roi}`,
                 value: `${formatDisplayMoney(item.cumulative, currency, lang)} (${formatNumber(item.cumulativePct)}%)`,
@@ -5281,7 +5372,7 @@ function RoiChart({
           },
         ]),
       ),
-    [currency, displayRows, lang, t.cumulative, t.roi],
+    [currency, displayRows, lang, t.cumulative, t.damageReplacement, t.investment, t.roi],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -8000,6 +8091,61 @@ function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefine
     before: rows.filter((current) => current.date < commercialPeriodStart),
     after: rows.filter((current) => current.date >= commercialPeriodStart),
   };
+}
+
+function InvestmentBreakdown({
+  t,
+  lang,
+  currency,
+  initialInvestmentUsd,
+  launchDate,
+  launchUsdRate,
+  spendings,
+  spendingUsdRateById,
+  total,
+}: {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly currency: Currency;
+  readonly initialInvestmentUsd: number;
+  readonly launchDate?: Date;
+  readonly launchUsdRate: number;
+  readonly spendings: readonly PlantSpending[];
+  readonly spendingUsdRateById: ReadonlyMap<number, number>;
+  readonly total: number;
+}) {
+  const valueRows = (amountUsd: number, usdRate: number): readonly StackedValueRow[] => currency === "USD"
+    ? [{ label: t.amount, value: formatDisplayMoney(amountUsd, "USD", lang) }]
+    : [
+      { label: "USD", value: formatDisplayMoney(amountUsd, "USD", lang) },
+      { label: t.usdRate, value: `${formatNumber(usdRate, 2, 2)} UAH/USD` },
+      { label: t.amount, value: formatDisplayMoney(moneyFromUsd(amountUsd, "UAH", usdRate), "UAH", lang) },
+    ];
+  const sortedSpendings = [...spendings].sort((first, second) => (
+    first.date.getTime() - second.date.getTime() || first.id - second.id
+  ));
+
+  return (
+    <div className="info-stack investment-breakdown">
+      <MathInfo
+        rows={[
+          {
+            label: [t.initialInvestment, launchDate ? formatLaunchDate(launchDate, lang) : ""].filter(Boolean).join(" · "),
+            value: <StackedValues rows={valueRows(initialInvestmentUsd, launchUsdRate)} />,
+          },
+          ...sortedSpendings.map((spending) => ({
+            label: `${t.damageReplacement} · ${formatLaunchDate(spending.date, lang)}`,
+            value: <StackedValues rows={valueRows(spending.amountUsd, spendingUsdRateById.get(spending.id) ?? 1)} />,
+          })),
+          {
+            label: t.total,
+            value: <FormulaResult>{formatDisplayMoney(total, currency, lang)}</FormulaResult>,
+          },
+        ]}
+      />
+      <p>{t.investmentInfo}</p>
+    </div>
+  );
 }
 
 function MathInfo({

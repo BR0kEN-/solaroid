@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { exportTotal } from '../domain/formulas'
-import { toLoadedPlant } from './supabase'
+import { toLoadedPlant, toPlantSpending } from './supabase'
 
 const plant = {
   id: 'bondas',
@@ -44,6 +44,23 @@ const greenTariffReport = {
 }
 
 describe('Supabase data mapping', () => {
+  it('maps a damage-replacement spending without changing its USD amount or exact date', () => {
+    const spending = toPlantSpending({
+      id: 7,
+      plant_id: 'bondas',
+      date: '2026-08-20',
+      type: 'damage_replacement',
+      amount_usd: 2_000,
+    })
+
+    expect(spending).toEqual({
+      id: 7,
+      date: new Date('2026-08-20T00:00:00'),
+      type: 'damage_replacement',
+      amountUsd: 2_000,
+    })
+  })
+
   it('uses the latest positive daily USD rate in a month before manual fallback', () => {
     const loaded = toLoadedPlant({
       plant,
