@@ -12,7 +12,7 @@ const EMAIL_INGEST_TOKEN = requiredVar('EMAIL_INGEST_TOKEN')
 const EMAIL_ALLOWED_SENDER_DOMAINS = requiredVar('EMAIL_ALLOWED_SENDER_DOMAINS', true)
 const EMAIL_ALLOWED_SENDER_ADDRESSES = requiredVar('EMAIL_ALLOWED_SENDER_ADDRESSES', true)
 const OPENAI_API_KEY = requiredVar('OPENAI_API_KEY')
-const OPENAI_MODEL = Deno.env.get('OPENAI_MODEL') || 'gpt-4.1-mini'
+const OPENAI_MODEL = Deno.env.get('OPENAI_MODEL') || 'gpt-5.6-terra'
 const DAM_API_AUTH = `Basic ${btoa(`${requiredVar('DAM_API_USER')}:${requiredVar('DAM_API_PASS')}`)}`
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
