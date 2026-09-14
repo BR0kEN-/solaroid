@@ -288,6 +288,15 @@ Deno.test('email receiver accepts only exact configured envelope senders', async
     throw new Error('configured sender address rejected')
   }
 
+  if (!isAllowedEnvelopeSender(
+    'Tester+caf_=docs+demo-plant=example.com@Gmail.com',
+    allowedDomains,
+    allowedAddresses,
+    'docs+demo-plant@example.com',
+  )) {
+    throw new Error('configured Gmail auto-forwarder rejected')
+  }
+
   for (const sender of [
     'other@gmail.com',
     'reports@sub.supplier.example',
@@ -298,6 +307,17 @@ Deno.test('email receiver accepts only exact configured envelope senders', async
   ]) {
     if (isAllowedEnvelopeSender(sender, allowedDomains, allowedAddresses)) {
       throw new Error(`invalid sender accepted: ${sender}`)
+    }
+  }
+
+  for (const [sender, recipient] of [
+    ['other+caf_=docs+demo-plant=example.com@gmail.com', 'docs+demo-plant@example.com'],
+    ['tester+caf_=docs+other-plant=example.com@gmail.com', 'docs+demo-plant@example.com'],
+    ['tester+caf_=docs+demo-plant=attacker.test@gmail.com', 'docs+demo-plant@example.com'],
+    ['tester+caf_=@gmail.com', 'docs+demo-plant@example.com'],
+  ]) {
+    if (isAllowedEnvelopeSender(sender, allowedDomains, allowedAddresses, recipient)) {
+      throw new Error(`invalid Gmail auto-forwarder accepted: ${sender}`)
     }
   }
 

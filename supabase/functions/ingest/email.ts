@@ -11,6 +11,12 @@ import { Hash } from './utils/crypto.ts'
 
 const PLANT_ID_PATTERN = /^[a-z0-9_-]{1,59}$/
 const RAW_SIZE_PATTERN = /^[1-9][0-9]*$/
+const GMAIL_FORWARDING_MARKER = '+caf_='
+
+interface Mailbox {
+  readonly domain: string
+  readonly local: string
+}
 
 function mediaType(request: Request): string {
   return request.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() || ''
@@ -44,12 +50,8 @@ function attachmentBytes(attachment: Attachment): ArrayBuffer {
   throw new Error('Invalid email attachment')
 }
 
-function isAllowedEnvelopeSender(
-  sender: string,
-  allowedDomains: readonly string[],
-  allowedAddresses: readonly string[] = [],
-): boolean {
-  const normalized = sender.trim().toLowerCase()
+function mailbox(value: string): Mailbox | undefined {
+  const normalized = value.trim().toLowerCase()
   const separator = normalized.indexOf('@')
 
   if (
@@ -57,10 +59,45 @@ function isAllowedEnvelopeSender(
     separator !== normalized.lastIndexOf('@') ||
     /[<>\s]/.test(normalized)
   ) {
-    return false
+    return undefined
   }
 
-  return allowedAddresses.includes(normalized) || allowedDomains.includes(normalized.slice(separator + 1))
+  return {
+    local: normalized.slice(0, separator),
+    domain: normalized.slice(separator + 1),
+  }
+}
+
+function gmailForwarderAddress(sender: Mailbox, recipient: string): string | undefined {
+  const markerIndex = sender.local.lastIndexOf(GMAIL_FORWARDING_MARKER)
+  const target = mailbox(recipient)
+
+  if (markerIndex <= 0 || !target) return undefined
+
+  const encodedTarget = sender.local.slice(markerIndex + GMAIL_FORWARDING_MARKER.length)
+
+  if (encodedTarget !== `${target.local}=${target.domain}`) return undefined
+
+  return `${sender.local.slice(0, markerIndex)}@${sender.domain}`
+}
+
+function isAllowedEnvelopeSender(
+  sender: string,
+  allowedDomains: readonly string[],
+  allowedAddresses: readonly string[] = [],
+  recipient = '',
+): boolean {
+  const parsed = mailbox(sender)
+
+  if (!parsed) return false
+
+  const normalized = `${parsed.local}@${parsed.domain}`
+
+  if (allowedAddresses.includes(normalized) || allowedDomains.includes(parsed.domain)) return true
+
+  const forwarder = gmailForwarderAddress(parsed, recipient)
+
+  return Boolean(forwarder && allowedAddresses.includes(forwarder))
 }
 
 function matchingSignature(attachments: readonly Attachment[], pdf: Attachment): Attachment | undefined {
@@ -96,10 +133,9 @@ async function receiveEmail(
   const plantId = requiredHeader(request, 'X-Solaroid-Plant-Id')
   const rawSizeValue = requiredHeader(request, 'X-Solaroid-Raw-Size')
   const sender = requiredHeader(request, 'X-Solaroid-Envelope-From')
+  const recipient = requiredHeader(request, 'X-Solaroid-Recipient')
 
-  requiredHeader(request, 'X-Solaroid-Recipient')
-
-  if (!isAllowedEnvelopeSender(sender, allowedSenderDomains, allowedSenderAddresses)) throw new ForbiddenError()
+  if (!isAllowedEnvelopeSender(sender, allowedSenderDomains, allowedSenderAddresses, recipient)) throw new ForbiddenError()
 
   if (!PLANT_ID_PATTERN.test(plantId) || !RAW_SIZE_PATTERN.test(rawSizeValue)) {
     throw new Error('Invalid email relay metadata')
