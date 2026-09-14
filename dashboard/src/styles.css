@@ -2998,6 +2998,25 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.expenses-info {
+  gap: 0;
+}
+
+.expenses-info > div {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.expenses-info > div > dt,
+.expenses-info > div > dd {
+  white-space: nowrap;
+}
+
+.expenses-info > div > dd {
+  text-align: right;
+}
+
 .net-payment-math dd,
 .net-payment-math .stacked-values > span > span,
 .net-payment-math .input-values > span,
