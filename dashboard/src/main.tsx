@@ -64,6 +64,15 @@ interface PlantComparisonResult {
   readonly year: string;
   readonly plants: readonly PlantComparison[];
 }
+interface ChartInfoModal {
+  readonly kind: "chartInfo";
+  readonly title: string;
+  readonly body: React.ReactNode;
+}
+interface ExpensesInfoModal {
+  readonly kind: "expenses";
+  readonly row: MonthRow;
+}
 type InfoModal =
   | "latestRoi"
   | "netPayment"
@@ -86,11 +95,8 @@ type InfoModal =
     readonly kind: "consumedTotals";
     readonly rows: readonly MonthRow[];
   }
-  | {
-    readonly kind: "comparisonDelta";
-    readonly title: string;
-    readonly body: React.ReactNode;
-  };
+  | ExpensesInfoModal
+  | ChartInfoModal;
 
 interface DashboardDataState extends DataState {
   readonly isRefreshing: boolean;
@@ -304,6 +310,7 @@ const i18n = {
     investmentBreakdown: "breakdown",
     initialInvestment: "Initial investment",
     damageReplacement: "Damage replacement",
+    expenses: "Expenses",
     payback: "Payback",
     recovered: "recovered",
     remaining: "remaining",
@@ -558,6 +565,7 @@ const i18n = {
     investmentBreakdown: "складові",
     initialInvestment: "Початкова інвестиція",
     damageReplacement: "Заміна пошкодженого обладнання",
+    expenses: "Витрати",
     payback: "Окупність",
     recovered: "повернуто",
     remaining: "залишилось",
@@ -2323,7 +2331,21 @@ function App({
         body: <UtilityMeterInfo row={row} t={t} lang={lang} />,
       };
     }
-    if (typeof infoModal === "object" && infoModal?.kind === "comparisonDelta") {
+    if (typeof infoModal === "object" && infoModal?.kind === "expenses") {
+      return {
+        title: `${t.expenses} · ${formatPeriodLabel(infoModal.row, lang)}`,
+        body: (
+          <ExpensesInfo
+            t={t}
+            lang={lang}
+            currency={currency}
+            spendings={dataState.spendings.filter((spending) => monthKey(spending.date) === monthKey(infoModal.row.date))}
+            spendingUsdRateById={spendingUsdRateById}
+          />
+        ),
+      };
+    }
+    if (typeof infoModal === "object" && infoModal?.kind === "chartInfo") {
       return {
         title: infoModal.title,
         body: infoModal.body,
@@ -2680,7 +2702,7 @@ function App({
               t={t}
               currency={currency}
               lang={lang}
-              onDeltaInfo={(title, body) => setInfoModal({ kind: "comparisonDelta", title, body })}
+              onDeltaInfo={(title, body) => setInfoModal({ kind: "chartInfo", title, body })}
             />
           ) : (
             <div className="notice">
@@ -2882,6 +2904,7 @@ function App({
                 currency={currency}
                 investmentByMonth={investmentByMonth}
                 spendingMoneyByMonth={spendingMoneyByMonth}
+                onInfo={(row) => setInfoModal({ kind: "expenses", row })}
               />
             )}
           </ChartPanel>
@@ -4476,6 +4499,7 @@ function PlantPeriodComparisonCharts({
       unit: energyUnit(lang),
       higherIsBetter: false,
       invertDeltaSign: true,
+      invertScale: true,
     },
     {
       title: t.roi,
@@ -4515,6 +4539,7 @@ function PlantPeriodComparisonCharts({
             unit={item.unit}
             higherIsBetter={item.higherIsBetter}
             invertDeltaSign={item.invertDeltaSign}
+            invertScale={item.invertScale}
             capacityContext={item.capacityContext}
             metricTitle={item.title}
             lang={lang}
@@ -4536,6 +4561,7 @@ function PlantPeriodLineChart({
   unit,
   higherIsBetter,
   invertDeltaSign,
+  invertScale,
   capacityContext,
   metricTitle,
   lang,
@@ -4548,6 +4574,7 @@ function PlantPeriodLineChart({
   readonly unit: string;
   readonly higherIsBetter: boolean;
   readonly invertDeltaSign?: boolean;
+  readonly invertScale?: boolean;
   readonly capacityContext?: boolean;
   readonly metricTitle: string;
   readonly lang: Lang;
@@ -4576,7 +4603,10 @@ function PlantPeriodLineChart({
     const index = Math.max(0, periodKeys.indexOf(date));
     return plotStart + index * band + band / 2;
   };
-  const y = (item: number) => pad.top + innerH - ((item - min) / (max - min || 1)) * innerH;
+  const y = (item: number) => {
+    const ratio = (item - min) / (max - min || 1);
+    return invertScale ? pad.top + ratio * innerH : pad.top + innerH - ratio * innerH;
+  };
   const rowByPlantAndDay = useMemo(
     () =>
       new Map(
@@ -5057,6 +5087,8 @@ interface ChartInspectorSelection {
   readonly month: string;
   readonly delta?: string;
   readonly deltaTone?: string;
+  readonly infoLabel?: string;
+  readonly infoAction?: () => void;
   readonly deltaInfoTitle?: string;
   readonly deltaInfo?: React.ReactNode;
   readonly items: readonly ChartInspectorItem[];
@@ -5145,17 +5177,26 @@ function ChartInspector({
   onDeltaInfo?: (title: string, body: React.ReactNode) => void;
 }) {
   if (!selection) return <div className="chart-inspector chart-inspector-empty">{hint}</div>;
+  const hasInfo = Boolean(selection.infoAction || (selection.deltaInfo && onDeltaInfo));
   return (
-    <div className={`chart-inspector${selection.deltaInfo && onDeltaInfo ? " has-delta-info" : ""}`}>
+    <div className={`chart-inspector${hasInfo ? " has-delta-info" : ""}`}>
       <strong className="chart-inspector-period">
         <span>{selection.month}</span>
         {selection.delta ? <em className={selection.deltaTone}>{selection.delta}</em> : null}
-        {selection.deltaInfo && onDeltaInfo ? (
+        {hasInfo ? (
           <button
             type="button"
             className="table-info-button chart-inspector-info"
-            aria-label="Delta details"
-            onClick={() => onDeltaInfo(selection.deltaInfoTitle ?? selection.month, selection.deltaInfo)}
+            aria-label={selection.infoLabel ?? "Delta details"}
+            onClick={() => {
+              if (selection.infoAction) {
+                selection.infoAction();
+                return;
+              }
+              if (selection.deltaInfo && onDeltaInfo) {
+                onDeltaInfo(selection.deltaInfoTitle ?? selection.month, selection.deltaInfo);
+              }
+            }}
           >
             <Info size={12} />
           </button>
@@ -5320,24 +5361,26 @@ function RoiChart({
   currency,
   investmentByMonth,
   spendingMoneyByMonth,
+  onInfo,
 }: {
   readonly rows: readonly MonthRow[];
   readonly currency: Currency;
   readonly investmentByMonth: ReadonlyMap<string, number>;
   readonly spendingMoneyByMonth: ReadonlyMap<string, number>;
+  readonly onInfo: (row: MonthRow) => void;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const chronologicalRows = useMemo(
     () =>
-      rows.reduce<Array<{ row: MonthRow; cumulative: number; cumulativePct: number; investment: number; monthly: number; spending: number }>>((items, row) => {
+      rows.reduce<Array<{ row: MonthRow; cumulative: number; cumulativePct: number; monthly: number; spending: number }>>((items, row) => {
         const monthly = rowRoiMoney(row, currency);
         const cumulative = (items.at(-1)?.cumulative ?? 0) + monthly;
         const investment = investmentByMonth.get(row.month) ?? 0;
         const spending = spendingMoneyByMonth.get(row.month) ?? 0;
         const cumulativePct = investment > 0 ? (cumulative / investment) * 100 : 0;
-        items.push({ row, monthly, cumulative, cumulativePct, investment, spending });
+        items.push({ row, monthly, cumulative, cumulativePct, spending });
         return items;
       }, []),
     [currency, investmentByMonth, rows, spendingMoneyByMonth],
@@ -5350,18 +5393,10 @@ function RoiChart({
           item.row.month,
           {
             month: formatPeriodLabel(item.row, lang),
+            infoLabel: item.spending > 0 ? t.expenses : undefined,
+            infoAction: item.spending > 0 ? () => onInfo(item.row) : undefined,
             items: [
               { label: t.roi, value: formatDisplayMoney(item.monthly, currency, lang), color: colors.green },
-              ...(item.spending > 0 ? [{
-                label: t.damageReplacement,
-                value: formatDisplayMoney(item.spending, currency, lang),
-                color: colors.rose,
-              }] : []),
-              {
-                label: t.investment,
-                value: formatDisplayMoney(item.investment, currency, lang),
-                color: colors.ink,
-              },
               {
                 label: `${t.cumulative} ${t.roi}`,
                 value: `${formatDisplayMoney(item.cumulative, currency, lang)} (${formatNumber(item.cumulativePct)}%)`,
@@ -5372,7 +5407,7 @@ function RoiChart({
           },
         ]),
       ),
-    [currency, displayRows, lang, t.cumulative, t.damageReplacement, t.investment, t.roi],
+    [currency, displayRows, lang, onInfo, t.cumulative, t.expenses, t.roi],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -8114,13 +8149,6 @@ function InvestmentBreakdown({
   readonly spendingUsdRateById: ReadonlyMap<number, number>;
   readonly total: number;
 }) {
-  const valueRows = (amountUsd: number, usdRate: number): readonly StackedValueRow[] => currency === "USD"
-    ? [{ label: t.amount, value: formatDisplayMoney(amountUsd, "USD", lang) }]
-    : [
-      { label: "USD", value: formatDisplayMoney(amountUsd, "USD", lang) },
-      { label: t.usdRate, value: `${formatNumber(usdRate, 2, 2)} UAH/USD` },
-      { label: t.amount, value: formatDisplayMoney(moneyFromUsd(amountUsd, "UAH", usdRate), "UAH", lang) },
-    ];
   const sortedSpendings = [...spendings].sort((first, second) => (
     first.date.getTime() - second.date.getTime() || first.id - second.id
   ));
@@ -8131,11 +8159,11 @@ function InvestmentBreakdown({
         rows={[
           {
             label: [t.initialInvestment, launchDate ? formatLaunchDate(launchDate, lang) : ""].filter(Boolean).join(" · "),
-            value: <StackedValues rows={valueRows(initialInvestmentUsd, launchUsdRate)} />,
+            value: <StackedValues rows={investmentAmountRows(initialInvestmentUsd, launchUsdRate, currency, t, lang)} />,
           },
           ...sortedSpendings.map((spending) => ({
             label: `${t.damageReplacement} · ${formatLaunchDate(spending.date, lang)}`,
-            value: <StackedValues rows={valueRows(spending.amountUsd, spendingUsdRateById.get(spending.id) ?? 1)} />,
+            value: <StackedValues rows={investmentAmountRows(spending.amountUsd, spendingUsdRateById.get(spending.id) ?? 1, currency, t, lang)} />,
           })),
           {
             label: t.total,
@@ -8146,6 +8174,48 @@ function InvestmentBreakdown({
       <p>{t.investmentInfo}</p>
     </div>
   );
+}
+
+interface ExpensesInfoProps {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly currency: Currency;
+  readonly spendings: readonly PlantSpending[];
+  readonly spendingUsdRateById: ReadonlyMap<number, number>;
+}
+
+function ExpensesInfo({ t, lang, currency, spendings, spendingUsdRateById }: ExpensesInfoProps) {
+  const amountsByType = new Map<PlantSpending["type"], number>();
+  spendings.forEach((spending) => {
+    const amount = moneyFromUsd(spending.amountUsd, currency, spendingUsdRateById.get(spending.id) ?? 1);
+    amountsByType.set(spending.type, (amountsByType.get(spending.type) ?? 0) + amount);
+  });
+
+  return (
+    <MathInfo
+      className="expenses-info"
+      rows={[...amountsByType].map(([type, amount]) => ({
+        label: type === "damage_replacement" ? t.damageReplacement : type,
+        value: <FormulaResult>{formatDisplayMoney(amount, currency, lang)}</FormulaResult>,
+      }))}
+    />
+  );
+}
+
+function investmentAmountRows(
+  amountUsd: number,
+  usdRate: number,
+  currency: Currency,
+  t: Record<string, string>,
+  lang: Lang,
+): readonly StackedValueRow[] {
+  return currency === "USD"
+    ? [{ label: t.amount, value: formatDisplayMoney(amountUsd, "USD", lang) }]
+    : [
+      { label: "USD", value: formatDisplayMoney(amountUsd, "USD", lang) },
+      { label: t.usdRate, value: `${formatNumber(usdRate, 2, 2)} UAH/USD` },
+      { label: t.amount, value: formatDisplayMoney(moneyFromUsd(amountUsd, "UAH", usdRate), "UAH", lang) },
+    ];
 }
 
 function MathInfo({
