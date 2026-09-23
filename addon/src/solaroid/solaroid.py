@@ -10,6 +10,7 @@ StateReader = Callable[[str], float]
 POST_RETRY_DELAYS_SECONDS = (20, 70)
 POST_RETRY_JITTER = (0.8, 1.2)
 POST_RETRYABLE_STATUS_CODES = {408, 429}
+POST_TIMEOUT_SECONDS = 30
 
 
 def entity_value(mapping: Any, read_state: StateReader) -> Any:
@@ -75,12 +76,13 @@ def post_payload(url: str, token: str, payload: dict[str, Any]) -> dict[str, Any
     attempts = len(POST_RETRY_DELAYS_SECONDS) + 1
 
     for attempt in range(attempts):
+        timeout = POST_TIMEOUT_SECONDS * (attempt + 1)
         try:
             response = requests.post(
                 url,
                 json=payload,
                 headers=headers,
-                timeout=30,
+                timeout=timeout,
             )
             response.raise_for_status()
             result = response.json()
@@ -101,11 +103,12 @@ def post_payload(url: str, token: str, payload: dict[str, Any]) -> dict[str, Any
 
         delay = POST_RETRY_DELAYS_SECONDS[attempt] * random.uniform(*POST_RETRY_JITTER)
         logging.warning(
-            "Solaroid POST attempt %d/%d failed (%s); retrying in %.1fs",
+            "Solaroid POST attempt %d/%d failed (%s); retrying in %.1fs with %ds timeout",
             attempt + 1,
             attempts,
             category,
             delay,
+            POST_TIMEOUT_SECONDS * (attempt + 2),
         )
         time.sleep(delay)
 
