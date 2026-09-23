@@ -87,6 +87,7 @@ def test_post_payload_succeeds_without_retry(monkeypatch: pytest.MonkeyPatch) ->
     assert result == {"ok": True}
     assert len(calls) == 1
     assert calls[0]["json"] is payload
+    assert [call["timeout"] for call in calls] == [30]
     assert sleeps == []
 
 
@@ -102,6 +103,7 @@ def test_post_payload_retries_503_with_same_payload(monkeypatch: pytest.MonkeyPa
     assert result == {"ok": True}
     assert len(calls) == 2
     assert all(call["json"] is payload for call in calls)
+    assert [call["timeout"] for call in calls] == [30, 60]
     assert sleeps == [20]
 
 
@@ -115,6 +117,7 @@ def test_post_payload_retries_transport_and_server_failures(monkeypatch: pytest.
 
     assert result == {"ok": True}
     assert len(calls) == 3
+    assert [call["timeout"] for call in calls] == [30, 60, 90]
     assert sleeps == [20, 70]
 
 
@@ -128,6 +131,7 @@ def test_post_payload_raises_after_retry_budget(monkeypatch: pytest.MonkeyPatch)
         post_payload("https://example.test", "token", {"value": 1})
 
     assert len(calls) == 3
+    assert [call["timeout"] for call in calls] == [30, 60, 90]
     assert sleeps == [20, 70]
 
 
@@ -138,4 +142,5 @@ def test_post_payload_does_not_retry_regular_4xx(monkeypatch: pytest.MonkeyPatch
         post_payload("https://example.test", "token", {"value": 1})
 
     assert len(calls) == 1
+    assert [call["timeout"] for call in calls] == [30]
     assert sleeps == []
