@@ -200,7 +200,7 @@ GET /functions/v1/ingest?plant=bondas&granularity=2026
 
 The monthly data table has client-only `What if` editing. Selecting the net-export, import-price, or USD/UAH cell opens a vertical editor for that month's net day export price, day/night import prices, and USD/UAH rate. Tariff inputs follow the dashboard currency and are converted back to canonical UAH/kWh for calculations. Changing only the USD/UAH rate leaves those canonical tariff values unchanged.
 
-Each override applies only to its selected month. Changing net day export price scales that month's gross day and night export prices proportionally while preserving export taxes; a zero export baseline cannot be scaled. Changing the USD/UAH rate updates that month's USD conversions and ROI, including the investment conversion when the overridden month contains the launch date. The dashboard then recalculates monthly payment, savings/ROI, totals, payback, current-month forecast cards, finance charts, and related formula popups. A commercial-transition month is repriced through its daily rows so the original before/after-commercial split remains intact. Exact-month tariff and exchange-rate overrides do not become future values in the commercial recovery projection.
+Each override applies only to its selected month. Changing net day export price scales that month's gross day and night export prices proportionally while preserving export taxes; a zero export baseline cannot be scaled. Changing the USD/UAH rate updates that month's USD conversions and ROI, including the investment conversion when the overridden month contains the launch date. The dashboard then recalculates monthly payment, savings/ROI, totals, payback, current-month forecast cards, the Finance chart, and related formula popups. A commercial-transition month is repriced through its daily rows so the original before/after-commercial split remains intact. Exact-month tariff and exchange-rate overrides do not become future tariff values in the payback estimate.
 
 Overrides apply immediately. Row reset removes one override; the table-level `Reset all` control appears after the first override and removes all overrides, including ones outside the visible date range. Overrides survive in-app view/range changes and data refreshes, but disappear on page reload. They are never written to Supabase. Documents, receipt reconciliation, daily data, and plant comparison always use actual values.
 
@@ -418,6 +418,8 @@ Important naming:
 - `savings`/ROI is effective investment recovery, not simply `production * export_price`.
 - Damage-replacement spending does not change monthly operational ROI. It increases deployed investment from its calendar month onward, reducing recovery progress and delaying payback forecasts.
 
+The monthly investment-recovery strip shows one compact desktop row: the label with estimated payoff date, progress, then recovered/total investment. The strip date and the popup's Time left use the same month-by-month recovery projection, including production basis, consumption, commercial-period rules, tariffs, and total investment. The popup preserves the detailed calculation. The date and duration are estimates, not guarantees.
+
 Currency rules:
 
 - UAH values are native and summed directly.
@@ -434,7 +436,7 @@ insert into public.plant_spendings (plant_id, date, type, amount_usd)
 values ('bondas', '2026-08-20', 'damage_replacement', 2000);
 ```
 
-The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated damage replacement, the conversion rate used in UAH mode, and the total. The ROI trajectory keeps prior months on their original investment basis and applies spending from its month onward. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, and dashboard editing are not supported.
+The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated damage replacement, the conversion rate used in UAH mode, and the total. The cumulative ROI line in the Finance chart keeps prior months on their original investment basis and applies spending from its month onward. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, and dashboard editing are not supported.
 
 ## UI Conventions
 
