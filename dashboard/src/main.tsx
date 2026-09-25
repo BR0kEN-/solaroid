@@ -179,7 +179,7 @@ const i18n = {
     all: "All",
     monthly: "Monthly",
     daily: "Daily",
-    comparison: "Comparison",
+    comparison: "Compare",
     total: "Total",
     cost: "Cost",
     compareDays: "Compare days",
@@ -192,6 +192,7 @@ const i18n = {
     overview: "Overview",
     energy: "Energy",
     finance: "Finance",
+    financeAndRoi: "Finance",
     data: "Data",
     forecast: "Forecast",
     expected: "Expected",
@@ -312,13 +313,14 @@ const i18n = {
     damageReplacement: "Damage replacement",
     expenses: "Expenses",
     payback: "Payback",
+    investmentRecovery: "Investment recovery",
+    investmentRecoveryAt: "ROI at",
+    investmentRecoveryForecast: "Investment recovery forecast",
     recovered: "recovered",
     remaining: "remaining",
-    currentAverage: "at the current pace",
     addInvestment: "Add investment cost",
     investmentHelp: "Set the installed system cost to turn monthly ROI into a payback projection.",
     investment: "Investment",
-    roiTrajectory: "ROI trajectory",
     importMix: "Import",
     consumptionMix: "Consumption",
     utilityMeter: "Utility meter",
@@ -434,7 +436,7 @@ const i18n = {
     all: "Усі",
     monthly: "Місяці",
     daily: "Дні",
-    comparison: "Порівняння",
+    comparison: "Порівняти",
     total: "Разом",
     cost: "Вартість",
     compareDays: "Порівняти дні",
@@ -447,6 +449,7 @@ const i18n = {
     overview: "Огляд",
     energy: "Енергія",
     finance: "Фінанси",
+    financeAndRoi: "Фінанси",
     data: "Дані",
     forecast: "Прогноз",
     expected: "Очікувано",
@@ -567,13 +570,14 @@ const i18n = {
     damageReplacement: "Заміна пошкодженого обладнання",
     expenses: "Витрати",
     payback: "Окупність",
+    investmentRecovery: "Повернення інвестицій",
+    investmentRecoveryAt: "ПІ",
+    investmentRecoveryForecast: "Прогноз повернення інвестицій",
     recovered: "повернуто",
     remaining: "залишилось",
-    currentAverage: "за поточного темпу",
     addInvestment: "Додайте вартість станції",
     investmentHelp: "Вкажіть вартість системи, щоб бачити прогноз окупності.",
     investment: "Інвестиція",
-    roiTrajectory: "Динаміка поверення інвестицій",
     importMix: "Імпорт",
     consumptionMix: "Споживання",
     utilityMeter: "Покази лічильника",
@@ -1329,10 +1333,6 @@ function formatMounting(value: string, lang: Lang) {
 function pct(value: number) {
   if (!Number.isFinite(value)) return "0%";
   return `${formatNumber(value)}%`;
-}
-
-function titleCase(value: string) {
-  return value ? `${value[0].toLocaleUpperCase()}${value.slice(1)}` : value;
 }
 
 function monthShort(month: string) {
@@ -2408,7 +2408,7 @@ function App({
           ? t.allTimeDataSource
           : t.actualFallbackSource;
       return {
-        title: titleCase(t.investmentRecovered),
+        title: t.investmentRecoveryForecast,
         body: (
           <div className="info-stack">
             {commercialEndRecovery ? (
@@ -2578,12 +2578,13 @@ function App({
     dataState.launchDate,
     dataState.metadata,
     dataState.spendings,
+    commercialEndRecovery,
     infoModal,
     investmentDisplay,
     lang,
+    payback,
     spendingUsdRateById,
     t,
-    commercialEndRecovery,
     totals.exportPayoutDisplay,
     totals.exportPayoutKwhTotal,
     totals.exported,
@@ -2778,44 +2779,33 @@ function App({
 
         <section className="payback-band">
           {showPlaceholders ? (
-            <>
-              <div className="payback-copy">
-                <PaybackHeadingSkeleton />
-                <span className="payback-lines payback-lines-skeleton">
-                  <SkeletonText width="min(620px, 100%)" height="1.35em" />
-                  <SkeletonText width="min(560px, 90%)" height="1.35em" />
-                  <SkeletonText width="min(430px, 78%)" height="1.35em" />
-                </span>
-              </div>
-              <SkeletonBlock className="progress-track skeleton-track" />
-            </>
+            <PaybackBandSkeleton />
           ) : (
             <>
-              <div className="payback-copy">
-                <h2 className="heading-with-info">
-                  <span>{payback ? `${formatNumber(payback.progress)}% ${t.investmentRecovered}` : t.addInvestment}</span>
+              <h2 className="payback-label">
+                <span>
+                  {commercialEndRecovery?.roiDate
+                    ? `${t.investmentRecoveryAt} ${formatLaunchDate(commercialEndRecovery.roiDate, lang)}`
+                    : payback ? t.investmentRecovery : t.addInvestment}
+                </span>
+                {payback ? (
                   <button type="button" className="section-info-button" aria-label={t.investmentRecovered} onClick={() => setInfoModal("investmentForecast")}>
                     <Info size={16} />
                   </button>
-                </h2>
-                <p>
-                  {payback ? (
-                    <span className="payback-lines">
-                      <span>
-                        {formatDisplayMoney(payback.recovered, currency, lang)} {t.recovered},{" "}
-                        {formatDisplayMoney(payback.remaining, currency, lang)} {t.remaining}
-                        {payback.payoffDuration ? "," : "."}
-                      </span>
-                      {payback.payoffDuration ? (
-                        <span>{formatActiveDuration(payback.payoffDuration, lang)} {t.currentAverage}.</span>
-                      ) : null}
-                    </span>
-                  ) : t.investmentHelp}
-                </p>
-              </div>
-              <div className="progress-track" aria-label="Payback progress">
+                ) : null}
+              </h2>
+              <div className="progress-track" aria-label={`${t.investmentRecovery}: ${formatNumber(payback?.progress ?? 0)}%`}>
                 <span style={{ width: `${payback?.progress ?? 0}%` }} />
               </div>
+              <strong className="payback-values">
+                {payback ? (
+                  <>
+                    <span>{formatDisplayMoney(payback.recovered, currency, lang)}</span>
+                    <span className="payback-value-divider" aria-hidden="true">/</span>
+                    <span>{formatDisplayMoney(payback.investment, currency, lang)}</span>
+                  </>
+                ) : "-"}
+              </strong>
             </>
           )}
         </section>
@@ -2890,16 +2880,31 @@ function App({
 
         <section id="finance" className="chart-grid">
           <ChartPanel
-            title={t.roiTrajectory}
+            title={t.production}
             legend={[
-              [t.roi, colors.green],
-              [`${t.cumulative} %`, colors.ink],
+              [t.production, colors.amber],
+              [t.export, colors.green],
+              ...(productionProjection ? [[t.expected, colors.blue] as [string, string]] : []),
             ]}
           >
             {showPlaceholders ? (
               <ChartSkeleton />
             ) : (
-              <RoiChart
+              <ProductionExportChart rows={rows} projection={productionProjection} onInfo={() => setInfoModal("pvgis")} />
+            )}
+          </ChartPanel>
+          <ChartPanel
+            title={t.financeAndRoi}
+            legend={[
+              [t.savings, colors.mint],
+              [t.payment, colors.green],
+              [`${t.cumulative} ${t.roi} %`, colors.ink],
+            ]}
+          >
+            {showPlaceholders ? (
+              <ChartSkeleton />
+            ) : (
+              <FinanceRoiChart
                 rows={rows}
                 currency={currency}
                 investmentByMonth={investmentByMonth}
@@ -2907,15 +2912,6 @@ function App({
                 onInfo={(row) => setInfoModal({ kind: "expenses", row })}
               />
             )}
-          </ChartPanel>
-          <ChartPanel
-            title={t.finance}
-            legend={[
-              [t.savings, colors.mint],
-              [t.payment, colors.green],
-            ]}
-          >
-            {showPlaceholders ? <ChartSkeleton /> : <MoneyChart rows={rows} currency={currency} />}
           </ChartPanel>
         </section>
 
@@ -2941,18 +2937,6 @@ function App({
         </section>
 
         <section className="chart-grid">
-          <ChartPanel
-            title={t.production}
-            infoLabel={`${t.production} PVGIS`}
-            onInfo={() => setInfoModal("pvgis")}
-            legend={[
-              [t.production, colors.amber],
-              [t.export, colors.green],
-              ...(productionProjection ? [[t.expected, colors.blue] as [string, string]] : []),
-            ]}
-          >
-            {showPlaceholders ? <ChartSkeleton /> : <ProductionExportChart rows={rows} projection={productionProjection} />}
-          </ChartPanel>
           <ChartPanel
             title={t.losses}
             legend={[
@@ -3733,15 +3717,7 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
           showInfoIcons
         />
         <section className="payback-band">
-          <div className="payback-copy">
-            <PaybackHeadingSkeleton />
-            <span className="payback-lines payback-lines-skeleton">
-              <SkeletonText width="min(620px, 100%)" height="1.35em" />
-              <SkeletonText width="min(560px, 90%)" height="1.35em" />
-              <SkeletonText width="min(430px, 78%)" height="1.35em" />
-            </span>
-          </div>
-          <SkeletonBlock className="progress-track skeleton-track" />
+          <PaybackBandSkeleton />
         </section>
         <section className="forecast-section">
           <div className="section-heading">
@@ -3773,8 +3749,8 @@ function MonthlyPageSkeletonTail() {
         <ChartPanelSkeleton />
         <ChartPanelSkeleton />
       </section>
-      <section className="chart-grid chart-grid-single">
-        <ChartPanelSkeleton hasInfo />
+      <section className="chart-grid">
+        <ChartPanelSkeleton />
       </section>
       <section id="data" className="data-section">
         <div className="section-heading">
@@ -3792,12 +3768,20 @@ function MonthlyPageSkeletonTail() {
   );
 }
 
-function PaybackHeadingSkeleton() {
+function PaybackBandSkeleton() {
   return (
-    <h2 className="heading-with-info payback-heading-skeleton">
-      <SkeletonText width="230px" height="22px" />
-      <DisabledInfoIcon className="section-info-button" />
-    </h2>
+    <>
+      <span className="payback-label">
+        <SkeletonText width="220px" height="22px" />
+        <DisabledInfoIcon className="section-info-button" />
+      </span>
+      <SkeletonBlock className="progress-track skeleton-track" />
+      <span className="payback-values">
+        <SkeletonText width="88px" height="18px" />
+        <span className="payback-value-divider">/</span>
+        <SkeletonText width="96px" height="18px" />
+      </span>
+    </>
   );
 }
 
@@ -5076,6 +5060,22 @@ function axisMax(values: number[]) {
   return Math.ceil(buffered / step) * step;
 }
 
+function axisTicksWithZero(min: number, max: number, height: number) {
+  const range = max - min || 1;
+  const tickGap = 48;
+  const negativeIntervals = min < 0 ? Math.max(1, Math.round((height * Math.abs(min)) / range / tickGap)) : 0;
+  const positiveIntervals = max > 0 ? Math.max(1, Math.round((height * max) / range / tickGap)) : 0;
+  const negativeTicks = Array.from(
+    { length: negativeIntervals },
+    (_, index) => min + (Math.abs(min) * index) / negativeIntervals,
+  );
+  const positiveTicks = Array.from(
+    { length: positiveIntervals },
+    (_, index) => (max * (index + 1)) / positiveIntervals,
+  );
+  return [...negativeTicks, 0, ...positiveTicks];
+}
+
 interface ChartInspectorItem {
   readonly label: string;
   readonly value: string;
@@ -5223,9 +5223,11 @@ function newestFirst(rows: readonly MonthRow[]) {
 function ProductionExportChart({
   rows,
   projection,
+  onInfo,
 }: {
   readonly rows: readonly MonthRow[];
   readonly projection?: ProductionProjection | null;
+  readonly onInfo?: () => void;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
@@ -5244,6 +5246,8 @@ function ProductionExportChart({
             row.month,
             {
               month: formatPeriodLabel(row, lang),
+              infoLabel: onInfo ? `${t.production} PVGIS` : undefined,
+              infoAction: onInfo,
               items: [
               { label: t.production, value: formatKwh(row.production, lang), color: colors.amber },
               { label: t.export, value: formatKwh(exportTotal(row), lang), color: colors.green },
@@ -5253,7 +5257,7 @@ function ProductionExportChart({
           ];
         }),
       ),
-    [displayRows, expectedByMonth, lang, t.export, t.expected, t.production],
+    [displayRows, expectedByMonth, lang, onInfo, t.export, t.expected, t.production],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
@@ -5356,31 +5360,43 @@ function ProductionExportChart({
   );
 }
 
-function RoiChart({
-  rows,
-  currency,
-  investmentByMonth,
-  spendingMoneyByMonth,
-  onInfo,
-}: {
+interface FinanceRoiPoint {
+  readonly row: MonthRow;
+  readonly savings: number;
+  readonly payment: number;
+  readonly cumulative: number;
+  readonly cumulativePct: number;
+  readonly spending: number;
+}
+
+interface FinanceRoiChartProps {
   readonly rows: readonly MonthRow[];
   readonly currency: Currency;
   readonly investmentByMonth: ReadonlyMap<string, number>;
   readonly spendingMoneyByMonth: ReadonlyMap<string, number>;
   readonly onInfo: (row: MonthRow) => void;
-}) {
+}
+
+function FinanceRoiChart({
+  rows,
+  currency,
+  investmentByMonth,
+  spendingMoneyByMonth,
+  onInfo,
+}: FinanceRoiChartProps) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const chronologicalRows = useMemo(
     () =>
-      rows.reduce<Array<{ row: MonthRow; cumulative: number; cumulativePct: number; monthly: number; spending: number }>>((items, row) => {
-        const monthly = rowRoiMoney(row, currency);
-        const cumulative = (items.at(-1)?.cumulative ?? 0) + monthly;
+      rows.reduce<FinanceRoiPoint[]>((items, row) => {
+        const savings = moneyFromUah(row.electricitySavings, currency, row.usdRate);
+        const payment = moneyFromUah(row.electricityPayment, currency, row.usdRate);
+        const cumulative = (items.at(-1)?.cumulative ?? 0) + rowRoiMoney(row, currency);
         const investment = investmentByMonth.get(row.month) ?? 0;
         const spending = spendingMoneyByMonth.get(row.month) ?? 0;
         const cumulativePct = investment > 0 ? (cumulative / investment) * 100 : 0;
-        items.push({ row, monthly, cumulative, cumulativePct, spending });
+        items.push({ row, savings, payment, cumulative, cumulativePct, spending });
         return items;
       }, []),
     [currency, investmentByMonth, rows, spendingMoneyByMonth],
@@ -5396,7 +5412,12 @@ function RoiChart({
             infoLabel: item.spending > 0 ? t.expenses : undefined,
             infoAction: item.spending > 0 ? () => onInfo(item.row) : undefined,
             items: [
-              { label: t.roi, value: formatDisplayMoney(item.monthly, currency, lang), color: colors.green },
+              { label: t.savings, value: formatDisplayMoney(item.savings, currency, lang), color: colors.mint },
+              {
+                label: t.payment,
+                value: formatDisplayMoney(item.payment, currency, lang),
+                color: item.payment >= 0 ? colors.green : colors.rose,
+              },
               {
                 label: `${t.cumulative} ${t.roi}`,
                 value: `${formatDisplayMoney(item.cumulative, currency, lang)} (${formatNumber(item.cumulativePct)}%)`,
@@ -5407,44 +5428,83 @@ function RoiChart({
           },
         ]),
       ),
-    [currency, displayRows, lang, onInfo, t.cumulative, t.expenses, t.roi],
+    [currency, displayRows, lang, onInfo, t.cumulative, t.expenses, t.payment, t.roi, t.savings],
   );
   const latestRow = rows.at(-1);
   const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
   const width = chartWidthForItemCount(displayRows.length, isMobile);
   const height = 300;
-  const pad = { left: 48, right: 24, top: 18, bottom: 42 };
+  const pad = { left: 70, right: 58, top: 18, bottom: 42 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
-  const monthly = displayRows.map((item) => item.monthly);
+  const moneyValues = displayRows.flatMap((item) => [item.savings, item.payment]);
   const cumulativePct = displayRows.map((item) => item.cumulativePct);
-  const moneyMax = axisMax(monthly);
-  const pctMax = axisMax(cumulativePct);
+  const moneyMinValue = Math.min(0, ...moneyValues);
+  const moneyMaxValue = Math.max(0, ...moneyValues);
+  const moneyMin = moneyMinValue < 0 ? -axisMax(moneyValues.filter((value) => value < 0).map(Math.abs)) : 0;
+  const moneyMax = moneyMaxValue > 0 ? axisMax(moneyValues.filter((value) => value > 0)) : 1;
+  const pctMinValue = Math.min(0, ...cumulativePct);
+  const pctMaxValue = Math.max(0, ...cumulativePct);
+  const pctMin = pctMinValue < 0 ? -axisMax(cumulativePct.filter((value) => value < 0).map(Math.abs)) : 0;
+  const pctMax = pctMaxValue > 0 ? axisMax(cumulativePct.filter((value) => value > 0)) : 1;
   const band = chartBand(innerW, displayRows.length);
-  const bar = Math.max(16, band * 0.44);
-  const moneyY = (value: number) => pad.top + innerH - (value / moneyMax) * innerH;
-  const pctY = (value: number) => pad.top + innerH - (value / pctMax) * innerH;
+  const bar = pairedChartBarWidth(band, 13, 0.24);
+  const moneyY = (value: number) => pad.top + ((moneyMax - value) / (moneyMax - moneyMin || 1)) * innerH;
+  const zeroY = moneyY(0);
+  const plotBottom = pad.top + innerH;
+  const pctY = (value: number) => {
+    if (value >= 0) return zeroY - (value / pctMax) * (zeroY - pad.top);
+    return zeroY + (Math.abs(value) / Math.abs(pctMin)) * (plotBottom - zeroY);
+  };
+  const moneyTicks = axisTicksWithZero(moneyMin, moneyMax, innerH);
+  const pctTicks = axisTicksWithZero(pctMin, pctMax, innerH);
   const points = cumulativePct
     .map((value, index) => `${pad.left + band * index + band / 2},${pctY(value)}`)
     .join(" ");
 
   return (
     <>
-      <div className={chartScrollClassName(displayRows.length)}>
-        <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
-          <Grid width={width} height={height} pad={pad} max={moneyMax} currency={currency} />
-          {displayRows.map(({ row, monthly: value }, index) => {
+      <div className="finance-roi-chart-wrap">
+        <div className={chartScrollClassName(displayRows.length)}>
+          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t.financeAndRoi}>
+          <g className="grid">
+            {moneyTicks.map((tick) => (
+              <g key={tick}>
+                <line x1={pad.left} x2={width - pad.right} y1={moneyY(tick)} y2={moneyY(tick)} />
+                <text x={pad.left - 10} y={moneyY(tick) + 4} textAnchor="end">
+                  {formatAxisValue(tick, currency)}
+                </text>
+              </g>
+            ))}
+          </g>
+          {pctTicks.map((tick) => (
+            <text className="finance-roi-right-axis" key={tick} x={width - pad.right + 10} y={pctY(tick) + 4} textAnchor="start">
+              {formatNumber(tick)}%
+            </text>
+          ))}
+          <line x1={pad.left} x2={width - pad.right} y1={zeroY} y2={zeroY} stroke={colors.ink} strokeWidth="1.5" />
+          {displayRows.map(({ row, savings, payment }, index) => {
             const x = pad.left + band * index + band / 2;
             const inspector = inspectors.get(row.month);
+            const savingsY = moneyY(savings);
+            const paymentY = moneyY(payment);
             return (
               <g key={row.month}>
                 <rect
-                  x={x - bar / 2}
-                  y={moneyY(value)}
+                  x={x - bar}
+                  y={Math.min(savingsY, zeroY)}
                   width={bar}
-                  height={innerH - (moneyY(value) - pad.top)}
-                  rx="4"
-                  fill={colors.green}
+                  height={Math.abs(zeroY - savingsY)}
+                  rx="3"
+                  fill={colors.mint}
+                />
+                <rect
+                  x={x}
+                  y={Math.min(paymentY, zeroY)}
+                  width={bar}
+                  height={Math.abs(zeroY - paymentY)}
+                  rx="3"
+                  fill={payment >= 0 ? colors.green : colors.rose}
                 />
                 {inspector && (
                   <MonthTarget
@@ -5472,19 +5532,26 @@ function RoiChart({
             pointerEvents="none"
           />
           {displayRows.map(({ row, cumulativePct: value }, index) => (
-            <React.Fragment key={`${row.month}-${value}`}>
-              <circle
-                cx={pad.left + band * index + band / 2}
-                cy={pctY(value)}
-                r="5"
-                fill="var(--panel)"
-                stroke={colors.ink}
-                strokeWidth="2"
-                pointerEvents="none"
-              />
-            </React.Fragment>
+            <circle
+              key={`${row.month}-${value}`}
+              cx={pad.left + band * index + band / 2}
+              cy={pctY(value)}
+              r="5"
+              fill="var(--panel)"
+              stroke={colors.ink}
+              strokeWidth="2"
+              pointerEvents="none"
+            />
           ))}
-        </svg>
+          </svg>
+        </div>
+        <div className="finance-roi-mobile-axis" aria-hidden="true">
+          {pctTicks.map((tick) => (
+            <span key={tick} style={{ top: `${((pctY(tick) - pad.top) / innerH) * 100}%` }}>
+              {formatNumber(tick)}%
+            </span>
+          ))}
+        </div>
       </div>
       <ChartInspector selection={selection} hint={t.tapBarOrDot} />
     </>
