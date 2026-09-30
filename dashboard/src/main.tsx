@@ -24,6 +24,7 @@ import { API_URL, APP_MODE, FORECAST_LATITUDE, FORECAST_LONGITUDE, SUPABASE_ANON
 import { moneyFromUah, moneyFromUsd, moneyToUah, rowRoiMoney, sumRowsFromUah, sumRowsRoiMoney, type Currency } from "./domain/money";
 import { calculateCommercialEndRecovery, calculatePayback } from "./domain/payback";
 import { calculateForecast } from "./domain/forecast";
+import { plantSpendingTypeLabel, plantSpendingTypeTotals } from "./domain/spendings";
 import type { GreenTariffReconciliationValue, GreenTariffReport, MonthReceipt, MonthTariffScenario } from "./domain/types";
 import {
   capacityAdjustedProductionSurplus,
@@ -355,11 +356,12 @@ const i18n = {
     expectedPostCommercialSelfConsumption: "Post-commercial self-consumption",
     projectedRoiDate: "Projected ROI date",
     postCommercialNetBilling: "Post-commercial net billing",
-    investmentInfo: "The initial investment uses the launch-month USD/UAH rate. Each additional spending uses its own month's rate. Damage-replacement spending affects payback from that month onward but does not change operational monthly ROI.",
+    investmentInfo: "The initial investment uses the launch-month USD/UAH rate. Each additional spending uses its own month's rate. Additional spending affects payback from that month onward but does not change operational monthly ROI.",
     investmentDetailsSection: "Investment breakdown",
     detailsAction: "Details",
     initialInvestment: "Initial investment",
     damageReplacement: "Damage replacement",
+    improvement: "Improvement",
     expenses: "Expenses",
     payback: "Payback",
     investmentRecovery: "Investment recovery",
@@ -643,11 +645,12 @@ const i18n = {
     expectedPostCommercialSelfConsumption: "Власне споживання після комерційного періоду",
     projectedRoiDate: "Прогнозована дата ПІ",
     postCommercialNetBilling: "Net billing після комерційного періоду",
-    investmentInfo: "Початкова інвестиція використовує курс USD/UAH місяця запуску. Кожна додаткова витрата використовує курс свого місяця. Витрати на заміну пошкодженого впливають на окупність з цього місяця, але не змінюють операційне місячне ПІ.",
+    investmentInfo: "Початкова інвестиція використовує курс USD/UAH місяця запуску. Кожна додаткова витрата використовує курс свого місяця. Додаткові витрати впливають на окупність з цього місяця, але не змінюють операційне місячне ПІ.",
     investmentDetailsSection: "Складові інвестицій",
     detailsAction: "Деталі",
     initialInvestment: "Початкова інвестиція",
     damageReplacement: "Заміна пошкодженого обладнання",
+    improvement: "Покращення",
     expenses: "Витрати",
     payback: "Окупність",
     investmentRecovery: "Повернення інвестицій",
@@ -9885,6 +9888,10 @@ function InvestmentBreakdown({
   const sortedSpendings = [...spendings].sort((first, second) => (
     first.date.getTime() - second.date.getTime() || first.id - second.id
   ));
+  const spendingLabels = {
+    damageReplacement: t.damageReplacement,
+    improvement: t.improvement,
+  };
   const investmentRows = [
     {
       id: "initial",
@@ -9896,7 +9903,7 @@ function InvestmentBreakdown({
     },
     ...sortedSpendings.map((spending) => ({
       id: `spending-${spending.id}`,
-      label: t.damageReplacement,
+      label: plantSpendingTypeLabel(spending.type, spendingLabels),
       date: formatLaunchDate(spending.date, lang),
       amountUsd: spending.amountUsd,
       usdRate: spendingUsdRateById.get(spending.id) ?? 1,
@@ -9965,17 +9972,20 @@ interface ExpensesInfoProps {
 }
 
 function ExpensesInfo({ t, lang, currency, spendings, spendingUsdRateById }: ExpensesInfoProps) {
-  const amountsByType = new Map<PlantSpending["type"], number>();
-  spendings.forEach((spending) => {
-    const amount = moneyFromUsd(spending.amountUsd, currency, spendingUsdRateById.get(spending.id) ?? 1);
-    amountsByType.set(spending.type, (amountsByType.get(spending.type) ?? 0) + amount);
-  });
+  const spendingLabels = {
+    damageReplacement: t.damageReplacement,
+    improvement: t.improvement,
+  };
+  const totals = plantSpendingTypeTotals(
+    spendings,
+    (spending) => moneyFromUsd(spending.amountUsd, currency, spendingUsdRateById.get(spending.id) ?? 1),
+  );
 
   return (
     <MathInfo
       className="expenses-info"
-      rows={[...amountsByType].map(([type, amount]) => ({
-        label: type === "damage_replacement" ? t.damageReplacement : type,
+      rows={totals.map(({ type, amount }) => ({
+        label: plantSpendingTypeLabel(type, spendingLabels),
         value: <FormulaResult>{formatDisplayMoney(amount, currency, lang)}</FormulaResult>,
       }))}
     />

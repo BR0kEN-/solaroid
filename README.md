@@ -66,7 +66,7 @@ Canonical tables:
 - `days`: daily cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and daily currency rates.
 - `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
-- `plant_spendings`: dated additional plant costs. The only supported type is currently `damage_replacement`; amounts are stored in USD.
+- `plant_spendings`: dated additional plant costs. Supported types are `damage_replacement` and `improvement`; amounts are stored in USD.
 - `dam_prices`: hourly day-ahead market prices cached by market date, stored as UAH/kWh in `hour1` through `hour24`.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
@@ -418,7 +418,7 @@ Important naming:
 - Negative balance means export surplus. This is good in the UI.
 - `payment`/`electricityPayment` is cash net payment.
 - `savings`/ROI is effective investment recovery, not simply `production * export_price`.
-- Damage-replacement spending does not change monthly operational ROI. It increases deployed investment from its calendar month onward, reducing recovery progress and delaying payback forecasts.
+- Additional spending does not change monthly operational ROI. It increases deployed investment from its calendar month onward, reducing recovery progress and delaying payback forecasts.
 
 The monthly investment-recovery strip shows one compact desktop row: the label with estimated payoff date, progress, then recovered/total investment. The strip date and the popup's Time left use the same month-by-month recovery projection, including production basis, consumption, commercial-period rules, tariffs, and total investment. The popup preserves the detailed calculation. The date and duration are estimates, not guarantees.
 
@@ -429,16 +429,21 @@ Currency rules:
 - Monthly USD/UAH uses the latest available daily rate from that month first. If a month has no daily rates, `months.uah_usd_rate` can be filled manually as the fallback.
 - Initial investment and additional spending are stored in USD. In UAH mode, initial investment uses the launch-month USD/UAH rate while each spending uses its own month's rate. A missing spending-month rate falls back to the latest positive plant rate. A matching What-if USD-rate override affects only that month's conversion.
 
-### Damage-replacement spending
+### Additional plant spending
 
 The dashboard is read-only for plant spending. Add an already-incurred cost through Supabase SQL or the table editor:
 
 ```sql
 insert into public.plant_spendings (plant_id, date, type, amount_usd)
-values ('bondas', '2026-08-20', 'damage_replacement', 2000);
+values ('your-plant-id', '2026-08-20', 'damage_replacement', 2000);
+
+insert into public.plant_spendings (plant_id, date, type, amount_usd)
+values ('your-plant-id', '2026-09-05', 'improvement', 750);
 ```
 
-The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated damage replacement, the conversion rate used in UAH mode, and the total. The cumulative ROI line in the Finance chart keeps prior months on their original investment basis and applies spending from its month onward. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, and dashboard editing are not supported.
+The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated additional spending with its type, the conversion rate used in UAH mode, and the total. The cumulative ROI line in the Finance chart keeps prior months on their original investment basis and applies spending from its month onward. The Finance chart's Expenses popup groups spending by type for the selected month.
+
+`improvement` can represent any already-incurred plant upgrade. It does not automatically change capacity, production history, or forecasts. Update current plant PV metadata separately when an upgrade changes the installation; telemetry and the regenerated PVGIS projection then reflect that configuration. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, historical PV configurations, production-uplift multipliers, and dashboard editing are not supported.
 
 ## UI Conventions
 

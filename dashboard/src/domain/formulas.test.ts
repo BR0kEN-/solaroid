@@ -62,7 +62,7 @@ const electricHeatingTariff: Tariff = {
 
 const spendings: readonly PlantSpending[] = [
   { id: 1, date: new Date('2026-08-20T00:00:00'), type: 'damage_replacement', amountUsd: 2_000 },
-  { id: 2, date: new Date('2026-10-01T00:00:00'), type: 'damage_replacement', amountUsd: 500 },
+  { id: 2, date: new Date('2026-10-01T00:00:00'), type: 'improvement', amountUsd: 500 },
 ]
 
 describe('plant investment', () => {

@@ -38,7 +38,7 @@ export interface MonthTariffScenario {
   readonly usdRate: number
 }
 
-export type PlantSpendingType = 'damage_replacement'
+export type PlantSpendingType = 'damage_replacement' | 'improvement'
 
 export interface PlantSpending {
   readonly id: number

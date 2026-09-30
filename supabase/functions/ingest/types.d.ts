@@ -30,7 +30,7 @@ declare global {
       type Id = string
 
       namespace Spending {
-        type Type = 'damage_replacement'
+        type Type = 'damage_replacement' | 'improvement'
 
         interface Record {
           readonly id: number
