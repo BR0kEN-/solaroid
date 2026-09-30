@@ -1,23 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
-  ArrowDownToLine,
-  ArrowUpFromLine,
   CalendarClock,
+  CalendarRange,
   CheckCircle2,
   CircleAlert,
-  CircleDollarSign,
   Eye,
   FileText,
   GitCompareArrows,
   Info,
+  LayoutDashboard,
   List,
   LogOut,
   RefreshCw,
   RotateCcw,
-  SunMedium,
-  WalletCards,
+  Settings2,
   X,
 } from "lucide-react";
 import { configureDashboardAccess, getMonthDocumentUrl, loadDashboardData, loadPlantData, loadPlantGranularity } from "./data/supabase";
@@ -33,14 +32,14 @@ import {
   exportTotal,
   greenTariffReceiptReconciliation,
   importCostBreakdown,
-  importEnergyCost,
   investmentUsdRateForDate,
   plantCapacityKwp,
+  projectConsumptionWithoutPlant,
   productionYieldKwhPerKwp,
   repriceMonthRow,
   regularImportDayPrice,
   regularImportNightPrice,
-  spendingUsdInMonth,
+  solarCoveragePercent,
   totalInvestmentMoney,
   type ImportCostBreakdown,
 } from "./domain/formulas";
@@ -49,7 +48,7 @@ import { PdfPreview } from "./PdfPreview";
 import "./styles.css";
 
 type RangeKey = "all" | "range";
-type DailyRangeKey = "currentMonth" | "7d" | "14d" | "21d" | "30d" | "range";
+type DailyRangeKey = "all" | "7d" | "14d" | "21d" | "30d" | "range";
 type ViewMode = "monthly" | "daily" | "comparison";
 type PlantComparisonMode = "daily" | "monthly";
 type DocumentsView = "list" | "pdf" | "details";
@@ -58,6 +57,8 @@ type TariffScenarioCell = "export" | "import" | "usdRate";
 const monthRangePresets = [1, 3, 6, 12] as const;
 const dailyRangePresets = [7, 14, 21, 30] as const;
 type Lang = "en" | "uk";
+const IS_HA_MODE = APP_MODE === "ha";
+const IS_HA_IFRAME = APP_MODE === "ha" && window.self !== window.top;
 interface PlantComparisonResult {
   readonly mode: PlantComparisonMode;
   readonly month: string;
@@ -69,24 +70,43 @@ interface ChartInfoModal {
   readonly title: string;
   readonly body: React.ReactNode;
 }
-interface ExpensesInfoModal {
-  readonly kind: "expenses";
-  readonly row: MonthRow;
+interface FinanceSummaryInfoModal {
+  readonly kind: "financeSummary";
+  readonly row?: MonthRow;
 }
+
+interface PreservedViewProps {
+  readonly children: React.ReactNode;
+  readonly dependencies: readonly unknown[];
+}
+
+interface ViewPresentation {
+  readonly lang: Lang;
+  readonly currency: Currency;
+}
+
+interface ViewPresentationState {
+  readonly monthly: ViewPresentation;
+  readonly daily: ViewPresentation;
+  readonly comparison: ViewPresentation;
+}
+
+const PreservedView = React.memo(
+  function PreservedView({ children }: PreservedViewProps) {
+    return children;
+  },
+  (previous, next) => previous.dependencies.length === next.dependencies.length
+    && previous.dependencies.every((dependency, index) => Object.is(dependency, next.dependencies[index])),
+);
 type InfoModal =
-  | "latestRoi"
+  | "productionExport"
   | "netPayment"
-  | "totalProduction"
-  | "totalExport"
-  | "totalImport"
+  | "totalConsumption"
   | "usdRate"
   | "importPrice"
   | "roi"
-  | "forecast"
-  | "investment"
+  | "investmentDetails"
   | "investmentForecast"
-  | "plantWorks"
-  | "pvgis"
   | {
     readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "lossesSplit" | "exportPrice" | "netPayment" | "roiCalc" | "utilityMeter";
     readonly row: MonthRow;
@@ -95,7 +115,7 @@ type InfoModal =
     readonly kind: "consumedTotals";
     readonly rows: readonly MonthRow[];
   }
-  | ExpensesInfoModal
+  | FinanceSummaryInfoModal
   | ChartInfoModal;
 
 interface DashboardDataState extends DataState {
@@ -181,7 +201,25 @@ const i18n = {
     daily: "Daily",
     comparison: "Compare",
     total: "Total",
+    totals: "Totals",
+    value: "Value",
+    performance: "Performance",
+    monthlyRoiPerformanceTitle: "Selected month's ROI: savings ÷ investment through that month.",
+    monthlyPaymentPerformanceTitle: "Selected month's payment ÷ selected month's savings.",
+    monthlyConsumptionPerformanceTitle: "Selected month's savings minus payment ÷ selected month's savings.",
+    monthlyRangeRoiPerformanceTitle: "Selected months' savings ÷ investment through the end of the selected range.",
+    monthlyRangePaymentPerformanceTitle: "Selected months' payment ÷ selected months' savings.",
+    monthlyRangeConsumptionPerformanceTitle: "Selected months' savings minus payment ÷ selected months' savings.",
+    dailyRoiPerformanceTitle: "Selected day's ROI: savings ÷ investment through that day.",
+    dailyPaymentPerformanceTitle: "Selected day's payment ÷ selected day's savings.",
+    dailyConsumptionPerformanceTitle: "Selected day's savings minus payment ÷ selected day's savings.",
+    dailyRangeRoiPerformanceTitle: "Selected days' savings ÷ investment through the end of the selected range.",
+    dailyRangePaymentPerformanceTitle: "Selected days' payment ÷ selected days' savings.",
+    dailyRangeConsumptionPerformanceTitle: "Selected days' savings minus payment ÷ selected days' savings.",
     cost: "Cost",
+    compareMonths: "Compare months",
+    firstMonth: "First month",
+    secondMonth: "Second month",
     compareDays: "Compare days",
     firstDay: "First day",
     secondDay: "Second day",
@@ -190,17 +228,22 @@ const i18n = {
     noDailyData: "No daily data yet",
     updated: "Updated",
     overview: "Overview",
+    settings: "Settings",
+    language: "Language",
     energy: "Energy",
     finance: "Finance",
+    income: "Income",
     financeAndRoi: "Finance",
     data: "Data",
     forecast: "Forecast",
     expected: "Expected",
     expectedProduction: "Expected production",
+    actual: "Actual",
+    actualProduction: "Actual production",
     expectedRoi: "Expected ROI",
     expectedIncome: "Expected income",
-    soFar: "so far",
-    forecastInfo: "Forecast values use the current month daylight pace plus PVGIS seasonal production data when available. PVGIS gives the expected month shape; recent completed months correct it to this plant's real performance. ROI and income follow the projected production scale. The colored comparison shows the projected value against the previous month's actual value.",
+    soFar: "So far",
+    forecastInfo: "Forecast values use the current month's daylight pace and PVGIS seasonal production data. PVGIS defines the expected monthly shape; recent completed months calibrate it to this plant's actual performance. ROI and income follow the forecast production scale.",
     pvgisInfo: "PVGIS estimates expected solar production from long-term satellite radiation data, not from this year's weather. It models the sun path for the plant location, panel tilt and azimuth, horizon shading, system power, module technology, mounting type, and configured losses. The result is a typical monthly average. Real production can differ because of clouds, fog, snow cover, dust or dirt, temporary shadows, nearby trees or buildings, inverter limits, outages, maintenance, panel degradation, and unusually sunny or gloomy months.",
     pvgisFields: "PV fields",
     power: "Power",
@@ -224,25 +267,28 @@ const i18n = {
     compareYear: "Year",
     comparisonHint: "Select two plants and a period to compare performance.",
     comparisonUnavailable: "No other assigned plants yet. Ask admin to assign another plant for comparison.",
-    latestRoi: "Latest ROI",
-    latestRoiInfo: "ROI shows how much investment was effectively recovered during the latest month. It includes the value of electricity consumed from your own solar production plus any export income, minus grid electricity costs. Net payment is only the cash balance for the month: export income minus grid electricity costs.",
     refresh: "Refresh",
     cumulative: "Cumulative",
     production: "Production",
+    productionAndExport: "Production and export",
     totalProduction: "Total production",
     totalProductionKpi: "Production",
     totalProductionCostInfoDetails: "This hypothetical value treats every produced kWh as sold at its own month's export price after personal income tax and military levy. In USD mode, each month is converted using that month's USD/UAH rate.",
     exported: "export",
     export: "Export",
+    exportShare: "% export",
     totalExport: "Total export",
     totalExportKpi: "Export",
     totalExportCostInfoDetails: "The payout is calculated from net exported surplus after the monthly import/export balance, using each month's export price after personal income tax and military levy.",
     latest: "Latest",
     gridImport: "Import",
-    totalImport: "Total import",
     totalImportKpi: "Import",
-    totalImportCostInfoDetails: "Day imports are calculated with each month's day import rate, night imports with each month's night import rate.",
-    solarCoverage: "solar",
+    totalConsumptionCostInfoDetails: "Day and night consumption are priced with each month's corresponding import rates.",
+    withoutPlantProjection: "Without plant and inverter",
+    inverterLossesRemoved: "Inverter losses removed",
+    projectedConsumption: "Projected consumption",
+    amountDue: "Amount due",
+    solarCoverage: "Solar",
     net: "Net",
     netPayment: "Net payment",
     totalNetPayment: "Total net payment",
@@ -271,24 +317,26 @@ const i18n = {
     importPriceInfo: "Import prices are shown as day / night. Day is the rate from 7 AM to 11 PM; night is the rate from 11 PM to 7 AM.",
     roiInfo: "ROI is not production multiplied by export price. It is the effective investment recovery for the period: the value of electricity consumed from the solar system plus export payout when commercial export is active, minus grid import costs. Before the commercial date, export is unpaid and does not offset import, so ROI is based only on inferred self-consumed solar energy: production minus export, valued by the weighted day/night import rate.",
     savings: "Savings",
+    consumption: "Consumption",
     plantWorks: "Plant works",
+    plantInformation: "Plant information",
     sinceLaunch: "since",
     date: "Date",
     amount: "Amount",
     launchDate: "Launch date",
+    plantAge: "Plant age",
     commercialDate: "Commercial date",
-    commercialEndDate: "Commercial period end",
-    plantWorksInfo: "Plant age is counted from the launch date. Paid commercial export runs from the commercial date until the commercial period end. After that, net billing is expected: export money becomes a virtual balance, and kWh prices will vary by hour instead of using one fixed payout rate.",
+    commercialEndDate: "Commercial end",
+    plantWorksInfo: "Paid commercial export runs from the commercial date until the commercial period end. After that, net billing is expected: export money becomes a virtual balance, and kWh prices will vary by hour instead of using one fixed payout rate.",
     investmentRecovered: "investment recovered",
-    recoverableByCommercialEnd: "Possible recovery by commercial period end",
+    recoverableByCommercialEnd: "Possible ROI by commercial period end",
     pvgisAdjustedForecast: "PVGIS-adjusted forecast",
-    commercialRecoveryCalcInfo: "Forecast uses annual production, fixed annual consumption, current tariff rules, and month rates. Before the commercial date only self-consumption counts. During the commercial period, surplus is paid. After the commercial period, net billing is treated as closing the same 17 MWh/year internally, so electricity is still avoided but surplus has no cash payout.",
+    commercialRecoveryCalcInfo: "Forecast uses annual production, fixed annual consumption, current tariff rules, and monthly exchange rates. Before the commercial date, only self-consumption counts. During the commercial period, surplus is paid. After it ends, the estimate assumes annual self-sufficiency through net billing: peak-season surplus covers autumn and winter imports within the same 17 MWh/year, avoiding electricity costs without a cash payout for surplus.",
     annualProduction: "Annual production",
     annualConsumption: "Annual consumption",
     annualSurplus: "Annual surplus",
     commercialPeriod: "Commercial period",
     commercialPeriodRange: "Commercial period from {from} to {to}.",
-    postCommercialAssumption: "Once the commercial period ends, the estimate assumes annual self-sufficiency: peak sun season surplus covers fall and winter import through net billing.",
     paybackForecast: "Payback forecast",
     paybackDate: "Date",
     totalPaybackTime: "Total time",
@@ -308,15 +356,17 @@ const i18n = {
     projectedRoiDate: "Projected ROI date",
     postCommercialNetBilling: "Post-commercial net billing",
     investmentInfo: "The initial investment uses the launch-month USD/UAH rate. Each additional spending uses its own month's rate. Damage-replacement spending affects payback from that month onward but does not change operational monthly ROI.",
-    investmentBreakdown: "breakdown",
+    investmentDetailsSection: "Investment breakdown",
+    detailsAction: "Details",
     initialInvestment: "Initial investment",
     damageReplacement: "Damage replacement",
     expenses: "Expenses",
     payback: "Payback",
     investmentRecovery: "Investment recovery",
     investmentRecoveryAt: "ROI at",
-    investmentRecoveryForecast: "Investment recovery forecast",
-    recovered: "recovered",
+    investmentRecoveryForecast: "Return of investment",
+    recovered: "Recovered",
+    of: "of",
     remaining: "remaining",
     addInvestment: "Add investment cost",
     investmentHelp: "Set the installed system cost to turn monthly ROI into a payback projection.",
@@ -347,7 +397,8 @@ const i18n = {
     currentMonth: "Current month",
     from: "From",
     to: "To",
-    allMonths: "All months",
+    allMonths: "All available months",
+    allDays: "All available days",
     allYears: "All years",
     month: "Month",
     import: "Import",
@@ -438,7 +489,25 @@ const i18n = {
     daily: "Дні",
     comparison: "Порівняти",
     total: "Разом",
+    totals: "Підсумки",
+    value: "Значення",
+    performance: "Показник",
+    monthlyRoiPerformanceTitle: "ПІ вибраного місяця: заощадження ÷ інвестиції станом на цей місяць.",
+    monthlyPaymentPerformanceTitle: "Виплата за вибраний місяць ÷ заощадження за вибраний місяць.",
+    monthlyConsumptionPerformanceTitle: "Заощадження мінус виплата за вибраний місяць ÷ заощадження за вибраний місяць.",
+    monthlyRangeRoiPerformanceTitle: "Заощадження за вибрані місяці ÷ інвестиції станом на кінець вибраного діапазону.",
+    monthlyRangePaymentPerformanceTitle: "Виплати за вибрані місяці ÷ заощадження за вибрані місяці.",
+    monthlyRangeConsumptionPerformanceTitle: "Заощадження мінус виплати за вибрані місяці ÷ заощадження за вибрані місяці.",
+    dailyRoiPerformanceTitle: "ПІ вибраного дня: заощадження ÷ інвестиції станом на цей день.",
+    dailyPaymentPerformanceTitle: "Виплата за вибраний день ÷ заощадження за вибраний день.",
+    dailyConsumptionPerformanceTitle: "Заощадження мінус виплата за вибраний день ÷ заощадження за вибраний день.",
+    dailyRangeRoiPerformanceTitle: "Заощадження за вибрані дні ÷ інвестиції станом на кінець вибраного діапазону.",
+    dailyRangePaymentPerformanceTitle: "Виплати за вибрані дні ÷ заощадження за вибрані дні.",
+    dailyRangeConsumptionPerformanceTitle: "Заощадження мінус виплати за вибрані дні ÷ заощадження за вибрані дні.",
     cost: "Вартість",
+    compareMonths: "Порівняти місяці",
+    firstMonth: "Перший місяць",
+    secondMonth: "Другий місяць",
     compareDays: "Порівняти дні",
     firstDay: "Перший день",
     secondDay: "Другий день",
@@ -447,17 +516,22 @@ const i18n = {
     noDailyData: "Денних даних ще немає",
     updated: "Оновлено",
     overview: "Огляд",
+    settings: "Налаштування",
+    language: "Мова",
     energy: "Енергія",
     finance: "Фінанси",
+    income: "Дохід",
     financeAndRoi: "Фінанси",
     data: "Дані",
     forecast: "Прогноз",
     expected: "Очікувано",
     expectedProduction: "Очікувана генерація",
+    actual: "Факт",
+    actualProduction: "Фактична генерація",
     expectedRoi: "Очікуване ПІ",
     expectedIncome: "Очікуваний дохід",
-    soFar: "зараз",
-    forecastInfo: "Прогноз використовує поточний темп світлового дня та сезонні дані PVGIS, якщо вони доступні. PVGIS дає очікувану форму місяця, а останні завершені місяці коригують її під фактичну роботу цієї станції. ПІ та дохід ідуть за масштабом прогнозованої генерації. Кольорове порівняння показує прогноз проти факту попереднього місяця.",
+    soFar: "Зараз",
+    forecastInfo: "Прогноз використовує поточний темп світлового дня та сезонні дані PVGIS. PVGIS визначає очікувану форму місяця, а останні завершені місяці коригують її під фактичну роботу цієї станції. ПІ та дохід ідуть за масштабом прогнозованої генерації.",
     pvgisInfo: "PVGIS рахує очікувану генерацію за довгостроковими супутниковими даними сонячної радіації, а не за погодою саме цього року. Він моделює шлях сонця для локації станції, нахил і азимут панелей, горизонт, потужність системи, тип модуля, монтаж і задані втрати. Результат — типовий середній місяць. Фактична генерація може відрізнятись через хмари, туман, сніг на панелях, пил чи бруд, тимчасові тіні, дерева або будівлі поруч, обмеження інвертора, відключення, обслуговування, деградацію панелей і нетипово сонячні чи похмурі місяці.",
     pvgisFields: "Фотоелектричні поля",
     power: "Потужність",
@@ -481,32 +555,35 @@ const i18n = {
     compareYear: "Рік",
     comparisonHint: "Оберіть дві станції та період для порівняння показників.",
     comparisonUnavailable: "Інші станції ще не привязані. Попросіть адміна додати ще одну станцію для порівняння.",
-    latestRoi: "Останнє ПІ",
-    latestRoiInfo: "ПІ показує, скільки інвестиції фактично повернулось за останній місяць. Воно включає вартість електроенергії, спожитої з власної генерації, плюс дохід від експорту, мінус витрати на електроенергію з мережі. Баланс — це лише грошовий результат місяця: дохід від експорту мінус витрати на електроенергію з мережі.",
     refresh: "Оновити",
     cumulative: "Сумарно",
     production: "Генерація",
+    productionAndExport: "Генерація та експорт",
     totalProduction: "Загальна генерація",
     totalProductionKpi: "Генерація",
     totalProductionCostInfoDetails: "Це умовне значення рахує кожну згенеровану кВт·г як продану за ціною експорту свого місяця після ПДФО і військового збору. У режимі USD кожен місяць конвертується за його курсом USD/UAH.",
     exported: "експорт",
     export: "Експорт",
+    exportShare: "% експорту",
     totalExport: "Загальний експорт",
     totalExportKpi: "Експорт",
     totalExportCostInfoDetails: "Виплата рахується з чистого експортного надлишку після місячного балансу імпорту/експорту, за ціною експорту кожного місяця після ПДФО і військового збору.",
     latest: "Останнє",
     gridImport: "Імпорт",
-    totalImport: "Загальний імпорт",
     totalImportKpi: "Імпорт",
-    totalImportCostInfoDetails: "Денний імпорт рахується за денним тарифом кожного місяця, нічний імпорт - за нічним тарифом.",
-    solarCoverage: "з сонця",
+    totalConsumptionCostInfoDetails: "Денне та нічне споживання рахуються за відповідними тарифами імпорту кожного місяця.",
+    withoutPlantProjection: "Без станції та інвертора",
+    inverterLossesRemoved: "Вилучені втрати інвертора",
+    projectedConsumption: "Розрахункове споживання",
+    amountDue: "До сплати",
+    solarCoverage: "З сонця",
     net: "Баланс",
     netPayment: "Баланс оплати",
     totalNetPayment: "Загальний баланс оплати",
     totalNetPaymentKpi: "Баланс оплати",
     electricityCostWithoutSolar: "Вартість електрики без сонця",
     formulaInputs: "Вхідні дані",
-    importPrices: "Ціни імпорту",
+    importPrices: "Ціни на імпорт",
     exportPriceInput: "Ціни експорту",
     after: "Після",
     usdRate: "Курс USD/UAH",
@@ -528,24 +605,26 @@ const i18n = {
     importPriceInfo: "Ціни імпорту показані як день / ніч. День — тариф з 7:00 до 23:00; ніч — тариф з 23:00 до 7:00.",
     roiInfo: "ПІ — це не генерація, помножена на ціну експорту. Це фактичне повернення інвестицій за період: вартість електроенергії, спожитої з сонячної системи, плюс виплата за експорт після початку комерційного експорту, мінус витрати на імпорт з мережі. До комерційної дати експорт не оплачується і не перекриває імпорт, тому ПІ рахується лише з орієнтовно спожитої власної сонячної енергії: генерація мінус експорт, оцінені за зваженим денним/нічним тарифом імпорту.",
     savings: "Економія",
+    consumption: "Споживання",
     plantWorks: "Станція працює",
+    plantInformation: "Інформація про станцію",
     sinceLaunch: "з",
     date: "Дата",
     amount: "Сума",
     launchDate: "Дата запуску",
+    plantAge: "Вік станції",
     commercialDate: "Комерційна дата",
-    commercialEndDate: "Кінець комерційного періоду",
-    plantWorksInfo: "Вік станції рахується від дати запуску. Оплачений комерційний експорт діє з комерційної дати до кінця комерційного періоду. Після цього очікується net billing: гроші за експорт стають віртуальним балансом, а ціна кВт·г змінюватиметься щогодини замість фіксованої ставки виплати.",
+    commercialEndDate: "Кінець комерції",
+    plantWorksInfo: "Оплачений комерційний експорт діє з комерційної дати до кінця комерційного періоду. Після цього очікується net billing: гроші за експорт стають віртуальним балансом, а ціна кВт·г змінюватиметься щогодини замість фіксованої ставки виплати.",
     investmentRecovered: "інвестиції повернуто",
-    recoverableByCommercialEnd: "Можливе повернення до кінця комерційного періоду",
+    recoverableByCommercialEnd: "Можливе ПІ до кінця комерційного періоду",
     pvgisAdjustedForecast: "прогноз з урахуванням PVGIS",
-    commercialRecoveryCalcInfo: "Прогноз використовує річну генерацію, фіксоване річне споживання, поточні правила тарифів і місячні курси. До комерційної дати враховується лише власне споживання. У комерційний період надлишок оплачується. Після кінця комерційного періоду net billing вважається таким, що закриває ті самі 17 МВт·г/рік всередині року, тому витрати на електрику все ще не виникають, але надлишок не має грошової виплати.",
+    commercialRecoveryCalcInfo: "Прогноз використовує річну генерацію, фіксоване річне споживання, поточні правила тарифів і місячні курси. До комерційної дати враховується лише власне споживання. У комерційний період надлишок оплачується. Після його завершення прогноз припускає річну самодостатність через net billing: надлишок пікового сонячного сезону покриває осінній і зимовий імпорт у межах тих самих 17 МВт·г/рік, тому витрати на електроенергію не виникають, а надлишок не має грошової виплати.",
     annualProduction: "Річна генерація",
     annualConsumption: "Річне споживання",
     annualSurplus: "Річний надлишок",
     commercialPeriod: "Комерційний період",
     commercialPeriodRange: "Комерційний період з {from} до {to}.",
-    postCommercialAssumption: "Після завершення комерційного періоду прогноз припускає річну самодостатність: надлишок пікового сонячного сезону покриває осінній і зимовий імпорт через net billing.",
     paybackForecast: "Прогноз окупності",
     paybackDate: "Дата",
     totalPaybackTime: "Усього",
@@ -562,18 +641,20 @@ const i18n = {
     expectedPaidExport: "Очікуваний оплачений експорт",
     expectedSelfConsumption: "Очікуване власне споживання",
     expectedPostCommercialSelfConsumption: "Власне споживання після комерційного періоду",
-    projectedRoiDate: "Прогнозована дата окупності",
+    projectedRoiDate: "Прогнозована дата ПІ",
     postCommercialNetBilling: "Net billing після комерційного періоду",
     investmentInfo: "Початкова інвестиція використовує курс USD/UAH місяця запуску. Кожна додаткова витрата використовує курс свого місяця. Витрати на заміну пошкодженого впливають на окупність з цього місяця, але не змінюють операційне місячне ПІ.",
-    investmentBreakdown: "складові",
+    investmentDetailsSection: "Складові інвестицій",
+    detailsAction: "Деталі",
     initialInvestment: "Початкова інвестиція",
     damageReplacement: "Заміна пошкодженого обладнання",
     expenses: "Витрати",
     payback: "Окупність",
     investmentRecovery: "Повернення інвестицій",
     investmentRecoveryAt: "ПІ",
-    investmentRecoveryForecast: "Прогноз повернення інвестицій",
-    recovered: "повернуто",
+    investmentRecoveryForecast: "Повернення інвестицій",
+    recovered: "Повернуто",
+    of: "з",
     remaining: "залишилось",
     addInvestment: "Додайте вартість станції",
     investmentHelp: "Вкажіть вартість системи, щоб бачити прогноз окупності.",
@@ -604,7 +685,8 @@ const i18n = {
     currentMonth: "Поточний місяць",
     from: "З",
     to: "До",
-    allMonths: "Усі місяці",
+    allMonths: "Усі доступні місяці",
+    allDays: "Усі доступні дні",
     allYears: "Усі роки",
     month: "Місяць",
     import: "Імпорт",
@@ -812,8 +894,22 @@ function formatNumber(value: number, maximumFractionDigits = 2, minimumFractionD
   }).format(value);
 }
 
+const MWH_DISPLAY_THRESHOLD_KWH = 10_000;
+
+function shouldDisplayMwh(value: number) {
+  return Math.abs(value) >= MWH_DISPLAY_THRESHOLD_KWH;
+}
+
 function formatKwh(value: number, lang: Lang = DEFAULT_LANG) {
+  if (shouldDisplayMwh(value)) return `${formatNumber(value / 1000, 2, 2)} MWh`;
   return `${formatNumber(value, 2, 2)} ${lang === "uk" ? "кВт·г" : "kWh"}`;
+}
+
+function formatChartEnergy(value: number, rounding: "down" | "up", lang: Lang) {
+  if (!shouldDisplayMwh(value)) return formatKwh(value, lang);
+  const scaled = (value / 1000) * 100;
+  const rounded = rounding === "down" ? Math.floor(scaled) : Math.ceil(scaled);
+  return `${formatNumber(rounded / 100, 2, 2)} MWh`;
 }
 
 function formatKwp(value: number, lang: Lang = DEFAULT_LANG) {
@@ -837,11 +933,6 @@ function formatSignedPercentFromDelta(delta: number, base: number) {
 function formatUnsignedPercentFromDelta(delta: number, base: number) {
   if (base) return `${formatNumber(Math.abs(delta / base) * 100)}%`;
   return delta === 0 ? "0%" : "—";
-}
-
-function formatMonthlyKpiKwh(value: number, lang: Lang = DEFAULT_LANG) {
-  if (Math.abs(value) <= 10_000) return formatKwh(value, lang);
-  return `${formatNumber(value / 1000, 2, 2)} ${lang === "uk" ? "МВт·г" : "MWh"}`;
 }
 
 function energyUnit(lang: Lang) {
@@ -932,6 +1023,44 @@ function monthRangeLabel(count: number, lang: Lang) {
 
 function dayRangeLabel(count: number, lang: Lang) {
   return `${count}${lang === "uk" ? "д" : "d"}`;
+}
+
+function lastDayRangeLabel(count: number, lang: Lang) {
+  if (lang === "uk") return `Останні ${count} ${ukrainianCountLabel(count, "день", "дні", "днів")}`;
+  return `Last ${count} ${count === 1 ? "day" : "days"}`;
+}
+
+function lastMonthRangeLabel(count: number, lang: Lang) {
+  if (lang === "uk") return `${count === 1 ? "Останній" : "Останні"} ${count} ${ukrainianCountLabel(count, "місяць", "місяці", "місяців")}`;
+  return `Last ${count} ${count === 1 ? "month" : "months"}`;
+}
+
+function ukrainianCountLabel(count: number, one: string, few: string, many: string) {
+  const lastTwo = Math.abs(count) % 100;
+  const last = lastTwo % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return many;
+  if (last === 1) return one;
+  if (last >= 2 && last <= 4) return few;
+  return many;
+}
+
+function formatMonthRangeValue(month: string, lang: Lang) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (!year || !monthNumber) return month;
+  return formatLocalizedDate(new Date(year, monthNumber - 1, 1), lang, {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatMonthRangeSelection(fromMonth: string, toMonth: string, lang: Lang) {
+  const [from, to] = fromMonth <= toMonth ? [fromMonth, toMonth] : [toMonth, fromMonth];
+  return `${formatMonthRangeValue(from, lang)} – ${formatMonthRangeValue(to, lang)}`;
+}
+
+function formatDayRangeSelection(fromDate: string, toDate: string, lang: Lang) {
+  const [from, to] = fromDate <= toDate ? [fromDate, toDate] : [toDate, fromDate];
+  return `${formatDayLabel(new Date(`${from}T00:00:00`), lang)} – ${formatDayLabel(new Date(`${to}T00:00:00`), lang)}`;
 }
 
 function chartLevel(value: number, max: number, minVisible = 3) {
@@ -1088,7 +1217,7 @@ function ProductionCapacityInfo({
   const expected = secondProduction * (firstCapacity / secondCapacity);
   const productionDelta = firstProduction - secondProduction;
   const yieldDelta = (firstYield ?? 0) - (secondYield ?? 0);
-  const productionLabel = lang === "uk" ? "Генерація · кВт·г" : "Production · kWh";
+  const productionLabel = lang === "uk" ? "Генерація" : "Production";
   const capacityLabel = lang === "uk" ? "Потужність · кВт·п" : "Capacity · kWp";
   const yieldLabel = lang === "uk" ? "кВт·г / кВт·п" : "kWh / kWp";
   const yieldNote = lang === "uk"
@@ -1128,8 +1257,8 @@ function ProductionCapacityInfo({
         <tbody>
           <tr>
             <th>{productionLabel}</th>
-            <td><span className="production-capacity-value">{formatNumber(firstProduction, 2, 2)}</span></td>
-            <td><span className="production-capacity-value">{formatNumber(secondProduction, 2, 2)}</span></td>
+            <td><span className="production-capacity-value">{formatKwh(firstProduction, lang)}</span></td>
+            <td><span className="production-capacity-value">{formatKwh(secondProduction, lang)}</span></td>
           </tr>
           <tr>
             <th>{capacityLabel}</th>
@@ -1151,7 +1280,7 @@ function ProductionCapacityInfo({
             <span>{productionLabel}</span>
             <b className={comparisonDeltaTone(productionDelta, true)}>
               <span className="production-capacity-value">
-                <span>{formatSignedNumber(productionDelta)}</span>
+                <span>{formatSignedKwh(productionDelta, lang)}</span>
                 <span className="production-capacity-subdelta">, {formatSignedPercentFromDelta(productionDelta, secondProduction)}</span>
               </span>
             </b>
@@ -1170,7 +1299,7 @@ function ProductionCapacityInfo({
           <span className="production-capacity-note">{expectedNote}</span>
           <div className="production-capacity-card-row">
             <span>{productionLabel}</span>
-            <b>{formatNumber(expected, 2, 2)}</b>
+            <b>{formatKwh(expected, lang)}</b>
           </div>
         </section>
         <section className="production-capacity-card">
@@ -1180,7 +1309,7 @@ function ProductionCapacityInfo({
             <span>{productionLabel}</span>
             <b className={comparisonDeltaTone(surplus ?? 0, true)}>
               <span className="production-capacity-value">
-                <span>{formatSignedNumber(surplus ?? 0)}</span>
+                <span>{formatSignedKwh(surplus ?? 0, lang)}</span>
                 <span className="production-capacity-subdelta">, {formatSignedPercentFromDelta(surplus ?? 0, expected)}</span>
               </span>
             </b>
@@ -1224,10 +1353,6 @@ function ProductionCapacityInfo({
       )}
     </div>
   );
-}
-
-function importCostUah(row: MonthRow) {
-  return importEnergyCost(row.importDay, row.importNight, tariffFromRow(row));
 }
 
 function lossesTotal(row: MonthRow) {
@@ -1297,17 +1422,77 @@ function chartBand(innerWidth: number, count: number, maxBand = 72) {
   return Math.min(innerWidth / Math.max(count, 1), maxBand);
 }
 
-function pairedChartBarWidth(band: number, minWidth: number, ratio: number) {
-  return Math.max(2, Math.min(Math.max(minWidth, band * ratio), band * 0.38));
+const FIXED_CHART_BAND = 52;
+const PAIRED_CHART_BAR_WIDTH = 14;
+const STACKED_CHART_BAR_WIDTH = 25;
+
+function chartScrollClassName(_itemCount: number, _alwaysScrollable = false) {
+  return "chart-scroll";
 }
 
-function chartScrollClassName(itemCount: number) {
-  return itemCount <= 4 ? "chart-scroll chart-scroll-fit" : "chart-scroll";
-}
-
-function chartWidthForItemCount(itemCount: number, isMobile: boolean) {
+function chartWidthForItemCount(itemCount: number, isMobile: boolean, fixedBandPadding?: number) {
+  if (fixedBandPadding !== undefined) {
+    return fixedBandPadding + FIXED_CHART_BAND * Math.max(itemCount, 1);
+  }
   if (!isMobile || itemCount > 4) return 900;
-  return Math.max(360, 56 + 22 + chartBand(900 - 56 - 22, itemCount) * Math.max(itemCount, 1));
+  return Math.max(360, 40 + 22 + chartBand(900 - 40 - 22, itemCount) * Math.max(itemCount, 1));
+}
+
+interface ChartDimensions {
+  readonly width: number;
+  readonly band: number;
+  readonly plotStart: number;
+}
+
+function chartDimensionsForItemCount(
+  itemCount: number,
+  isMobile: boolean,
+  fixedBarDensity: boolean,
+  leadingInset: number,
+  trailingInset: number,
+  viewportWidth: number,
+): ChartDimensions {
+  const horizontalPadding = leadingInset + trailingInset;
+  const contentWidth = chartWidthForItemCount(itemCount, isMobile, fixedBarDensity ? horizontalPadding : undefined);
+  const width = fixedBarDensity ? Math.max(contentWidth, viewportWidth) : contentWidth;
+  const innerWidth = width - horizontalPadding;
+  const band = fixedBarDensity ? FIXED_CHART_BAND : chartBand(innerWidth, itemCount);
+  return { width, band, plotStart: leadingInset };
+}
+
+function useDesktopChartEndScroll(
+  isMobile: boolean,
+  enabled: boolean,
+  itemCount: number,
+  firstPeriod?: string,
+  lastPeriod?: string,
+) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+
+  React.useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return undefined;
+    const updateWidth = () => setViewportWidth(element.clientWidth);
+    updateWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth);
+      return () => window.removeEventListener("resize", updateWidth);
+    }
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !enabled) return;
+    element.scrollLeft = isMobile ? 0 : element.scrollWidth;
+  }, [enabled, firstPeriod, isMobile, itemCount, lastPeriod, viewportWidth]);
+
+  return [scrollRef, viewportWidth] as const;
 }
 
 function projectedProduction(row: MonthRow, projection?: ProductionProjection | null) {
@@ -1335,6 +1520,10 @@ function pct(value: number) {
   return `${formatNumber(value)}%`;
 }
 
+function formatConsumptionWithSolar(consumed: number, imported: number, lang: Lang) {
+  return `${formatChartEnergy(consumed, "up", lang)} · ${pct(solarCoveragePercent(consumed, imported))} ${i18n[lang].solarCoverage}`;
+}
+
 function monthShort(month: string) {
   if (month.includes("-")) {
     const [, , d] = month.split("-");
@@ -1344,53 +1533,70 @@ function monthShort(month: string) {
   return `${m}.${y.slice(2)}`;
 }
 
+function normalizeUkrainianDateLabel(value: string) {
+  return value
+    .replace(/\s+р\.(?=,|$)/gu, "")
+    .replace(/([\p{L}]{3,})\.(?=,|\s|$)/gu, "$1");
+}
+
+function formatLocalizedDate(date: Date, lang: Lang, options: Intl.DateTimeFormatOptions) {
+  const value = new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", options).format(date);
+  return lang === "uk" ? normalizeUkrainianDateLabel(value) : value;
+}
+
 function formatDayLabel(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     day: "numeric",
     month: "short",
     year: "numeric",
-  }).format(date);
+  });
 }
 
-function formatDayMonthLabel(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
-    day: "numeric",
-    month: "short",
-  }).format(date);
+function formatDataRowCount(count: number, period: "monthly" | "daily", lang: Lang) {
+  if (lang === "en") {
+    const unit = period === "monthly" ? "month" : "day";
+    return `${count} ${unit}${count === 1 ? "" : "s"} of data`;
+  }
+
+  const plural = new Intl.PluralRules("uk-UA").select(count);
+  const unit = period === "monthly"
+    ? plural === "one" ? "місяць" : plural === "few" ? "місяці" : plural === "many" ? "місяців" : "місяця"
+    : plural === "one" ? "день" : plural === "few" ? "дні" : plural === "many" ? "днів" : "дня";
+  return `${count} ${unit} даних`;
 }
 
 function formatDayOnlyLabel(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     day: "numeric",
-  }).format(date);
+  });
 }
 
 function formatDateTimeLabel(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     day: "numeric",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+  });
 }
 
 function formatMonthYear(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     month: "long",
     year: "numeric",
-  }).format(date);
+  });
 }
 
 function formatMonthOnly(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     month: "long",
-  }).format(date);
+  });
 }
 
 function formatMonthShortOnly(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     month: "short",
-  }).format(date);
+  });
 }
 
 function monthKey(date: Date) {
@@ -1402,11 +1608,11 @@ function formatPeriodLabel(row: MonthRow, lang: Lang = DEFAULT_LANG) {
 }
 
 function formatLaunchDate(date: Date, lang: Lang) {
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     day: "numeric",
-    month: "short",
+    month: "long",
     year: "numeric",
-  }).format(date);
+  });
 }
 
 function formatDuration(months: number, lang: Lang) {
@@ -1566,6 +1772,11 @@ function formatCompactActiveDuration(duration: { months: number; days: number },
   return parts.filter(Boolean).join(" ");
 }
 
+function formatCompactDateDistance(date: Date, lang: Lang, referenceDate = new Date()) {
+  const [start, end] = date <= referenceDate ? [date, referenceDate] : [referenceDate, date];
+  return formatCompactActiveDuration(fullDurationBetween(start, end), lang);
+}
+
 function netExportPrice(row: MonthRow) {
   return netExportRate(row);
 }
@@ -1591,19 +1802,27 @@ function shiftedDateKey(date: Date, days: number) {
   return dateKey(shifted);
 }
 
+function latestDailyMonthRange(sourceRows: readonly MonthRow[]) {
+  const first = sourceRows[0];
+  const latest = sourceRows.at(-1);
+  if (!first || !latest) return ["", ""] as const;
+
+  const firstKey = dateKey(first.date);
+  const latestKey = dateKey(latest.date);
+  const latestMonthStart = `${monthKey(latest.date)}-01`;
+  return [latestMonthStart < firstKey ? firstKey : latestMonthStart, latestKey] as const;
+}
+
 function filteredDailyRows(
   sourceRows: readonly MonthRow[],
   range: DailyRangeKey,
   fromDate: string,
   toDate: string,
 ) {
+  if (range === "all") return sourceRows;
+
   const latest = sourceRows.at(-1);
   if (!latest) return sourceRows;
-
-  if (range === "currentMonth") {
-    const latestMonth = monthKey(latest.date);
-    return sourceRows.filter((row) => monthKey(row.date) === latestMonth);
-  }
 
   if (range.endsWith("d")) {
     const count = Number.parseInt(range, 10);
@@ -1615,7 +1834,13 @@ function filteredDailyRows(
     });
   }
 
-  if (!fromDate || !toDate) return sourceRows;
+  if (!fromDate || !toDate) {
+    const [defaultFrom, defaultTo] = latestDailyMonthRange(sourceRows);
+    return sourceRows.filter((row) => {
+      const key = dateKey(row.date);
+      return key >= defaultFrom && key <= defaultTo;
+    });
+  }
   const [from, to] = fromDate <= toDate ? [fromDate, toDate] : [toDate, fromDate];
   return sourceRows.filter((row) => {
     const key = dateKey(row.date);
@@ -1738,13 +1963,20 @@ function App({
 }) {
   const dataState = useDashboardData(initialData);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
+  const [overviewViewMode, setOverviewViewMode] = useState<Exclude<ViewMode, "comparison">>("monthly");
+  const [mountedViewModes, setMountedViewModes] = useState<ReadonlySet<ViewMode>>(() => new Set(["monthly"]));
+  const [isMobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const mobileSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
   const [range, setRange] = useState<RangeKey>("all");
   const [rangeFromMonth, setRangeFromMonth] = useState("");
   const [rangeToMonth, setRangeToMonth] = useState("");
-  const [dailyRange, setDailyRange] = useState<DailyRangeKey>("currentMonth");
-  const [dailyFromDate, setDailyFromDate] = useState("");
-  const [dailyToDate, setDailyToDate] = useState("");
+  const [dailyRange, setDailyRange] = useState<DailyRangeKey>("range");
+  const [dailyFromDate, setDailyFromDate] = useState(() => latestDailyMonthRange(dataState.dailyRows)[0]);
+  const [dailyToDate, setDailyToDate] = useState(() => latestDailyMonthRange(dataState.dailyRows)[1]);
   const [currency, setCurrency] = useState<Currency>("UAH");
+  const [firstMonth, setFirstMonth] = useState("");
+  const [secondMonth, setSecondMonth] = useState("");
+  const [isMonthlyCompareOpen, setMonthlyCompareOpen] = useState(false);
   const [firstDay, setFirstDay] = useState("");
   const [secondDay, setSecondDay] = useState("");
   const [isDailyCompareOpen, setDailyCompareOpen] = useState(false);
@@ -1758,15 +1990,112 @@ function App({
   const [comparisonError, setComparisonError] = useState("");
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
+  const [financeSummaryRow, setFinanceSummaryRow] = useState<MonthRow | null>(null);
   const [documentsModalRow, setDocumentsModalRow] = useState<MonthRow | null>(null);
   const [tariffScenarios, setTariffScenarios] = useState<Readonly<Record<string, MonthTariffScenario>>>({});
   const [whatIfEditorMonth, setWhatIfEditorMonth] = useState("");
   const [lang, setLang] = useState<Lang>(initialLang);
-  const setAppLang = (nextLang: Lang) => {
+  const [viewPresentation, setViewPresentation] = useState<ViewPresentationState>(() => ({
+    monthly: { lang: initialLang, currency: "UAH" },
+    daily: { lang: initialLang, currency: "UAH" },
+    comparison: { lang: initialLang, currency: "UAH" },
+  }));
+  const presentationWarmupCancelRef = useRef<() => void>(() => undefined);
+  const scheduleInactiveViewPresentations = React.useCallback((
+    nextLang: Lang,
+    nextCurrency: Currency,
+    activeViewMode: ViewMode,
+  ) => {
+    presentationWarmupCancelRef.current();
+
+    const pending = (["monthly", "daily", "comparison"] as const).filter((mode) => mode !== activeViewMode);
+    let cancelled = false;
+    let idleHandle: number | undefined;
+    let timeoutHandle: number | undefined;
+
+    const warmNext = () => {
+      if (cancelled) return;
+      const nextViewMode = pending.shift();
+      if (!nextViewMode) return;
+      React.startTransition(() => {
+        setViewPresentation((current) => {
+          const currentPresentation = current[nextViewMode];
+          if (currentPresentation.lang === nextLang && currentPresentation.currency === nextCurrency) return current;
+          return {
+            ...current,
+            [nextViewMode]: { lang: nextLang, currency: nextCurrency },
+          };
+        });
+      });
+      schedule();
+    };
+    const schedule = () => {
+      if (cancelled || pending.length === 0) return;
+      if ("requestIdleCallback" in window) {
+        idleHandle = window.requestIdleCallback(warmNext, { timeout: 1500 });
+      } else {
+        timeoutHandle = setTimeout(warmNext, 250);
+      }
+    };
+
+    timeoutHandle = setTimeout(schedule, 500);
+    presentationWarmupCancelRef.current = () => {
+      cancelled = true;
+      if (idleHandle !== undefined) window.cancelIdleCallback(idleHandle);
+      if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
+    };
+  }, []);
+  const updateActiveViewPresentation = React.useCallback((nextLang: Lang, nextCurrency: Currency) => {
+    React.startTransition(() => {
+      setViewPresentation((current) => {
+        const currentPresentation = current[viewMode];
+        if (currentPresentation.lang === nextLang && currentPresentation.currency === nextCurrency) return current;
+        return {
+          ...current,
+          [viewMode]: { lang: nextLang, currency: nextCurrency },
+        };
+      });
+    });
+    scheduleInactiveViewPresentations(nextLang, nextCurrency, viewMode);
+  }, [scheduleInactiveViewPresentations, viewMode]);
+  const setAppLang = React.useCallback((nextLang: Lang) => {
+    if (nextLang === lang) return;
     setLang(nextLang);
     onLangChange?.(nextLang);
-  };
+    updateActiveViewPresentation(nextLang, currency);
+  }, [currency, lang, onLangChange, updateActiveViewPresentation]);
+  const setAppCurrency = React.useCallback((nextCurrency: Currency) => {
+    if (nextCurrency === currency) return;
+    setCurrency(nextCurrency);
+    updateActiveViewPresentation(lang, nextCurrency);
+  }, [currency, lang, updateActiveViewPresentation]);
   const t = i18n[lang];
+  const selectViewMode = (nextViewMode: ViewMode) => {
+    React.startTransition(() => {
+      setViewPresentation((current) => {
+        const nextPresentation = current[nextViewMode];
+        if (nextPresentation.lang === lang && nextPresentation.currency === currency) return current;
+        return {
+          ...current,
+          [nextViewMode]: { lang, currency },
+        };
+      });
+      setMountedViewModes((current) => current.has(nextViewMode) ? current : new Set([...current, nextViewMode]));
+      setViewMode(nextViewMode);
+      if (nextViewMode !== "comparison") setOverviewViewMode(nextViewMode);
+    });
+  };
+  const selectViewModeOrScrollTop = (nextViewMode: ViewMode) => {
+    if (viewMode === nextViewMode) {
+      window.scrollTo(0, 0);
+      return;
+    }
+    selectViewMode(nextViewMode);
+  };
+  const closeMobileSettings = React.useCallback(() => {
+    setMobileSettingsOpen(false);
+    window.requestAnimationFrame(() => mobileSettingsButtonRef.current?.focus());
+  }, []);
   const monthOptions = useMemo(
     () => dataState.rows.map((row) => [monthKey(row.date), formatMonthYear(row.date, lang)] as const),
     [dataState.rows, lang],
@@ -1778,10 +2107,20 @@ function App({
   );
 
   useEffect(() => {
+    const latest = dataState.rows.at(-1);
+    const previous = dataState.rows.at(-2);
+    const availableMonths = new Set(dataState.rows.map((row) => monthKey(row.date)));
+    if ((!firstMonth || !availableMonths.has(firstMonth)) && (previous || latest)) {
+      setFirstMonth(monthKey((previous ?? latest)!.date));
+    }
+    if ((!secondMonth || !availableMonths.has(secondMonth)) && latest) setSecondMonth(monthKey(latest.date));
+  }, [dataState.rows, firstMonth, secondMonth]);
+
+  useEffect(() => {
     const latest = dataState.dailyRows.at(-1);
     const previous = dataState.dailyRows.at(-2);
-    if (!firstDay && previous) setFirstDay(previous.month);
-    if (!secondDay && latest) setSecondDay(latest.month);
+    if (!firstDay && previous) setFirstDay(dateKey(previous.date));
+    if (!secondDay && latest) setSecondDay(dateKey(latest.date));
     if (!plantComparisonMonth && latest) setPlantComparisonMonth(monthKey(latest.date));
   }, [dataState.dailyRows, firstDay, plantComparisonMonth, secondDay]);
 
@@ -1804,14 +2143,13 @@ function App({
     const first = dataState.dailyRows[0];
     if (!first) return;
     const firstKey = dateKey(first.date);
-    const latestKey = dateKey(latest.date);
-    const latestMonthStart = `${monthKey(latest.date)}-01`;
-    const defaultFrom = latestMonthStart < firstKey ? firstKey : latestMonthStart;
+    const [defaultFrom, latestKey] = latestDailyMonthRange(dataState.dailyRows);
     if (!dailyFromDate || dailyFromDate < firstKey || dailyFromDate > latestKey) setDailyFromDate(defaultFrom);
     if (!dailyToDate || dailyToDate < firstKey || dailyToDate > latestKey) setDailyToDate(latestKey);
   }, [dailyFromDate, dailyToDate, dataState.dailyRows]);
 
   useEffect(() => {
+    if (viewMode !== "monthly") setMonthlyCompareOpen(false);
     if (viewMode !== "daily") setDailyCompareOpen(false);
   }, [viewMode]);
 
@@ -1821,7 +2159,18 @@ function App({
   );
   const viewOptions = ["monthly", "daily", "comparison"] as const;
 
-  const activePlantComparison = useMemo<PlantComparison>(() => toPlantComparison(dataState), [dataState]);
+  const activePlantComparison = useMemo<PlantComparison>(() => toPlantComparison(dataState), [
+    dataState.commercialDate,
+    dataState.dailyRows,
+    dataState.investmentUsd,
+    dataState.launchDate,
+    dataState.metadata,
+    dataState.plantId,
+    dataState.projection,
+    dataState.rows,
+    dataState.scopes,
+    dataState.sheetUpdatedAt,
+  ]);
 
   useEffect(() => {
     if (!readablePlantOptions.length) return;
@@ -1874,9 +2223,7 @@ function App({
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
   }, [lang]);
 
-  useEffect(() => {
-    setLang(initialLang);
-  }, [initialLang]);
+  useEffect(() => () => presentationWarmupCancelRef.current(), []);
 
   const dailyRowsByMonth = useMemo(() => {
     const grouped = new Map<string, MonthRow[]>();
@@ -1931,6 +2278,12 @@ function App({
     );
   }, [repricedRows, tariffOverrideMonths]);
   const productionProjection = dataState.projection ?? null;
+  const projectedProductionTotal = useMemo(() => {
+    const values = rows
+      .map((row) => projectedProduction(row, productionProjection))
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;
+  }, [productionProjection, rows]);
   const dailyDateBounds = useMemo(
     () => [dataState.dailyRows[0] ? dateKey(dataState.dailyRows[0].date) : "", dataState.dailyRows.at(-1) ? dateKey(dataState.dailyRows.at(-1)!.date) : ""] as const,
     [dataState.dailyRows],
@@ -2077,41 +2430,35 @@ function App({
     }
   };
 
+  const monthlyCurrency = viewPresentation.monthly.currency;
+  const dailyCurrency = viewPresentation.daily.currency;
   const totals = useMemo(() => {
-    const roi = rows.reduce((sum, row) => sum + row.roiUsd, 0);
-    const roiDisplay = sumRowsRoiMoney(rows, currency);
     const latest = rows.at(-1);
-    const latestRow = monthlySourceRows.at(-1);
-    const latestDisplayRow = latestRow;
-    const latestPaymentDisplay = latestRow ? moneyFromUah(latestRow.electricityPayment, currency, latestRow.usdRate) : 0;
     const production = rows.reduce((sum, row) => sum + row.production, 0);
-    const productionSoldDisplay = sumRowsFromUah(rows, productionSoldUah, currency);
+    const productionSoldDisplay = sumRowsFromUah(rows, productionSoldUah, monthlyCurrency);
     const exported = rows.reduce((sum, row) => sum + exportTotal(row), 0);
     const exportedDay = rows.reduce((sum, row) => sum + row.exportDay, 0);
     const exportedNight = rows.reduce((sum, row) => sum + row.exportNight, 0);
     const exportPayoutKwhTotal = rows.reduce((sum, row) => sum + exportPayoutKwh(row), 0);
-    const exportPayoutDisplay = sumRowsFromUah(rows, exportPayoutUah, currency);
+    const exportPayoutDisplay = sumRowsFromUah(rows, exportPayoutUah, monthlyCurrency);
     const imported = rows.reduce((sum, row) => sum + row.importTotal, 0);
     const importedDay = rows.reduce((sum, row) => sum + row.importDay, 0);
     const importedNight = rows.reduce((sum, row) => sum + row.importNight, 0);
-    const importCostDisplay = sumRowsFromUah(rows, importCostUah, currency);
     const consumed = rows.reduce((sum, row) => sum + row.consumedTotal, 0);
+    const consumedDay = rows.reduce((sum, row) => sum + row.consumedDay, 0);
+    const consumedNight = rows.reduce((sum, row) => sum + row.consumedNight, 0);
+    const consumedCostDisplay = sumRowsFromUah(rows, (row) => row.consumedPayment, monthlyCurrency);
+    const lossesDay = rows.reduce((sum, row) => sum + (row.lossesDay ?? 0), 0);
+    const lossesNight = rows.reduce((sum, row) => sum + (row.lossesNight ?? 0), 0);
     const savings = rows.reduce((sum, row) => sum + row.electricitySavings, 0);
-    const savingsDisplay = sumRowsFromUah(rows, (row) => row.electricitySavings, currency);
+    const savingsDisplay = sumRowsFromUah(rows, (row) => row.electricitySavings, monthlyCurrency);
     const payments = rows.reduce((sum, row) => sum + row.electricityPayment, 0);
-    const paymentsDisplay = sumRowsFromUah(rows, (row) => row.electricityPayment, currency);
-    const covered = consumed ? ((consumed - imported) / consumed) * 100 : 0;
+    const paymentsDisplay = sumRowsFromUah(rows, (row) => row.electricityPayment, monthlyCurrency);
     const launchDate = dataState.launchDate ?? rows[0]?.date;
-    const activeDuration = launchDate ? fullDurationBetween(launchDate, new Date()) : { months: 0, days: 0 };
     const usdRate = latest?.usdRate || [...rows].reverse().find((row) => row.usdRate > 0)?.usdRate || 1;
     const launchUsdRate = launchDate ? monthlySourceRows.find((row) => sameMonth(row.date, launchDate))?.usdRate || usdRate : usdRate;
     return {
-      roi,
-      roiDisplay,
       latest,
-      latestRow,
-      latestDisplayRow,
-      latestPaymentDisplay,
       production,
       productionSoldDisplay,
       exported,
@@ -2122,27 +2469,21 @@ function App({
       imported,
       importedDay,
       importedNight,
-      importCostDisplay,
       consumed,
+      consumedDay,
+      consumedNight,
+      consumedCostDisplay,
+      lossesDay,
+      lossesNight,
       savings,
       savingsDisplay,
       payments,
       paymentsDisplay,
-      covered,
       launchDate,
-      activeDuration,
       usdRate,
       launchUsdRate,
     };
-  }, [currency, dataState.launchDate, monthlySourceRows, rows]);
-
-  const investmentDisplay = useMemo(() => totalInvestmentMoney({
-    initialInvestmentUsd: dataState.investmentUsd,
-    launchUsdRate: totals.launchUsdRate,
-    spendings: dataState.spendings,
-    currency,
-    spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
-  }), [currency, dataState.investmentUsd, dataState.spendings, spendingUsdRateById, totals.launchUsdRate]);
+  }, [dataState.launchDate, monthlyCurrency, monthlySourceRows, rows]);
 
   const investmentByMonth = useMemo(() => new Map(rows.map((row) => [
     row.month,
@@ -2150,61 +2491,110 @@ function App({
       initialInvestmentUsd: dataState.investmentUsd,
       launchUsdRate: totals.launchUsdRate,
       spendings: dataState.spendings,
-      currency,
+      currency: monthlyCurrency,
       spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
       throughMonth: row.date,
     }),
-  ] as const)), [currency, dataState.investmentUsd, dataState.spendings, rows, spendingUsdRateById, totals.launchUsdRate]);
+  ] as const)), [dataState.investmentUsd, dataState.spendings, monthlyCurrency, rows, spendingUsdRateById, totals.launchUsdRate]);
 
-  const spendingMoneyByMonth = useMemo(() => new Map(rows.flatMap((row) => {
-    const amountUsd = spendingUsdInMonth(dataState.spendings, row.date);
-    if (!amountUsd) return [];
+  const cumulativeRoiPercent = useMemo(() => {
+    const latestRow = rows.at(-1);
+    const investment = latestRow ? investmentByMonth.get(latestRow.month) ?? 0 : 0;
+    return investment > 0 ? (sumRowsRoiMoney(rows, monthlyCurrency) / investment) * 100 : 0;
+  }, [investmentByMonth, monthlyCurrency, rows]);
 
-    return [[
-      row.month,
-      moneyFromUsd(amountUsd, currency, investmentUsdRateForDate(row.date, monthlySourceRows)),
-    ] as const];
-  })), [currency, dataState.spendings, monthlySourceRows, rows]);
+  const dailyInvestmentByDay = useMemo(() => new Map(dailyRows.map((row) => [
+    row.month,
+    totalInvestmentMoney({
+      initialInvestmentUsd: dataState.investmentUsd,
+      launchUsdRate: totals.launchUsdRate,
+      spendings: dataState.spendings,
+      currency: dailyCurrency,
+      spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
+      throughMonth: row.date,
+    }),
+  ] as const)), [dailyCurrency, dailyRows, dataState.investmentUsd, dataState.spendings, spendingUsdRateById, totals.launchUsdRate]);
+
+  const dailyRangeRoiPercent = useMemo(() => {
+    const latestRow = dailyRows.at(-1);
+    if (!latestRow) return 0;
+    const investment = dailyInvestmentByDay.get(latestRow.month) ?? 0;
+    return investment > 0 ? (sumRowsRoiMoney(dailyRows, dailyCurrency) / investment) * 100 : 0;
+  }, [dailyCurrency, dailyInvestmentByDay, dailyRows]);
 
   const payback = useMemo(() => {
     return calculatePayback({
       rows,
       investmentUsd: dataState.investmentUsd,
-      currency,
+      currency: monthlyCurrency,
       launchUsdRate: totals.launchUsdRate,
       launchDate: totals.launchDate,
       spendings: dataState.spendings,
       spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
     });
-  }, [currency, dataState.investmentUsd, dataState.spendings, rows, spendingUsdRateById, totals.launchDate, totals.launchUsdRate]);
+  }, [dataState.investmentUsd, dataState.spendings, monthlyCurrency, rows, spendingUsdRateById, totals.launchDate, totals.launchUsdRate]);
 
   const commercialEndRecovery = useMemo(() => {
     if (!payback) return null;
     return calculateCommercialEndRecovery({
       rows: dataState.rows,
       payback,
-      currency,
+      currency: monthlyCurrency,
       commercialDate: dataState.commercialDate,
       launchDate: totals.launchDate,
       endDate: COMMERCIAL_PERIOD_END_DATE,
       projection: dataState.projection,
       tariffOverrides,
     });
-  }, [currency, dataState.commercialDate, dataState.projection, dataState.rows, payback, tariffOverrides, totals.launchDate]);
+  }, [dataState.commercialDate, dataState.projection, dataState.rows, monthlyCurrency, payback, tariffOverrides, totals.launchDate]);
 
   const forecast = useMemo(() => {
     const today = new Date();
     const forecastAsOf = dataState.sheetUpdatedAt ?? today;
     return calculateForecast({
       rows: monthlySourceRows,
-      currency,
+      currency: monthlyCurrency,
       today,
       projectMonthValue: (value, date) => forecastMonthValue(value, date, forecastAsOf),
       projectProductionValue: (value, date) => forecastProductionValue(value, date, forecastAsOf, dataState.projection, monthlySourceRows),
     });
-  }, [currency, dataState.projection, dataState.sheetUpdatedAt, monthlySourceRows]);
+  }, [dataState.projection, dataState.sheetUpdatedAt, monthlyCurrency, monthlySourceRows]);
 
   const showPlaceholders = dataState.isLoading;
+  useEffect(() => {
+    if (showPlaceholders) return undefined;
+
+    const pending: ViewMode[] = ["comparison", "daily"];
+    let cancelled = false;
+    let idleHandle: number | undefined;
+    let timeoutHandle: number | undefined;
+
+    const schedule = () => {
+      if (cancelled || pending.length === 0) return;
+      if ("requestIdleCallback" in window) {
+        idleHandle = window.requestIdleCallback(mountNext, { timeout: 1500 });
+      } else {
+        timeoutHandle = setTimeout(mountNext, 250);
+      }
+    };
+    const mountNext = () => {
+      if (cancelled) return;
+      const nextViewMode = pending.shift();
+      if (!nextViewMode) return;
+      React.startTransition(() => {
+        setMountedViewModes((current) => current.has(nextViewMode) ? current : new Set([...current, nextViewMode]));
+      });
+      schedule();
+    };
+
+    schedule();
+    return () => {
+      cancelled = true;
+      if (idleHandle !== undefined) window.cancelIdleCallback(idleHandle);
+      if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
+    };
+  }, [showPlaceholders]);
+
   const infoModalContent = useMemo(() => {
     if (typeof infoModal === "object" && infoModal?.kind === "importSplit") {
       const row = infoModal.row;
@@ -2331,17 +2721,32 @@ function App({
         body: <UtilityMeterInfo row={row} t={t} lang={lang} />,
       };
     }
-    if (typeof infoModal === "object" && infoModal?.kind === "expenses") {
+    if (typeof infoModal === "object" && infoModal?.kind === "financeSummary") {
+      const financeRow = infoModal.row;
+      const spendings = financeRow
+        ? dataState.spendings.filter((spending) => monthKey(spending.date) === monthKey(financeRow.date))
+        : [];
       return {
-        title: `${t.expenses} · ${formatPeriodLabel(infoModal.row, lang)}`,
+        title: t.finance,
         body: (
-          <ExpensesInfo
-            t={t}
-            lang={lang}
-            currency={currency}
-            spendings={dataState.spendings.filter((spending) => monthKey(spending.date) === monthKey(infoModal.row.date))}
-            spendingUsdRateById={spendingUsdRateById}
-          />
+          <div className="info-stack">
+            <section className="info-modal-section">
+              <h3>{t.payment}</h3>
+              <p>{t.netPaymentLogic}</p>
+            </section>
+            {financeRow && spendings.length ? (
+              <section className="info-modal-section">
+                <h3>{t.expenses} · {formatPeriodLabel(financeRow, lang)}</h3>
+                <ExpensesInfo
+                  t={t}
+                  lang={lang}
+                  currency={currency}
+                  spendings={spendings}
+                  spendingUsdRateById={spendingUsdRateById}
+                />
+              </section>
+            ) : null}
+          </div>
         ),
       };
     }
@@ -2351,52 +2756,88 @@ function App({
         body: infoModal.body,
       };
     }
-    if (infoModal === "latestRoi") return { title: t.latestRoi, body: t.latestRoiInfo };
     if (infoModal === "netPayment") return { title: t.netPayment, body: t.netPaymentLogic };
     if (infoModal === "usdRate") return { title: "USD/UAH", body: t.usdRateInfo };
-    if (infoModal === "importPrice") return { title: `${t.import} ${t.exportPrice}`, body: t.importPriceInfo };
+    if (infoModal === "importPrice") return { title: t.importPrices, body: t.importPriceInfo };
     if (infoModal === "roi") return { title: t.roi, body: t.roiInfo };
-    if (infoModal === "forecast") return { title: t.forecast, body: t.forecastInfo };
-    if (infoModal === "pvgis") {
+    if (infoModal === "investmentDetails") {
       const fields = dataState.metadata?.pvs ?? [];
       return {
-        title: `${t.production} · PVGIS`,
+        title: t.plantInformation,
         body: (
           <div className="info-stack">
-            <p>{t.pvgisInfo}</p>
-            {fields.length > 0 && (
-              <div className="pv-fields">
-                <div className="pv-fields-head">
-                  <span>{t.pvgisFields}</span>
-                  <strong>{fields.length}</strong>
+            <section className="info-modal-section">
+              <p>{t.plantWorksInfo}</p>
+              <ChartInspector
+                hint=""
+                selection={{
+                  month: "",
+                  hideHeader: true,
+                  columns: [t.date],
+                  columnWidths: ["44%", "56%"],
+                  items: [
+                    {
+                      label: t.launchDate,
+                      color: colors.green,
+                      value: totals.launchDate ? formatLaunchDate(totals.launchDate, lang) : "-",
+                      cells: totals.launchDate
+                        ? [<StackedDateValue date={formatLaunchDate(totals.launchDate, lang)} duration={formatCompactDateDistance(totals.launchDate, lang)} durationBold={false} />]
+                        : ["-"],
+                    },
+                    {
+                      label: t.commercialDate,
+                      color: colors.blue,
+                      value: dataState.commercialDate ? formatLaunchDate(dataState.commercialDate, lang) : "-",
+                      cells: dataState.commercialDate
+                        ? [<StackedDateValue date={formatLaunchDate(dataState.commercialDate, lang)} duration={formatCompactDateDistance(dataState.commercialDate, lang)} durationBold={false} />]
+                        : ["-"],
+                    },
+                    {
+                      label: t.commercialEndDate,
+                      color: colors.ink,
+                      value: formatLaunchDate(COMMERCIAL_PERIOD_END_DATE, lang),
+                      cells: [
+                        <StackedDateValue
+                          date={formatLaunchDate(COMMERCIAL_PERIOD_END_DATE, lang)}
+                          duration={formatCompactDateDistance(COMMERCIAL_PERIOD_END_DATE, lang)}
+                          durationBold={false}
+                        />,
+                      ],
+                    },
+                  ],
+                }}
+              />
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.investmentDetailsSection}</h3>
+              <InvestmentBreakdown
+                t={t}
+                lang={lang}
+                initialInvestmentUsd={dataState.investmentUsd}
+                launchDate={dataState.launchDate}
+                launchUsdRate={totals.launchUsdRate}
+                spendings={dataState.spendings}
+                spendingUsdRateById={spendingUsdRateById}
+              />
+            </section>
+            {fields.length > 0 ? (
+              <section className="info-modal-section">
+                <h3>{t.pvgisFields} ({fields.length})</h3>
+                <div className="info-stack">
+                  {fields.map((field, index) => (
+                    <PvSpecTable
+                      field={field}
+                      t={t}
+                      lang={lang}
+                      showLocation={hasLocationScope(dataState.scopes)}
+                      title={lang === "uk" ? `Поле ${index + 1}` : `Field ${index + 1}`}
+                      key={`${field.azimuth}-${field.power}-${index}`}
+                    />
+                  ))}
                 </div>
-                {fields.map((field, index) => (
-                  <section className="pv-field" key={`${field.azimuth}-${field.power}-${index}`}>
-                    <h3>{lang === "uk" ? `Поле ${index + 1}` : `Field ${index + 1}`}</h3>
-                    <PvSpecList field={field} t={t} lang={lang} showLocation={hasLocationScope(dataState.scopes)} />
-                  </section>
-                ))}
-              </div>
-            )}
+              </section>
+            ) : null}
           </div>
-        ),
-      };
-    }
-    if (infoModal === "investment") {
-      return {
-        title: `${t.investment} · ${t.investmentBreakdown}`,
-        body: (
-          <InvestmentBreakdown
-            t={t}
-            lang={lang}
-            currency={currency}
-            initialInvestmentUsd={dataState.investmentUsd}
-            launchDate={dataState.launchDate}
-            launchUsdRate={totals.launchUsdRate}
-            spendings={dataState.spendings}
-            spendingUsdRateById={spendingUsdRateById}
-            total={investmentDisplay}
-          />
         ),
       };
     }
@@ -2408,163 +2849,244 @@ function App({
           ? t.allTimeDataSource
           : t.actualFallbackSource;
       return {
-        title: t.investmentRecoveryForecast,
+        title: t.forecast,
         body: (
           <div className="info-stack">
-            {commercialEndRecovery ? (
-              <MathInfo
-                rows={[
-                  {
-                    label: t.recoverableByCommercialEnd,
-                    value: (
-                      <>
-                        <FormulaResult>{formatDisplayMoney(commercialEndRecovery.recovered, currency, lang)}</FormulaResult>{" "}
-                        ({formatNumber(commercialEndRecovery.progress)}%)
-                      </>
-                    ),
-                  },
-                  ...(details ? [
-                    {
-                      label: t.annualProduction,
-                      value: (
-                        <StackedValues
-                          rows={[
-                            { label: t.total, value: formatKwh(details.annualProduction.kwh, lang) },
-                            { label: t.productionSource, value: sourceLabel },
-                          ]}
-                        />
-                      ),
-                    },
-                    {
-                      label: t.annualConsumption,
-                      value: (
-                        <StackedValues
-                          rows={[
-                            {
-                              label: t.day,
-                              value: `${formatKwh(details.annualConsumption.dayKwh, lang)} · ${formatDisplayMoney(details.annualConsumption.dayValue, currency, lang)}`,
-                            },
-                            {
-                              label: t.night,
-                              value: `${formatKwh(details.annualConsumption.nightKwh, lang)} · ${formatDisplayMoney(details.annualConsumption.nightValue, currency, lang)}`,
-                            },
-                            {
-                              label: t.total,
-                              value: `${formatKwh(details.annualConsumption.totalKwh, lang)} · ${formatDisplayMoney(details.annualConsumption.totalValue, currency, lang)}`,
-                            },
-                          ]}
-                        />
-                      ),
-                    },
-                    {
-                      label: t.annualSurplus,
-                      value: (
-                        <StackedValues
-                          rows={[
-                            { label: t.total, value: formatKwh(details.annualSurplus.kwh, lang) },
-                            { label: t.surplusValue, value: formatDisplayMoney(details.annualSurplus.value, currency, lang) },
-                          ]}
-                        />
-                      ),
-                    },
-                    {
-                      label: t.commercialPeriod,
-                      value: (
-                        <span className="math-note-stack">
-                          <span>{formatLaunchDate(details.commercialStartDate, lang)} - {formatLaunchDate(details.commercialEndDate, lang)}</span>
-                          <span>{t.postCommercialAssumption}</span>
-                        </span>
-                      ),
-                    },
-                  ] : []),
-                  {
-                    label: t.paybackForecast,
-                    value: commercialEndRecovery.roiDate ? (
-                      <StackedValues
-                        rows={[
-                          { label: t.paybackDate, value: <FormulaResult>{formatLaunchDate(commercialEndRecovery.roiDate, lang)}</FormulaResult> },
-                          ...(commercialEndRecovery.roiDuration ? [
-                            { label: t.totalPaybackTime, value: formatActiveDuration(commercialEndRecovery.roiDuration, lang) },
-                          ] : []),
-                          ...(commercialEndRecovery.roiRemainingDuration ? [
-                            { label: t.remainingPaybackTime, value: formatActiveDuration(commercialEndRecovery.roiRemainingDuration, lang) },
-                          ] : []),
-                        ]}
-                      />
-                    ) : "-",
-                  },
-                ]}
-              />
+            {forecast ? (
+              <section className="info-modal-section">
+                <h3>{t.currentMonth}</h3>
+                <ChartInspector
+                  hint=""
+                  selection={{
+                    month: formatMonthRangeValue(monthKey(forecast.row.date), lang),
+                    columns: [t.forecast, t.soFar],
+                    columnWidths: ["32%", "34%", "34%"],
+                    items: [
+                      {
+                        label: t.production,
+                        color: colors.amber,
+                        value: formatKwh(forecast.production, lang),
+                        cells: [formatKwh(forecast.production, lang), formatKwh(forecast.row.production, lang)],
+                      },
+                      {
+                        label: t.roi,
+                        color: colors.mint,
+                        value: formatDisplayMoney(forecast.roi, currency, lang),
+                        cells: [
+                          formatDisplayMoney(forecast.roi, currency, lang),
+                          formatDisplayMoney(rowRoiMoney(forecast.row, currency), currency, lang),
+                        ],
+                      },
+                      {
+                        label: t.income,
+                        color: colors.green,
+                        value: formatDisplayMoney(forecast.income, currency, lang),
+                        cells: [
+                          formatDisplayMoney(forecast.income, currency, lang),
+                          formatDisplayMoney(moneyFromUah(forecast.row.electricityPayment, currency, forecast.row.usdRate), currency, lang),
+                        ],
+                      },
+                    ],
+                  }}
+                />
+                <p>{t.forecastInfo}</p>
+              </section>
             ) : null}
-            <p>{t.commercialRecoveryCalcInfo}</p>
+            {commercialEndRecovery ? (
+              <section className="info-modal-section">
+                <h3>{t.investmentRecoveryForecast}</h3>
+                <p>{t.commercialRecoveryCalcInfo}</p>
+                <MathInfo
+                  rows={[
+                    {
+                      label: t.recoverableByCommercialEnd,
+                      value: (
+                        <>
+                          <FormulaResult>{formatDisplayMoney(commercialEndRecovery.recovered, currency, lang)}</FormulaResult>{" "}
+                          ({formatNumber(commercialEndRecovery.progress)}%)
+                        </>
+                      ),
+                    },
+                  ]}
+                />
+                {details ? (
+                  <>
+                    <ChartInspector
+                      hint=""
+                      selection={{
+                        month: t.annualProduction,
+                        columns: [t.value],
+                        items: [
+                          {
+                            label: t.total,
+                            color: colors.ink,
+                            value: formatKwh(details.annualProduction.kwh, lang),
+                            cells: [formatKwh(details.annualProduction.kwh, lang)],
+                          },
+                          {
+                            label: t.productionSource,
+                            color: colors.blue,
+                            value: sourceLabel,
+                            cells: [sourceLabel],
+                          },
+                        ],
+                      }}
+                    />
+                    <ChartInspector
+                      hint=""
+                      selection={{
+                        month: t.annualConsumption,
+                        columns: [t.energy, t.value],
+                        items: [
+                          {
+                            label: t.day,
+                            color: colors.blue,
+                            value: formatKwh(details.annualConsumption.dayKwh, lang),
+                            cells: [
+                              formatKwh(details.annualConsumption.dayKwh, lang),
+                              formatDisplayMoney(details.annualConsumption.dayValue, currency, lang),
+                            ],
+                          },
+                          {
+                            label: t.night,
+                            color: colors.indigo,
+                            value: formatKwh(details.annualConsumption.nightKwh, lang),
+                            cells: [
+                              formatKwh(details.annualConsumption.nightKwh, lang),
+                              formatDisplayMoney(details.annualConsumption.nightValue, currency, lang),
+                            ],
+                          },
+                          {
+                            label: t.total,
+                            color: colors.ink,
+                            value: formatKwh(details.annualConsumption.totalKwh, lang),
+                            cells: [
+                              formatKwh(details.annualConsumption.totalKwh, lang),
+                              formatDisplayMoney(details.annualConsumption.totalValue, currency, lang),
+                            ],
+                          },
+                        ],
+                      }}
+                    />
+                    <ChartInspector
+                      hint=""
+                      selection={{
+                        month: t.annualSurplus,
+                        columns: [t.value],
+                        items: [
+                          {
+                            label: t.total,
+                            color: colors.ink,
+                            value: formatKwh(details.annualSurplus.kwh, lang),
+                            cells: [formatKwh(details.annualSurplus.kwh, lang)],
+                          },
+                          {
+                            label: t.surplusValue,
+                            color: colors.green,
+                            value: formatDisplayMoney(details.annualSurplus.value, currency, lang),
+                            cells: [formatDisplayMoney(details.annualSurplus.value, currency, lang)],
+                          },
+                        ],
+                      }}
+                    />
+                  </>
+                ) : null}
+                <ChartInspector
+                  hint=""
+                  selection={{
+                    month: t.paybackForecast,
+                    columns: [t.value],
+                    items: [
+                      {
+                        label: t.paybackDate,
+                        color: colors.blue,
+                        value: commercialEndRecovery.roiDate
+                          ? `${formatLaunchDate(commercialEndRecovery.roiDate, lang)}${commercialEndRecovery.roiRemainingDuration
+                            ? ` ${formatCompactActiveDuration(commercialEndRecovery.roiRemainingDuration, lang)}`
+                            : ""}`
+                          : "-",
+                        cells: [commercialEndRecovery.roiDate
+                          ? <StackedDateValue
+                              date={formatLaunchDate(commercialEndRecovery.roiDate, lang)}
+                              duration={commercialEndRecovery.roiRemainingDuration
+                                ? formatCompactActiveDuration(commercialEndRecovery.roiRemainingDuration, lang)
+                                : undefined}
+                              durationBold={false}
+                            />
+                          : "-"],
+                      },
+                      ...(commercialEndRecovery.roiDuration ? [{
+                        label: t.totalPaybackTime,
+                        color: colors.ink,
+                        value: formatActiveDuration(commercialEndRecovery.roiDuration, lang),
+                        cells: [formatActiveDuration(commercialEndRecovery.roiDuration, lang)],
+                      }] : []),
+                    ],
+                  }}
+                />
+              </section>
+            ) : null}
           </div>
         ),
       };
     }
-    if (infoModal === "plantWorks") {
-      return {
-        title: t.plantWorks,
-        body: (
-          <div className="info-stack">
-            <p>{t.plantWorksInfo}</p>
-            <dl className="info-list">
-              <div>
-                <dt>{t.launchDate}</dt>
-                <dd>{totals.launchDate ? formatLaunchDate(totals.launchDate, lang) : "-"}</dd>
-              </div>
-              <div>
-                <dt>{t.commercialDate}</dt>
-                <dd>{dataState.commercialDate ? formatLaunchDate(dataState.commercialDate, lang) : "-"}</dd>
-              </div>
-              <div>
-                <dt>{t.commercialEndDate}</dt>
-                <dd>{formatLaunchDate(COMMERCIAL_PERIOD_END_DATE, lang)}</dd>
-              </div>
-            </dl>
-          </div>
-        ),
-      };
-    }
-    if (infoModal === "totalProduction") {
+    if (infoModal === "productionExport") {
       const productionValue = formatKwh(totals.production, lang);
       const soldValue = formatDisplayMoney(totals.productionSoldDisplay, currency, lang);
-      const body =
-        lang === "uk"
-          ? `Якби вся генерація ${productionValue} була продана, вона коштувала б ${soldValue}. ${t.totalProductionCostInfoDetails}`
-          : `If the full ${productionValue} production had been sold, it would have been worth ${soldValue}. ${t.totalProductionCostInfoDetails}`;
-      return { title: t.totalProduction, body };
-    }
-    if (infoModal === "totalExport") {
       const exportValue = formatKwh(totals.exported, lang);
       const paidExportValue = formatKwh(totals.exportPayoutKwhTotal, lang);
       const payoutValue = formatDisplayMoney(totals.exportPayoutDisplay, currency, lang);
       return {
-        title: t.totalExport,
+        title: t.productionAndExport,
         body: (
           <div className="info-stack">
-            <p>
-              {lang === "uk"
-                ? `Усього експортовано ${exportValue}. З них ${paidExportValue} чистого надлишку принесли ${payoutValue}. ${t.totalExportCostInfoDetails}`
-                : `${exportValue} was exported to the grid. Of that, ${paidExportValue} net surplus earned ${payoutValue}. ${t.totalExportCostInfoDetails}`}
-            </p>
-            <DayNightInfo t={t} lang={lang} day={totals.exportedDay} night={totals.exportedNight} />
+            <section className="info-modal-section">
+              <h3>{t.expectedProduction}</h3>
+              <p>{t.pvgisInfo}</p>
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.actualProduction}</h3>
+              <p>
+                {lang === "uk" ? (
+                  <>Якби вся генерація <strong>{productionValue}</strong> була продана, вона коштувала б <strong>{soldValue}</strong>. {t.totalProductionCostInfoDetails}</>
+                ) : (
+                  <>If the full <strong>{productionValue}</strong> production had been sold, it would have been worth <strong>{soldValue}</strong>. {t.totalProductionCostInfoDetails}</>
+                )}
+              </p>
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.export}</h3>
+              <p>
+                {lang === "uk" ? (
+                  <>Усього експортовано <strong>{exportValue}</strong>. З них <strong>{paidExportValue}</strong> чистого надлишку принесли <strong>{payoutValue}</strong>. {t.totalExportCostInfoDetails}</>
+                ) : (
+                  <><strong>{exportValue}</strong> was exported to the grid. Of that, <strong>{paidExportValue}</strong> net surplus earned <strong>{payoutValue}</strong>. {t.totalExportCostInfoDetails}</>
+                )}
+              </p>
+              <DayNightInfo t={t} lang={lang} day={totals.exportedDay} night={totals.exportedNight} />
+            </section>
           </div>
         ),
       };
     }
-    if (infoModal === "totalImport") {
-      const importValue = formatKwh(totals.imported, lang);
-      const costValue = formatDisplayMoney(totals.importCostDisplay, currency, lang);
+    if (infoModal === "totalConsumption") {
+      const consumptionValue = formatKwh(totals.consumed, lang);
+      const costValue = formatDisplayMoney(totals.consumedCostDisplay, currency, lang);
       return {
-        title: t.totalImport,
+        title: t.consumptionMix,
         body: (
           <div className="info-stack">
-            <p>
-              {lang === "uk"
-                ? `Імпортовані з мережі ${importValue} коштували б ${costValue}. ${t.totalImportCostInfoDetails}`
-                : `The ${importValue} imported from the grid would have cost ${costValue}. ${t.totalImportCostInfoDetails}`}
-            </p>
-            <DayNightInfo t={t} lang={lang} day={totals.importedDay} night={totals.importedNight} />
+            <section className="info-modal-section">
+              <p>
+                {lang === "uk" ? (
+                  <>Якби все споживання <strong>{consumptionValue}</strong> було імпортовано з мережі, воно коштувало б <strong>{costValue}</strong>. {t.totalConsumptionCostInfoDetails}</>
+                ) : (
+                  <>If the full <strong>{consumptionValue}</strong> consumption had been imported from the grid, it would have cost <strong>{costValue}</strong>. {t.totalConsumptionCostInfoDetails}</>
+                )}
+              </p>
+              <ConsumedInfo t={t} lang={lang} currency={currency} rows={rows} />
+            </section>
+            <WithoutPlantConsumptionInfo t={t} lang={lang} currency={currency} rows={rows} />
           </div>
         ),
       };
@@ -2577,10 +3099,11 @@ function App({
     dataState.investmentUsd,
     dataState.launchDate,
     dataState.metadata,
+    dataState.scopes,
     dataState.spendings,
     commercialEndRecovery,
+    forecast,
     infoModal,
-    investmentDisplay,
     lang,
     payback,
     spendingUsdRateById,
@@ -2590,26 +3113,30 @@ function App({
     totals.exported,
     totals.exportedDay,
     totals.exportedNight,
-    totals.importCostDisplay,
     totals.imported,
     totals.importedDay,
     totals.importedNight,
     totals.launchUsdRate,
     totals.production,
     totals.productionSoldDisplay,
+    totals.consumed,
+    totals.consumedCostDisplay,
+    rows,
   ]);
 
   return (
     <LanguageContext.Provider value={lang}>
-    <main className="app-shell">
+    <main className={`app-shell dashboard-view-mode-${viewMode}${IS_HA_MODE ? " ha-mode" : ""}${IS_HA_IFRAME ? " ha-iframe" : ""}`}>
       <section className="content">
         <DashboardToolbar
+          variant="desktop"
           t={t}
           lang={lang}
+          setLang={setAppLang}
           currency={currency}
-          setCurrency={setCurrency}
+          setCurrency={setAppCurrency}
           viewMode={viewMode}
-          setViewMode={setViewMode}
+          setViewMode={selectViewMode}
           viewOptions={viewOptions}
           range={range}
           setRange={setRange}
@@ -2625,20 +3152,38 @@ function App({
           setDailyFromDate={setDailyFromDate}
           setDailyToDate={setDailyToDate}
           dailyDateBounds={dailyDateBounds}
-          isDailyCompareOpen={isDailyCompareOpen}
-          setDailyCompareOpen={setDailyCompareOpen}
-          investmentValue={showPlaceholders ? (
-            <SkeletonText width="92px" height="1rem" />
-          ) : investmentDisplay > 0 ? (
-            formatDisplayMoney(investmentDisplay, currency, lang)
-          ) : (
-            "-"
-          )}
-          onInvestmentInfo={() => setInfoModal("investment")}
           isRefreshing={dataState.isRefreshing || isPlantComparisonLoading}
           refresh={handleRefresh}
           isLoading={showPlaceholders}
         />
+
+        {viewMode !== "comparison" ? (
+          <DashboardToolbar
+            variant="mobile"
+            t={t}
+            lang={lang}
+            currency={currency}
+            viewMode={viewMode}
+            setViewMode={selectViewMode}
+            viewOptions={["monthly", "daily"]}
+            range={range}
+            setRange={setRange}
+            monthOptions={monthOptions}
+            rangeFromMonth={rangeFromMonth}
+            rangeToMonth={rangeToMonth}
+            setRangeFromMonth={setRangeFromMonth}
+            setRangeToMonth={setRangeToMonth}
+            dailyRange={dailyRange}
+            setDailyRange={setDailyRange}
+            dailyFromDate={dailyFromDate}
+            dailyToDate={dailyToDate}
+            setDailyFromDate={setDailyFromDate}
+            setDailyToDate={setDailyToDate}
+            dailyDateBounds={dailyDateBounds}
+            isRefreshing={dataState.isRefreshing || isPlantComparisonLoading}
+            isLoading={showPlaceholders}
+          />
+        ) : null}
 
         {dataState.error && (
           <div className="notice">
@@ -2647,9 +3192,27 @@ function App({
           </div>
         )}
 
-        {viewMode === "daily" ? (
-          showPlaceholders ? (
-            <DailyPageSkeleton t={t} />
+        {mountedViewModes.has("daily") ? (() => {
+          const { lang, currency } = viewPresentation.daily;
+          const t = i18n[lang];
+          return (
+        <LanguageContext.Provider value={lang}>
+        <div className={`dashboard-view${viewMode === "daily" ? "" : " is-inactive"}`} aria-hidden={viewMode !== "daily"}>
+          <PreservedView dependencies={[
+            showPlaceholders,
+            dailyRows,
+            dataState.dailyRows,
+            firstDay,
+            secondDay,
+            isDailyCompareOpen,
+            t,
+            currency,
+            lang,
+            dailyInvestmentByDay,
+            dailyRangeRoiPercent,
+          ]}>
+          {showPlaceholders ? (
+            <DailyPageSkeleton />
           ) : (
             <DailyDashboard
               rows={dailyRows}
@@ -2663,6 +3226,8 @@ function App({
               t={t}
               currency={currency}
               lang={lang}
+              investmentByDay={dailyInvestmentByDay}
+              selectedRangeRoiPercent={dailyRangeRoiPercent}
               onUsdRateInfo={() => setInfoModal("usdRate")}
               onImportPriceInfo={() => setInfoModal("importPrice")}
               onNetPaymentHeaderInfo={() => setInfoModal("netPayment")}
@@ -2676,9 +3241,40 @@ function App({
               onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
               onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
             />
-          )
-        ) : viewMode === "comparison" ? (
-          showPlaceholders ? (
+          )}
+          </PreservedView>
+        </div>
+        </LanguageContext.Provider>
+          );
+        })() : null}
+        {mountedViewModes.has("comparison") ? (() => {
+          const { lang, currency } = viewPresentation.comparison;
+          const t = i18n[lang];
+          return (
+        <LanguageContext.Provider value={lang}>
+        <div className={`dashboard-view${viewMode === "comparison" ? "" : " is-inactive"}`} aria-hidden={viewMode !== "comparison"}>
+          <PreservedView dependencies={[
+            showPlaceholders,
+            dataState.plantId,
+            dataState.readablePlantIds,
+            readablePlantOptions,
+            firstPlantId,
+            secondPlantId,
+            plantComparisonMode,
+            plantComparisonMonth,
+            plantComparisonMonthOptions,
+            plantComparisonYear,
+            plantComparisonYearOptions,
+            comparisonResult,
+            comparisonPlantCache,
+            activePlantComparison,
+            isPlantComparisonLoading,
+            comparisonError,
+            t,
+            currency,
+            lang,
+          ]}>
+          {showPlaceholders ? (
             <PlantComparisonPageSkeleton />
           ) : dataState.readablePlantIds.length ? (
             <PlantComparisonSection
@@ -2710,206 +3306,189 @@ function App({
               <strong>{t.plantComparison}</strong>
               <small>{t.comparisonUnavailable}</small>
             </div>
-          )
-        ) : (
-          <>
-        {showPlaceholders ? (
-          <KpiSkeletonGrid
-            labels={[t.latestRoi, t.totalProductionKpi, t.totalExportKpi, t.totalImportKpi, t.totalNetPaymentKpi, t.plantWorks]}
-            showInfoIcons
-          />
-        ) : (
-          <section id="overview" className="kpi-grid">
-            <KpiCard
-              icon={<CircleDollarSign size={20} />}
-              label={t.latestRoi}
-              value={formatDisplayMoney(totals.latestDisplayRow ? rowRoiMoney(totals.latestDisplayRow, currency) : 0, currency, lang)}
-              detail={`${t.net} ${formatDisplayMoney(totals.latestPaymentDisplay, currency, lang)}`}
-              tone="green"
-              infoLabel={t.latestRoi}
-              onInfo={() => setInfoModal("latestRoi")}
-            />
-            <KpiCard
-              icon={<SunMedium size={20} />}
-              label={t.totalProductionKpi}
-              value={formatMonthlyKpiKwh(totals.production, lang)}
-              detail={`${pct((totals.exported / totals.production) * 100)} ${t.exported}`}
-              tone="amber"
-              infoLabel={t.totalProduction}
-              onInfo={() => setInfoModal("totalProduction")}
-            />
-            <KpiCard
-              icon={<ArrowUpFromLine size={20} />}
-              label={t.totalExportKpi}
-              value={formatMonthlyKpiKwh(totals.exported, lang)}
-              detail={`${t.latest} ${formatKwh(totals.latest ? exportTotal(totals.latest) : 0, lang)}`}
-              tone="mint"
-              infoLabel={t.totalExport}
-              onInfo={() => setInfoModal("totalExport")}
-            />
-            <KpiCard
-              icon={<ArrowDownToLine size={20} />}
-              label={t.totalImportKpi}
-              value={formatMonthlyKpiKwh(totals.imported, lang)}
-              detail={`${pct(totals.covered)} ${t.solarCoverage}`}
-              tone="blue"
-              infoLabel={t.totalImport}
-              onInfo={() => setInfoModal("totalImport")}
-            />
-            <KpiCard
-              icon={<WalletCards size={20} />}
-              label={t.totalNetPaymentKpi}
-              value={formatDisplayMoney(totals.paymentsDisplay, currency, lang)}
-              detail={`${t.savings} ${formatDisplayMoney(totals.savingsDisplay, currency, lang)}`}
-              tone={totals.payments >= 0 ? "green" : "rose"}
-              infoLabel={t.totalNetPayment}
-              onInfo={() => setInfoModal("netPayment")}
-            />
-            <KpiCard
-              icon={<CalendarClock size={20} />}
-              label={t.plantWorks}
-              value={formatCompactActiveDuration(totals.activeDuration, lang)}
-              detail={totals.launchDate ? `${t.sinceLaunch} ${formatLaunchDate(totals.launchDate, lang)}` : t.sinceLaunch}
-              tone="indigo"
-              infoLabel={t.plantWorks}
-              onInfo={() => setInfoModal("plantWorks")}
-            />
-          </section>
-        )}
-
-        <section className="payback-band">
-          {showPlaceholders ? (
-            <PaybackBandSkeleton />
-          ) : (
-            <>
-              <h2 className="payback-label">
-                <span>
-                  {commercialEndRecovery?.roiDate
-                    ? `${t.investmentRecoveryAt} ${formatLaunchDate(commercialEndRecovery.roiDate, lang)}`
-                    : payback ? t.investmentRecovery : t.addInvestment}
-                </span>
-                {payback ? (
-                  <button type="button" className="section-info-button" aria-label={t.investmentRecovered} onClick={() => setInfoModal("investmentForecast")}>
-                    <Info size={16} />
-                  </button>
-                ) : null}
-              </h2>
-              <div className="progress-track" aria-label={`${t.investmentRecovery}: ${formatNumber(payback?.progress ?? 0)}%`}>
-                <span style={{ width: `${payback?.progress ?? 0}%` }} />
-              </div>
-              <strong className="payback-values">
-                {payback ? (
-                  <>
-                    <span>{formatDisplayMoney(payback.recovered, currency, lang)}</span>
-                    <span className="payback-value-divider" aria-hidden="true">/</span>
-                    <span>{formatDisplayMoney(payback.investment, currency, lang)}</span>
-                  </>
-                ) : "-"}
-              </strong>
-            </>
           )}
-        </section>
-
-        <section className="forecast-section">
-          <div className="section-heading">
-            <div>
-              <h2 className="heading-with-info">
-                <span>
-                  {showPlaceholders || !forecast
-                    ? t.forecast
-                    : `${t.forecast}, ${formatMonthYear(forecast.row.date, lang)}`}
-                </span>
-                <button type="button" className="section-info-button" aria-label={t.forecast} onClick={() => setInfoModal("forecast")} disabled={showPlaceholders}>
-                  <Info size={16} />
-                </button>
-              </h2>
-            </div>
-          </div>
-          {showPlaceholders ? (
-            <ForecastKpiSkeletonGrid t={t} />
-          ) : forecast ? (
-            <div className="forecast-grid">
-              <KpiCard
-                icon={<SunMedium size={20} />}
-                label={t.expectedProduction}
-                value={formatKwh(forecast.production, lang)}
-                detail={
-                  <ForecastDetail
-                    current={`${formatKwh(forecast.row.production, lang)} ${t.soFar}`}
-                    delta={forecast.productionDelta}
-                    formattedDelta={formatSignedKwh(forecast.productionDelta, lang)}
-                    base={forecast.previousRow?.production ?? 0}
-                    label={forecast.previousRow ? `${lang === "uk" ? "до" : "vs"} ${formatMonthOnly(forecast.previousRow.date, lang)}` : ""}
-                  />
-                }
-                tone="amber"
-              />
-              <KpiCard
-                icon={<CircleDollarSign size={20} />}
-                label={t.expectedRoi}
-                value={formatDisplayMoney(forecast.roi, currency, lang)}
-                detail={
-                  <ForecastDetail
-                    current={`${formatDisplayMoney(rowRoiMoney(forecast.row, currency), currency, lang)} ${t.soFar}`}
-                    delta={forecast.roiDelta}
-                    formattedDelta={formatSignedMoney(forecast.roiDelta, currency, lang)}
-                    base={forecast.previousRow ? rowRoiMoney(forecast.previousRow, currency) : 0}
-                    label={forecast.previousRow ? `${lang === "uk" ? "до" : "vs"} ${formatMonthOnly(forecast.previousRow.date, lang)}` : ""}
-                  />
-                }
-                tone="green"
-              />
-              <KpiCard
-                icon={<WalletCards size={20} />}
-                label={t.expectedIncome}
-                value={formatDisplayMoney(forecast.income, currency, lang)}
-                detail={
-                  <ForecastDetail
-                    current={`${formatDisplayMoney(moneyFromUah(forecast.row.electricityPayment, currency, forecast.row.usdRate), currency, lang)} ${t.soFar}`}
-                    delta={forecast.incomeDelta}
-                    formattedDelta={formatSignedMoney(forecast.incomeDelta, currency, lang)}
-                    base={forecast.previousRow ? moneyFromUah(forecast.previousRow.electricityPayment, currency, forecast.previousRow.usdRate) : 0}
-                    label={forecast.previousRow ? `${lang === "uk" ? "до" : "vs"} ${formatMonthOnly(forecast.previousRow.date, lang)}` : ""}
-                  />
-                }
-                tone={forecast.income >= 0 ? "green" : "rose"}
-              />
-            </div>
-          ) : null}
-        </section>
-
+          </PreservedView>
+        </div>
+        </LanguageContext.Provider>
+          );
+        })() : null}
+        {(() => {
+          const { lang, currency } = viewPresentation.monthly;
+          const t = i18n[lang];
+          return (
+        <LanguageContext.Provider value={lang}>
+        <div className={`dashboard-view${viewMode === "monthly" ? "" : " is-inactive"}`} aria-hidden={viewMode !== "monthly"}>
+          <PreservedView dependencies={[
+            showPlaceholders,
+            monthlySourceRows,
+            firstMonth,
+            secondMonth,
+            isMonthlyCompareOpen,
+            t,
+            currency,
+            lang,
+            projectedProductionTotal,
+            productionProjection,
+            rows,
+            totals,
+            payback,
+            financeSummaryRow,
+            investmentByMonth,
+            cumulativeRoiPercent,
+            tariffOverrideMonths,
+            tariffScenarioCells,
+            dataState.rows,
+          ]}>
+          <>
+        <PeriodCompareModal
+          period="monthly"
+          rows={monthlySourceRows}
+          firstValue={firstMonth}
+          secondValue={secondMonth}
+          setFirstValue={setFirstMonth}
+          setSecondValue={setSecondMonth}
+          isOpen={isMonthlyCompareOpen}
+          setOpen={setMonthlyCompareOpen}
+          t={t}
+          currency={currency}
+          lang={lang}
+        />
+        <div className="dashboard-charts">
         <section id="finance" className="chart-grid">
           <ChartPanel
+            className="dashboard-chart-production"
             title={t.production}
-            legend={[
-              [t.production, colors.amber],
-              [t.export, colors.green],
-              ...(productionProjection ? [[t.expected, colors.blue] as [string, string]] : []),
-            ]}
+            legend={[]}
+            infoLabel={t.productionAndExport}
+            onInfo={() => setInfoModal("productionExport")}
+            infoDisabled={showPlaceholders}
+            totalSummaryLoading={showPlaceholders}
+            totalSummarySkeletonItemCount={3}
+            totalSummarySkeletonColumnCount={2}
+            totalSummary={{
+              month: t.totals,
+              columns: [t.value, t.performance],
+              items: [
+                ...(projectedProductionTotal !== undefined
+                  ? [{
+                      label: t.expected,
+                      color: colors.blue,
+                      value: formatChartEnergy(projectedProductionTotal, "down", lang),
+                      cells: [formatChartEnergy(projectedProductionTotal, "down", lang), ""],
+                    }]
+                  : []),
+                {
+                  label: t.actual,
+                  color: colors.amber,
+                  value: formatChartEnergy(totals.production, "down", lang),
+                  cells: [
+                    formatChartEnergy(totals.production, "down", lang),
+                    projectedProductionTotal
+                      ? `${formatNumber((totals.production / projectedProductionTotal) * 100, 2, 2)}%`
+                      : "",
+                  ],
+                },
+                {
+                  label: t.export,
+                  color: colors.green,
+                  value: formatChartEnergy(totals.exported, "down", lang),
+                  cells: [
+                    formatChartEnergy(totals.exported, "down", lang),
+                    totals.production
+                      ? `${formatNumber((totals.exported / totals.production) * 100, 2, 2)}%`
+                      : "",
+                  ],
+                },
+              ],
+            }}
           >
             {showPlaceholders ? (
-              <ChartSkeleton />
+              <ChartSkeleton variant="paired-line" inspectorItemCount={3} inspectorColumnCount={2} />
             ) : (
-              <ProductionExportChart rows={rows} projection={productionProjection} onInfo={() => setInfoModal("pvgis")} />
+              <ProductionExportChart rows={rows} projection={productionProjection} fixedBarDensity />
             )}
           </ChartPanel>
           <ChartPanel
+            className="dashboard-chart-finance"
             title={t.financeAndRoi}
-            legend={[
-              [t.savings, colors.mint],
-              [t.payment, colors.green],
-              [`${t.cumulative} ${t.roi} %`, colors.ink],
-            ]}
+            legend={[]}
+            headerActions={showPlaceholders ? (
+              <>
+                <SkeletonBlock className="chart-header-action-skeleton" />
+                <SkeletonBlock className="chart-header-action-skeleton" />
+              </>
+            ) : (
+              <>
+                {forecast || payback ? (
+                  <button type="button" className="ghost-button chart-header-action" onClick={() => setInfoModal("investmentForecast")}>
+                    <CalendarClock size={13} />
+                    <span>{t.forecast}</span>
+                  </button>
+                ) : null}
+                <button type="button" className="ghost-button chart-header-action" onClick={() => setInfoModal("investmentDetails")}>
+                  <List size={13} />
+                  <span>{t.detailsAction}</span>
+                </button>
+              </>
+            )}
+            infoLabel={t.finance}
+            onInfo={() => setInfoModal({ kind: "financeSummary", row: financeSummaryRow ?? rows.at(-1) })}
+            infoDisabled={showPlaceholders}
+            totalSummaryLoading={showPlaceholders}
+            totalSummarySkeletonItemCount={3}
+            totalSummarySkeletonColumnCount={2}
+            totalSummary={{
+              month: t.totals,
+              columns: [t.value, t.performance],
+              items: [
+                {
+                  label: t.savings,
+                  color: colors.mint,
+                  value: formatDisplayMoney(totals.savingsDisplay, currency, lang),
+                  cells: [formatDisplayMoney(totals.savingsDisplay, currency, lang), pct(cumulativeRoiPercent)],
+                  cellTitles: [undefined, t.monthlyRangeRoiPerformanceTitle],
+                  cellClassNames: [undefined, "finance-roi-highlight"],
+                },
+                {
+                  label: t.payment,
+                  color: colors.green,
+                  value: formatDisplayMoney(totals.paymentsDisplay, currency, lang),
+                  cells: [
+                    formatDisplayMoney(totals.paymentsDisplay, currency, lang),
+                    totals.savingsDisplay
+                      ? `${formatNumber((totals.paymentsDisplay / totals.savingsDisplay) * 100, 2, 2)}%`
+                      : "",
+                  ],
+                  cellTitles: [undefined, t.monthlyRangePaymentPerformanceTitle],
+                },
+                {
+                  label: t.consumption,
+                  color: colors.ink,
+                  value: formatDisplayMoney(totals.savingsDisplay - totals.paymentsDisplay, currency, lang),
+                  cells: [
+                    formatDisplayMoney(totals.savingsDisplay - totals.paymentsDisplay, currency, lang),
+                    totals.savingsDisplay
+                      ? `${formatNumber(
+                          ((totals.savingsDisplay - totals.paymentsDisplay) / totals.savingsDisplay) * 100,
+                          2,
+                          2,
+                        )}%`
+                      : "",
+                  ],
+                  cellTitles: [undefined, t.monthlyRangeConsumptionPerformanceTitle],
+                },
+              ],
+            }}
           >
             {showPlaceholders ? (
-              <ChartSkeleton />
+              <ChartSkeleton variant="dual-axis-line" inspectorItemCount={3} inspectorColumnCount={2} />
             ) : (
               <FinanceRoiChart
                 rows={rows}
                 currency={currency}
                 investmentByMonth={investmentByMonth}
-                spendingMoneyByMonth={spendingMoneyByMonth}
-                onInfo={(row) => setInfoModal({ kind: "expenses", row })}
+                onSelectionChange={setFinanceSummaryRow}
+                fixedBarDensity
               />
             )}
           </ChartPanel>
@@ -2917,58 +3496,98 @@ function App({
 
         <section id="energy" className="chart-grid">
           <ChartPanel
+            className="dashboard-chart-consumption"
             title={t.consumptionMix}
-            legend={[
-              [t.day, colors.blue],
-              [t.night, colors.indigo],
-            ]}
+            legend={[]}
+            infoLabel={t.consumptionMix}
+            onInfo={() => setInfoModal("totalConsumption")}
+            infoDisabled={showPlaceholders}
+            totalSummaryLoading={showPlaceholders}
+            totalSummarySkeletonItemCount={3}
+            totalSummarySkeletonColumnCount={2}
+            totalSummary={{
+              month: t.totals,
+              columns: [t.value, t.solarCoverage],
+              items: [
+                { label: t.day, color: colors.blue, value: formatConsumptionWithSolar(totals.consumedDay, totals.importedDay, lang), cells: [formatChartEnergy(totals.consumedDay, "up", lang), formatChartEnergy(totals.consumedDay - totals.importedDay, "up", lang)] },
+                { label: t.night, color: colors.indigo, value: formatConsumptionWithSolar(totals.consumedNight, totals.importedNight, lang), cells: [formatChartEnergy(totals.consumedNight, "up", lang), formatChartEnergy(totals.consumedNight - totals.importedNight, "up", lang)] },
+                { label: t.total, color: colors.ink, value: formatConsumptionWithSolar(totals.consumed, totals.imported, lang), cells: [formatChartEnergy(totals.consumed, "up", lang), formatChartEnergy(totals.consumed - totals.imported, "up", lang)] },
+              ],
+            }}
           >
-            {showPlaceholders ? <ChartSkeleton /> : <ConsumptionMixChart rows={rows} />}
+            {showPlaceholders ? <ChartSkeleton variant="paired" inspectorItemCount={3} inspectorColumnCount={2} /> : <ConsumptionMixChart rows={rows} fixedBarDensity />}
           </ChartPanel>
           <ChartPanel
-            title={t.importMix}
-            legend={[
-              [t.day, colors.blue],
-              [t.night, colors.indigo],
-            ]}
+            className="dashboard-chart-import"
+            title={t.import}
+            legend={[]}
+            totalSummaryLoading={showPlaceholders}
+            totalSummarySkeletonItemCount={3}
+            totalSummary={{
+              month: t.totals,
+              columns: [t.value],
+              items: [
+                { label: t.day, color: colors.blue, value: formatChartEnergy(totals.importedDay, "up", lang), cells: [formatChartEnergy(totals.importedDay, "up", lang)] },
+                { label: t.night, color: colors.indigo, value: formatChartEnergy(totals.importedNight, "up", lang), cells: [formatChartEnergy(totals.importedNight, "up", lang)] },
+                { label: t.total, color: colors.ink, value: formatChartEnergy(totals.imported, "up", lang), cells: [formatChartEnergy(totals.imported, "up", lang)] },
+              ],
+            }}
           >
-            {showPlaceholders ? <ChartSkeleton /> : <ImportMixChart rows={rows} />}
+            {showPlaceholders ? <ChartSkeleton variant="stacked" inspectorItemCount={3} /> : <ImportMixChart rows={rows} fixedBarDensity />}
           </ChartPanel>
         </section>
 
         <section className="chart-grid">
           <ChartPanel
+            className="dashboard-chart-losses"
             title={t.losses}
-            legend={[
-              [t.day, colors.orange],
-              [t.night, colors.rose],
-            ]}
+            legend={[]}
+            totalSummaryLoading={showPlaceholders}
+            totalSummarySkeletonItemCount={3}
+            totalSummary={{
+              month: t.totals,
+              columns: [t.value],
+              items: [
+                { label: t.day, color: colors.orange, value: formatChartEnergy(totals.lossesDay, "up", lang), cells: [formatChartEnergy(totals.lossesDay, "up", lang)] },
+                { label: t.night, color: colors.rose, value: formatChartEnergy(totals.lossesNight, "up", lang), cells: [formatChartEnergy(totals.lossesNight, "up", lang)] },
+                { label: t.total, color: colors.ink, value: formatChartEnergy(totals.lossesDay + totals.lossesNight, "up", lang), cells: [formatChartEnergy(totals.lossesDay + totals.lossesNight, "up", lang)] },
+              ],
+            }}
           >
-            {showPlaceholders ? <ChartSkeleton /> : <LossesMixChart rows={rows} />}
+            {showPlaceholders ? <ChartSkeleton variant="stacked" inspectorItemCount={3} /> : <LossesMixChart rows={rows} fixedBarDensity />}
           </ChartPanel>
         </section>
+        </div>
 
         <section id="data" className="data-section">
           <div className="section-heading">
             <div>
-              <h2>{t.table}</h2>
+              <h2>{formatDataRowCount(rows.length, "monthly", lang)}</h2>
             </div>
-            <div
-              className={`what-if-controls${!showPlaceholders && tariffOverrideMonths.size > 0 ? "" : " is-hidden"}`}
-              aria-hidden={showPlaceholders || tariffOverrideMonths.size === 0}
-            >
-              <button
-                type="button"
-                className="ghost-button what-if-reset-all"
-                disabled={showPlaceholders || tariffOverrideMonths.size === 0}
-                onClick={() => {
-                  setTariffScenarios({});
-                  setWhatIfEditorMonth("");
-                }}
+            <div className="data-section-actions">
+              <div
+                className={`what-if-controls${!showPlaceholders && tariffOverrideMonths.size > 0 ? "" : " is-hidden"}`}
+                aria-hidden={showPlaceholders || tariffOverrideMonths.size === 0}
               >
-                <RotateCcw size={14} />
-                <span>{t.resetAll}</span>
-              </button>
+                <button
+                  type="button"
+                  className="ghost-button chart-header-action data-header-action what-if-reset-all"
+                  disabled={showPlaceholders || tariffOverrideMonths.size === 0}
+                  onClick={() => {
+                    setTariffScenarios({});
+                    setWhatIfEditorMonth("");
+                  }}
+                >
+                  <RotateCcw size={13} />
+                  <span>{t.resetAll}</span>
+                </button>
+              </div>
+              <PeriodCompareButton
+                label={t.compare}
+                isOpen={isMonthlyCompareOpen}
+                onClick={() => setMonthlyCompareOpen(true)}
+                disabled={showPlaceholders}
+              />
             </div>
           </div>
           {showPlaceholders ? (
@@ -3000,7 +3619,11 @@ function App({
           )}
         </section>
           </>
-        )}
+          </PreservedView>
+        </div>
+        </LanguageContext.Provider>
+          );
+        })()}
         {infoModalContent && (
           <div className="modal-backdrop" role="presentation" onMouseDown={() => setInfoModal(null)}>
             <section
@@ -3054,19 +3677,37 @@ function App({
             />
           );
         })() : null}
+        {isMobileSettingsOpen ? (
+          <MobileSettingsSheet
+            t={t}
+            lang={lang}
+            setLang={setAppLang}
+            currency={currency}
+            setCurrency={setAppCurrency}
+            onClose={closeMobileSettings}
+          />
+        ) : null}
         <footer className="dash-footer">
           <span>
             {showPlaceholders ? (
               <SkeletonText width="130px" />
             ) : (
-              `${t.updated}: ${dataState.sheetUpdatedAt ? formatDateTimeLabel(dataState.sheetUpdatedAt, lang) : "-"}`
+              `${t.updated}${lang === "en" ? " on" : ""} ${dataState.sheetUpdatedAt ? formatDateTimeLabel(dataState.sheetUpdatedAt, lang) : "-"}`
             )}
           </span>
-          <span className="dash-footer-controls">
-            {footerExtra}
-            <LanguageSwitcher lang={lang} setLang={setAppLang} />
-          </span>
+          {footerExtra ? <span className="dash-footer-controls">{footerExtra}</span> : null}
         </footer>
+        <MobileBottomNavigation
+          t={t}
+          viewMode={viewMode}
+          isRefreshing={dataState.isRefreshing || isPlantComparisonLoading}
+          isLoading={showPlaceholders}
+          settingsButtonRef={mobileSettingsButtonRef}
+          onOverview={() => selectViewModeOrScrollTop(overviewViewMode)}
+          onCompare={() => selectViewModeOrScrollTop("comparison")}
+          onSettings={() => setMobileSettingsOpen(true)}
+          onRefresh={handleRefresh}
+        />
       </section>
     </main>
     </LanguageContext.Provider>
@@ -3374,9 +4015,34 @@ function PortalRoot() {
   );
 }
 
+interface PeriodCompareButtonProps {
+  readonly label: string;
+  readonly isOpen: boolean;
+  readonly onClick: () => void;
+  readonly disabled?: boolean;
+}
+
+function PeriodCompareButton({ label, isOpen, onClick, disabled = false }: PeriodCompareButtonProps) {
+  return (
+    <button
+      type="button"
+      className="ghost-button chart-header-action data-header-action"
+      onClick={onClick}
+      disabled={disabled}
+      aria-expanded={isOpen}
+      aria-haspopup="dialog"
+    >
+      <GitCompareArrows size={13} aria-hidden="true" />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 interface DashboardToolbarProps {
+  readonly variant?: "desktop" | "mobile";
   readonly t: Record<string, string>;
   readonly lang: Lang;
+  readonly setLang?: (lang: Lang) => void;
   readonly currency: Currency;
   readonly setCurrency?: (currency: Currency) => void;
   readonly viewMode: ViewMode;
@@ -3396,18 +4062,16 @@ interface DashboardToolbarProps {
   readonly setDailyFromDate?: (date: string) => void;
   readonly setDailyToDate?: (date: string) => void;
   readonly dailyDateBounds?: readonly [string, string];
-  readonly isDailyCompareOpen: boolean;
-  readonly setDailyCompareOpen?: (isOpen: boolean) => void;
-  readonly investmentValue: React.ReactNode;
-  readonly onInvestmentInfo?: () => void;
   readonly isRefreshing: boolean;
   readonly refresh?: () => void;
   readonly isLoading: boolean;
 }
 
 function DashboardToolbar({
+  variant = "desktop",
   t,
   lang,
+  setLang,
   currency,
   setCurrency,
   viewMode,
@@ -3420,17 +4084,13 @@ function DashboardToolbar({
   rangeToMonth = "",
   setRangeFromMonth,
   setRangeToMonth,
-  dailyRange = "currentMonth",
+  dailyRange = "range",
   setDailyRange,
   dailyFromDate = "",
   dailyToDate = "",
   setDailyFromDate,
   setDailyToDate,
   dailyDateBounds,
-  isDailyCompareOpen,
-  setDailyCompareOpen,
-  investmentValue,
-  onInvestmentInfo,
   isRefreshing,
   refresh,
   isLoading,
@@ -3467,6 +4127,20 @@ function DashboardToolbar({
       return Boolean(latestMonth && firstMonth && rangeFromMonth === firstMonth && rangeToMonth === latestMonth);
     })
     : undefined;
+  const selectedMonthRangeLabel = range === "all"
+    ? t.allMonths
+    : selectedMonthPreset
+      ? lastMonthRangeLabel(selectedMonthPreset, lang)
+      : rangeFromMonth && rangeToMonth
+        ? formatMonthRangeSelection(rangeFromMonth, rangeToMonth, lang)
+        : t.range;
+  const selectedDailyRangeLabel = dailyRange === "all"
+    ? t.allDays
+    : dailyRange.endsWith("d")
+      ? lastDayRangeLabel(Number.parseInt(dailyRange, 10), lang)
+      : dailyFromDate && dailyToDate
+        ? formatDayRangeSelection(dailyFromDate, dailyToDate, lang)
+        : t.range;
 
   useEffect(() => {
     if (!isRangePickerOpen) return undefined;
@@ -3507,25 +4181,23 @@ function DashboardToolbar({
   }, [isDailyRangePickerOpen]);
 
   return (
-    <header className="topbar">
-      <div className="dashboard-logo" aria-label="Solaroid">
-        <img src={`${import.meta.env.BASE_URL}logo-mark.svg`} alt="Solaroid" />
-      </div>
+    <header className={`topbar dashboard-toolbar dashboard-toolbar-${variant}`}>
+      {variant === "desktop" ? (
+        <div className="dashboard-logo" aria-label="Solaroid">
+          <img src={`${import.meta.env.BASE_URL}logo-mark.svg`} alt="Solaroid" />
+        </div>
+      ) : null}
       <div className="toolbar">
-        <div className="investment-pill" aria-label={`${t.investment} ${currency}`}>
-          <span>{t.investment}</span>
-          <strong>{investmentValue}</strong>
-          <button type="button" className="investment-info-button" aria-label={t.investment} onClick={onInvestmentInfo} disabled={isLoading || !onInvestmentInfo}>
-            <Info size={14} />
-          </button>
-        </div>
-        <div className="segmented currency" aria-label={t.currency}>
-          {(["UAH", "USD"] as Currency[]).map((item) => (
-            <button key={item} className={currency === item ? "selected" : ""} onClick={() => setCurrency?.(item)} disabled={isLoading}>
-              {item}
-            </button>
-          ))}
-        </div>
+        {variant === "desktop" ? (
+          <div className="segmented currency" aria-label={t.currency}>
+            {(["UAH", "USD"] as Currency[]).map((item) => (
+              <button key={item} className={currency === item ? "selected" : ""} onClick={() => setCurrency?.(item)} disabled={isLoading}>
+                {item}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {variant === "desktop" && setLang ? <LanguageSwitcher lang={lang} setLang={setLang} variant="toolbar" /> : null}
         <div className={`segmented view view-${viewOptions.length}`} aria-label="View">
           {viewOptions.map((item) => (
             <button key={item} className={viewMode === item ? "selected" : ""} onClick={() => setViewMode?.(item)} disabled={isLoading}>
@@ -3534,40 +4206,43 @@ function DashboardToolbar({
           ))}
         </div>
         {viewMode === "monthly" ? (
-          <div className="range-tools" aria-label="Date range" ref={rangeToolsRef}>
-            <div className="segmented range-segmented">
-              <button
-                className={range === "all" ? "selected" : ""}
-                onClick={() => {
-                  setRange?.("all");
-                  setRangePickerOpen(false);
-                }}
-                disabled={isLoading}
-              >
-                {t.all}
-              </button>
-              <button
-                className={range === "range" ? "selected" : ""}
-                onClick={() => {
-                  setRange?.("range");
-                  setRangePickerOpen((current) => !current);
-                }}
-                disabled={isLoading}
-                aria-expanded={isRangePickerOpen}
-                aria-haspopup="dialog"
-              >
-                {t.range}
-              </button>
-            </div>
-            {range === "range" && isRangePickerOpen ? (
-              <div className="month-range-controls">
-                <div className="range-preset-row" aria-label="Preset range">
+          <>
+          <div className={`range-tools${variant === "desktop" ? " segmented toolbar-range-control" : ""}`} aria-label="Date range" ref={rangeToolsRef}>
+            <button
+              type="button"
+              className="range-picker-trigger"
+              onClick={() => setRangePickerOpen((current) => !current)}
+              disabled={isLoading}
+              aria-expanded={isRangePickerOpen}
+              aria-haspopup="dialog"
+              aria-label={`${t.range}: ${selectedMonthRangeLabel}`}
+            >
+              <CalendarRange className="toolbar-control-icon" size={14} aria-hidden="true" />
+              <span>{selectedMonthRangeLabel}</span>
+            </button>
+            {isRangePickerOpen ? (
+              <div className="month-range-controls" role="dialog" aria-label={t.range}>
+                <div className="range-preset-row month-range-presets" aria-label="Preset range">
+                  <button
+                    type="button"
+                    className={range === "all" ? "selected" : ""}
+                    onClick={() => {
+                      setRange?.("all");
+                      setRangePickerOpen(false);
+                    }}
+                    disabled={isLoading}
+                  >
+                    {t.all}
+                  </button>
                   {monthRangePresets.map((count) => (
                     <button
                       key={count}
                       type="button"
                       className={selectedMonthPreset === count ? "selected" : ""}
-                      onClick={() => applyMonthRangePreset(count)}
+                      onClick={() => {
+                        applyMonthRangePreset(count);
+                        setRangePickerOpen(false);
+                      }}
                       disabled={isLoading || !monthOptions.length}
                     >
                       {monthRangeLabel(count, lang)}
@@ -3579,7 +4254,10 @@ function DashboardToolbar({
                   <input
                     type="month"
                     value={rangeFromMonth}
-                    onChange={(event) => setRangeFromMonth?.(event.target.value)}
+                    onChange={(event) => {
+                      setRange?.("range");
+                      setRangeFromMonth?.(event.target.value);
+                    }}
                     min={monthOptions[0]?.[0]}
                     max={monthOptions.at(-1)?.[0]}
                     disabled={isLoading}
@@ -3590,7 +4268,10 @@ function DashboardToolbar({
                   <input
                     type="month"
                     value={rangeToMonth}
-                    onChange={(event) => setRangeToMonth?.(event.target.value)}
+                    onChange={(event) => {
+                      setRange?.("range");
+                      setRangeToMonth?.(event.target.value);
+                    }}
                     min={monthOptions[0]?.[0]}
                     max={monthOptions.at(-1)?.[0]}
                     disabled={isLoading}
@@ -3599,38 +4280,36 @@ function DashboardToolbar({
               </div>
             ) : null}
           </div>
+          </>
         ) : viewMode === "daily" ? (
           <>
-            <div className="daily-range-tools" aria-label={t.range} ref={dailyRangeToolsRef}>
-              <div className="segmented range-segmented">
-                <button
-                  type="button"
-                  className={dailyRange === "currentMonth" ? "selected" : ""}
-                  onClick={() => {
-                    setDailyRange?.("currentMonth");
-                    setDailyRangePickerOpen(false);
-                  }}
-                  disabled={isLoading}
-                >
-                  {t.all}
-                </button>
-                <button
-                  type="button"
-                  className={dailyRange !== "currentMonth" ? "selected" : ""}
-                  onClick={() => {
-                    if (dailyRange === "currentMonth") setDailyRange?.("range");
-                    setDailyRangePickerOpen((current) => !current);
-                  }}
-                  disabled={isLoading}
-                  aria-expanded={isDailyRangePickerOpen}
-                  aria-haspopup="dialog"
-                >
-                  {t.range}
-                </button>
-              </div>
-              {dailyRange !== "currentMonth" && isDailyRangePickerOpen ? (
-                <div className="daily-date-range-controls">
-                  <div className="range-preset-row" aria-label="Preset range">
+            <div className={`daily-range-tools${variant === "desktop" ? " segmented toolbar-range-control" : ""}`} aria-label={t.range} ref={dailyRangeToolsRef}>
+              <button
+                type="button"
+                className="range-picker-trigger"
+                onClick={() => setDailyRangePickerOpen((current) => !current)}
+                disabled={isLoading}
+                aria-expanded={isDailyRangePickerOpen}
+                aria-haspopup="dialog"
+                aria-label={`${t.range}: ${selectedDailyRangeLabel}`}
+              >
+                <CalendarRange className="toolbar-control-icon" size={14} aria-hidden="true" />
+                <span>{selectedDailyRangeLabel}</span>
+              </button>
+              {isDailyRangePickerOpen ? (
+                <div className="daily-date-range-controls" role="dialog" aria-label={t.range}>
+                  <div className="range-preset-row daily-range-presets" aria-label="Preset range">
+                    <button
+                      type="button"
+                      className={dailyRange === "all" ? "selected" : ""}
+                      onClick={() => {
+                        setDailyRange?.("all");
+                        setDailyRangePickerOpen(false);
+                      }}
+                      disabled={isLoading}
+                    >
+                      {t.all}
+                    </button>
                     {dailyRangePresets.map((count) => {
                       const item = `${count}d` as DailyRangeKey;
                       return (
@@ -3640,8 +4319,9 @@ function DashboardToolbar({
                           className={dailyRange === item ? "selected" : ""}
                           onClick={() => {
                             applyDailyRangePreset(count);
+                            setDailyRangePickerOpen(false);
                           }}
-                          disabled={isLoading}
+                          disabled={isLoading || !dailyDateBounds?.[1]}
                         >
                           {dayRangeLabel(count, lang)}
                         </button>
@@ -3653,7 +4333,10 @@ function DashboardToolbar({
                     <input
                       type="date"
                       value={dailyFromDate}
-                      onChange={(event) => setDailyFromDate?.(event.target.value)}
+                      onChange={(event) => {
+                        setDailyRange?.("range");
+                        setDailyFromDate?.(event.target.value);
+                      }}
                       min={dailyDateBounds?.[0]}
                       max={dailyDateBounds?.[1]}
                       disabled={isLoading}
@@ -3664,7 +4347,10 @@ function DashboardToolbar({
                     <input
                       type="date"
                       value={dailyToDate}
-                      onChange={(event) => setDailyToDate?.(event.target.value)}
+                      onChange={(event) => {
+                        setDailyRange?.("range");
+                        setDailyToDate?.(event.target.value);
+                      }}
                       min={dailyDateBounds?.[0]}
                       max={dailyDateBounds?.[1]}
                       disabled={isLoading}
@@ -3673,25 +4359,166 @@ function DashboardToolbar({
                 </div>
               ) : null}
             </div>
-            <div className="segmented daily-tools" aria-label={t.compareDays}>
-              <button type="button" className={isDailyCompareOpen ? "selected" : ""} onClick={() => setDailyCompareOpen?.(true)} disabled={isLoading}>
-                {t.compareDays}
-              </button>
-            </div>
           </>
         ) : null}
-        <button
-          type="button"
-          className={`icon-button refresh-button${isRefreshing ? " is-refreshing" : ""}`}
-          onClick={refresh}
-          disabled={isRefreshing}
-          aria-label={t.refresh}
-          title={t.refresh}
-        >
-          <RefreshCw size={18} />
-        </button>
+        {variant === "desktop" ? (
+          <div className="segmented toolbar-refresh-control">
+            <button
+              type="button"
+              className={`refresh-button${isRefreshing ? " is-refreshing" : ""}`}
+              onClick={refresh}
+              disabled={isRefreshing}
+              aria-label={t.refresh}
+              title={t.refresh}
+            >
+              <RefreshCw size={18} />
+            </button>
+          </div>
+        ) : null}
       </div>
     </header>
+  );
+}
+
+interface MobileBottomNavigationProps {
+  readonly t: Record<string, string>;
+  readonly viewMode: ViewMode;
+  readonly isRefreshing: boolean;
+  readonly isLoading: boolean;
+  readonly settingsButtonRef: React.RefObject<HTMLButtonElement | null>;
+  readonly onOverview: () => void;
+  readonly onCompare: () => void;
+  readonly onSettings: () => void;
+  readonly onRefresh: () => void;
+}
+
+function MobileBottomNavigation({
+  t,
+  viewMode,
+  isRefreshing,
+  isLoading,
+  settingsButtonRef,
+  onOverview,
+  onCompare,
+  onSettings,
+  onRefresh,
+}: MobileBottomNavigationProps) {
+  const isOverview = viewMode !== "comparison";
+
+  return (
+    <nav className="mobile-bottom-nav" aria-label="Navigation">
+      <button
+        type="button"
+        className={isRefreshing ? "is-refreshing" : ""}
+        onClick={onRefresh}
+        disabled={isLoading || isRefreshing}
+        aria-label={t.refresh}
+        title={t.refresh}
+      >
+        <RefreshCw size={21} />
+      </button>
+      <button
+        type="button"
+        className={isOverview ? "is-active" : ""}
+        onClick={onOverview}
+        disabled={isLoading}
+        aria-current={isOverview ? "page" : undefined}
+        aria-label={t.overview}
+        title={t.overview}
+      >
+        <LayoutDashboard size={21} />
+      </button>
+      <button
+        type="button"
+        className={viewMode === "comparison" ? "is-active" : ""}
+        onClick={onCompare}
+        disabled={isLoading}
+        aria-current={viewMode === "comparison" ? "page" : undefined}
+        aria-label={t.comparison}
+        title={t.comparison}
+      >
+        <GitCompareArrows size={21} />
+      </button>
+      <button
+        ref={settingsButtonRef}
+        type="button"
+        onClick={onSettings}
+        disabled={isLoading}
+        aria-label={t.settings}
+        aria-haspopup="dialog"
+        title={t.settings}
+      >
+        <Settings2 size={21} />
+      </button>
+    </nav>
+  );
+}
+
+interface MobileSettingsSheetProps {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly setLang: (lang: Lang) => void;
+  readonly currency: Currency;
+  readonly setCurrency: (currency: Currency) => void;
+  readonly onClose: () => void;
+}
+
+function MobileSettingsSheet({
+  t,
+  lang,
+  setLang,
+  currency,
+  setCurrency,
+  onClose,
+}: MobileSettingsSheetProps) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop mobile-settings-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="mobile-settings-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mobile-settings-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="mobile-settings-heading">
+          <h2 id="mobile-settings-title">{t.settings}</h2>
+          <button ref={closeButtonRef} type="button" className="icon-button" onClick={onClose} aria-label={t.close}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mobile-settings-field">
+          <span>{t.currency}</span>
+          <div className="segmented mobile-settings-options" aria-label={t.currency}>
+            {(["UAH", "USD"] as Currency[]).map((item) => (
+              <button key={item} type="button" className={currency === item ? "selected" : ""} onClick={() => setCurrency(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mobile-settings-field">
+          <span>{t.language}</span>
+          <div className="segmented mobile-settings-options" aria-label={t.language}>
+            {(["en", "uk"] as Lang[]).map((item) => (
+              <button key={item} type="button" className={lang === item ? "selected" : ""} onClick={() => setLang(item)}>
+                {item.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -3707,31 +4534,9 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
           viewMode="monthly"
           viewOptions={["monthly", "daily", "comparison"]}
           range="all"
-          isDailyCompareOpen={false}
-          investmentValue={<SkeletonText width="92px" height="1rem" />}
           isRefreshing
           isLoading
         />
-        <KpiSkeletonGrid
-          labels={[t.latestRoi, t.totalProductionKpi, t.totalExportKpi, t.totalImportKpi, t.totalNetPaymentKpi, t.plantWorks]}
-          showInfoIcons
-        />
-        <section className="payback-band">
-          <PaybackBandSkeleton />
-        </section>
-        <section className="forecast-section">
-          <div className="section-heading">
-            <div>
-              <h2 className="heading-with-info">
-                <SkeletonText width="124px" height="18px" />
-                <DisabledInfoIcon className="section-info-button" />
-              </h2>
-            </div>
-          </div>
-          <div className="forecast-grid">
-            <ForecastKpiSkeletonGrid t={t} standalone={false} />
-          </div>
-        </section>
         <MonthlyPageSkeletonTail />
       </section>
     </main>
@@ -3741,25 +4546,26 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
 function MonthlyPageSkeletonTail() {
   return (
     <>
+      <div className="dashboard-charts">
       <section id="finance" className="chart-grid">
-        <ChartPanelSkeleton />
-        <ChartPanelSkeleton />
+        <ChartPanelSkeleton className="dashboard-chart-production" chartSkeletonVariant="paired-line" hasLegend={false} hasHeaderInfo hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
+        <ChartPanelSkeleton className="dashboard-chart-finance" chartSkeletonVariant="dual-axis-line" hasLegend={false} hasHeaderInfo headerActionCount={2} hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
       </section>
       <section id="energy" className="chart-grid">
-        <ChartPanelSkeleton />
-        <ChartPanelSkeleton />
+        <ChartPanelSkeleton className="dashboard-chart-consumption" chartSkeletonVariant="paired" hasLegend={false} hasHeaderInfo hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
+        <ChartPanelSkeleton className="dashboard-chart-import" chartSkeletonVariant="stacked" hasLegend={false} hasHeaderInfo hasTotalSummary inspectorItemCount={3} totalSummaryItemCount={3} />
       </section>
       <section className="chart-grid">
-        <ChartPanelSkeleton />
+        <ChartPanelSkeleton className="dashboard-chart-losses" chartSkeletonVariant="stacked" hasLegend={false} hasTotalSummary inspectorItemCount={3} totalSummaryItemCount={3} />
       </section>
+      </div>
       <section id="data" className="data-section">
         <div className="section-heading">
           <div>
             <SkeletonText width="96px" height="18px" />
           </div>
-          <div className="filter-controls">
-            <SkeletonText width="132px" height="40px" />
-            <SkeletonText width="112px" height="40px" />
+          <div className="data-section-actions">
+            <SkeletonText width="126px" height="28px" />
           </div>
         </div>
         <DataTableSkeleton />
@@ -3768,66 +4574,27 @@ function MonthlyPageSkeletonTail() {
   );
 }
 
-function PaybackBandSkeleton() {
+function DailyPageSkeleton() {
   return (
     <>
-      <span className="payback-label">
-        <SkeletonText width="220px" height="22px" />
-        <DisabledInfoIcon className="section-info-button" />
-      </span>
-      <SkeletonBlock className="progress-track skeleton-track" />
-      <span className="payback-values">
-        <SkeletonText width="88px" height="18px" />
-        <span className="payback-value-divider">/</span>
-        <SkeletonText width="96px" height="18px" />
-      </span>
-    </>
-  );
-}
-
-function ForecastKpiSkeletonGrid({ t, standalone = true }: { readonly t: Record<string, string>; readonly standalone?: boolean }) {
-  const labels = [t.expectedProduction, t.expectedRoi, t.expectedIncome];
-  const icons = [
-    <SunMedium size={20} />,
-    <CircleDollarSign size={20} />,
-    <WalletCards size={20} />,
-  ];
-  const cards = Array.from({ length: 3 }, (_, index) => (
-    <article className="kpi-card kpi-card-loading" key={index}>
-      <div className="kpi-icon">{icons[index]}</div>
-      <span>{labels[index]}</span>
-      <SkeletonText width="120px" height="22px" />
-      <SkeletonText width="110px" height="15px" />
-      <SkeletonText width="130px" height="15px" />
-    </article>
-  ));
-
-  return standalone ? <div className="forecast-grid">{cards}</div> : <>{cards}</>;
-}
-
-function DailyPageSkeleton({ t }: { readonly t: Record<string, string> }) {
-  return (
-    <>
-      <KpiSkeletonGrid
-        count={4}
-        className="daily-kpi-grid"
-        labels={[t.production, t.export, t.import, t.latestRoi]}
-      />
+      <div className="dashboard-charts">
       <section id="energy" className="chart-grid">
-        <ChartPanelSkeleton />
-        <ChartPanelSkeleton />
+        <ChartPanelSkeleton className="dashboard-chart-production" chartSkeletonVariant="paired-line" hasLegend={false} hasTotalSummary inspectorColumnCount={2} totalSummaryColumnCount={2} />
+        <ChartPanelSkeleton className="dashboard-chart-finance" chartSkeletonVariant="dual-axis-line" hasLegend={false} hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
       </section>
       <section id="finance" className="chart-grid">
-        <ChartPanelSkeleton />
-        <ChartPanelSkeleton />
+        <ChartPanelSkeleton className="dashboard-chart-consumption" chartSkeletonVariant="paired" hasLegend={false} hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
+        <ChartPanelSkeleton className="dashboard-chart-import" chartSkeletonVariant="stacked" hasLegend={false} hasTotalSummary inspectorItemCount={3} totalSummaryItemCount={3} />
+        <ChartPanelSkeleton className="dashboard-chart-losses" chartSkeletonVariant="stacked" hasLegend={false} hasTotalSummary inspectorItemCount={3} totalSummaryItemCount={3} />
       </section>
+      </div>
       <section id="data" className="data-section">
         <div className="section-heading">
           <div>
             <SkeletonText width="96px" height="18px" />
           </div>
-          <div className="filter-controls">
-            <SkeletonText width="132px" height="40px" />
+          <div className="data-section-actions">
+            <SkeletonText width="112px" height="28px" />
           </div>
         </div>
         <DataTableSkeleton />
@@ -3838,6 +4605,7 @@ function DailyPageSkeleton({ t }: { readonly t: Record<string, string> }) {
 
 function PlantComparisonPageSkeleton() {
   return (
+    <div className="plant-comparison-view">
     <section className="plant-comparison-section" aria-busy="true">
       <div className="section-heading">
         <div>
@@ -3853,26 +4621,135 @@ function PlantComparisonPageSkeleton() {
         <SkeletonText width="116px" height="42px" />
       </div>
     </section>
+    </div>
   );
 }
 
-function ChartPanelSkeleton({ hasInfo = false }: { readonly hasInfo?: boolean }) {
+interface ChartPanelSkeletonProps {
+  readonly className?: string;
+  readonly chartSkeletonVariant?: ChartSkeletonVariant;
+  readonly hasLegend?: boolean;
+  readonly hasSummary?: boolean;
+  readonly hasInfo?: boolean;
+  readonly hasHeaderInfo?: boolean;
+  readonly headerActionCount?: number;
+  readonly hasTotalSummary?: boolean;
+  readonly legendValueCount?: number;
+  readonly inspectorItemCount?: number;
+  readonly inspectorColumnCount?: number;
+  readonly totalSummaryItemCount?: number;
+  readonly totalSummaryColumnCount?: number;
+}
+
+function ChartPanelSkeleton({
+  className,
+  chartSkeletonVariant = "paired",
+  hasLegend = true,
+  hasSummary = false,
+  hasInfo = false,
+  hasHeaderInfo = false,
+  headerActionCount = 0,
+  hasTotalSummary = false,
+  legendValueCount = 0,
+  inspectorItemCount = 2,
+  inspectorColumnCount = 1,
+  totalSummaryItemCount = 2,
+  totalSummaryColumnCount = 1,
+}: ChartPanelSkeletonProps) {
   return (
-    <article className="chart-panel" aria-busy="true">
-      <div className="chart-head">
-        <div>
-          <h2 className={hasInfo ? "heading-with-info" : undefined}>
-            <SkeletonText width="128px" height="18px" />
-            {hasInfo ? <DisabledInfoIcon className="section-info-button" /> : null}
-          </h2>
+    <article className={`chart-panel${className ? ` ${className}` : ""}`} aria-busy="true">
+      <div className={`chart-head${hasSummary ? " chart-head-with-summary" : ""}${hasLegend ? "" : " chart-head-without-legend"}`}>
+        <div className="chart-title">
+          <h2><SkeletonText width="128px" height="18px" /></h2>
+          {hasHeaderInfo || headerActionCount ? (
+            <div className="chart-title-actions">
+              {Array.from({ length: headerActionCount }).map((_, index) => (
+                <SkeletonBlock className="chart-header-action-skeleton" key={index} />
+              ))}
+              {hasHeaderInfo ? <DisabledInfoIcon className="chart-summary-info-button chart-panel-info-button" size={14} /> : null}
+            </div>
+          ) : null}
         </div>
-        <div className="legend">
-          <SkeletonText width="72px" height="14px" />
-          <SkeletonText width="86px" height="14px" />
-        </div>
+        {hasSummary ? (
+          <dl className="chart-summary chart-summary-skeleton">
+            {[0, 1].map((index) => (
+              <div key={index}>
+                <dt><SkeletonText width={index === 0 ? "76px" : "58px"} height="16px" /></dt>
+                <dd>
+                  <SkeletonText width={index === 0 ? "104px" : "138px"} height="16px" />
+                  {index === 0 && hasInfo ? <DisabledInfoIcon className="chart-summary-info-button" size={14} /> : null}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {hasLegend ? (
+          <div className={`legend${legendValueCount ? " legend-with-values" : ""}`}>
+            {Array.from({ length: legendValueCount || 2 }).map((_, index) => (
+              <span className="legend-item" key={index}>
+                <SkeletonText width={index === 0 ? "72px" : "58px"} height="14px" />
+                {legendValueCount ? <SkeletonText width={index === 1 ? "96px" : "78px"} height="16px" /> : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
-      <ChartSkeleton />
+      <ChartSkeleton variant={chartSkeletonVariant} inspectorItemCount={inspectorItemCount} inspectorColumnCount={inspectorColumnCount} />
+      {hasTotalSummary ? (
+        <ChartInspectorSkeleton itemCount={totalSummaryItemCount} columnCount={totalSummaryColumnCount} />
+      ) : null}
     </article>
+  );
+}
+
+function ChartInspectorSkeleton({
+  hasInfo = false,
+  itemCount = 2,
+  columnCount = 1,
+}: {
+  readonly hasInfo?: boolean;
+  readonly itemCount?: number;
+  readonly columnCount?: number;
+}) {
+  return (
+    <div className={`chart-inspector chart-inspector-skeleton${hasInfo ? " has-delta-info" : ""}`} aria-busy="true">
+      <table className={`chart-inspector-table${columnCount === 1 ? " is-two-column" : ""}`}>
+        {columnCount === 1 ? (
+          <colgroup>
+            <col className="chart-inspector-label-column" />
+            <col className="chart-inspector-value-column" />
+          </colgroup>
+        ) : null}
+        <thead>
+          <tr>
+            <th>
+              <span className="chart-inspector-period">
+                <SkeletonText width="58px" height="14px" />
+              </span>
+              {hasInfo ? <DisabledInfoIcon className="chart-inspector-info" size={12} /> : null}
+            </th>
+            {Array.from({ length: columnCount }).map((_, index) => (
+              <th key={index}><SkeletonText width="46px" height="12px" /></th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: itemCount }).map((_, index) => (
+            <tr key={index}>
+              <th scope="row">
+                <span className="chart-inspector-label">
+                  <SkeletonBlock className="chart-inspector-dot-skeleton" />
+                  <SkeletonText width={index === 1 ? "64px" : "78px"} height="14px" />
+                </span>
+              </th>
+              {Array.from({ length: columnCount }).map((_, cellIndex) => (
+                <td key={cellIndex}><SkeletonText width={cellIndex === 0 ? "88px" : "54px"} height="14px" /></td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -4105,14 +4982,21 @@ function isPortalUserConfirmed(user: PortalUser | undefined) {
   return Boolean(user?.confirmed_at ?? user?.email_confirmed_at);
 }
 
-function LanguageSwitcher({ lang, setLang }: { readonly lang: Lang; readonly setLang: (lang: Lang) => void }) {
+interface LanguageSwitcherProps {
+  readonly lang: Lang;
+  readonly setLang: (lang: Lang) => void;
+  readonly variant?: "default" | "toolbar";
+}
+
+function LanguageSwitcher({ lang, setLang, variant = "default" }: LanguageSwitcherProps) {
+  const isToolbar = variant === "toolbar";
   return (
-    <div className="language-switcher" aria-label="Language">
+    <div className={isToolbar ? "segmented currency toolbar-language-switcher" : "language-switcher"} aria-label="Language">
       {(["en", "uk"] as const).map((option) => (
         <button
           key={option}
           type="button"
-          className={option === lang ? "active" : ""}
+          className={option === lang ? (isToolbar ? "selected" : "active") : ""}
           onClick={() => setLang(option)}
           aria-pressed={option === lang}
         >
@@ -4139,47 +5023,64 @@ function DisabledInfoIcon({ className, size = 16 }: { readonly className: string
   );
 }
 
-interface KpiSkeletonGridProps {
-  readonly count?: number;
-  readonly className?: string;
-  readonly labels?: readonly string[];
-  readonly showInfoIcons?: boolean;
-}
+type ChartSkeletonVariant = "paired" | "paired-line" | "dual-axis-line" | "stacked";
 
-function KpiSkeletonGrid({ count = 6, className = "", labels = [], showInfoIcons = false }: KpiSkeletonGridProps) {
-  const icons = [
-    <CircleDollarSign size={20} />,
-    <SunMedium size={20} />,
-    <ArrowUpFromLine size={20} />,
-    <ArrowDownToLine size={20} />,
-    <WalletCards size={20} />,
-    <CalendarClock size={20} />,
-  ];
-
-  return (
-    <section id="overview" className={`kpi-grid${className ? ` ${className}` : ""}`} aria-busy="true">
-      {Array.from({ length: count }).map((_, index) => (
-        <article className="kpi-card kpi-card-loading" key={index}>
-          {showInfoIcons ? <DisabledInfoIcon className="kpi-info-button" /> : null}
-          <div className="kpi-icon">{icons[index % icons.length]}</div>
-          {labels[index] ? <span>{labels[index]}</span> : <SkeletonText width="74px" height="22px" />}
-          <SkeletonText width="112px" height="22px" />
-          <SkeletonText width="138px" height="17px" />
-        </article>
-      ))}
-    </section>
-  );
-}
-
-function ChartSkeleton() {
+function ChartSkeleton({
+  variant = "paired",
+  inspectorItemCount = 2,
+  inspectorColumnCount = 1,
+}: {
+  readonly variant?: ChartSkeletonVariant;
+  readonly inspectorItemCount?: number;
+  readonly inspectorColumnCount?: number;
+}) {
+  const isPaired = variant !== "stacked";
+  const hasLine = variant === "paired-line" || variant === "dual-axis-line";
+  const hasRightAxis = variant === "dual-axis-line";
+  const axisPositions = [0, 25, 50, 75, 100];
+  const periods = Array.from({ length: 40 });
   return (
     <>
-      <div className="chart-skeleton" aria-busy="true">
-        {Array.from({ length: 8 }).map((_, index) => (
-          <SkeletonBlock key={index} className={`skeleton-bar skeleton-bar-${index + 1}`} />
-        ))}
+      <div className={`chart-skeleton chart-skeleton-${variant}`} aria-busy="true">
+        <div className="chart-skeleton-y-axis chart-skeleton-y-axis-left" aria-hidden="true">
+          {axisPositions.map((position) => (
+            <span className="chart-skeleton-axis-label" style={{ top: `${position}%` }} key={position}>
+              <SkeletonText width={hasRightAxis ? "34px" : "24px"} height="7px" />
+            </span>
+          ))}
+        </div>
+        {hasRightAxis ? (
+          <div className="chart-skeleton-y-axis chart-skeleton-y-axis-right" aria-hidden="true">
+            {axisPositions.map((position) => (
+              <span className="chart-skeleton-axis-label" style={{ top: `${position}%` }} key={position}>
+                <SkeletonText width="22px" height="7px" />
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div className="chart-skeleton-plot" aria-hidden="true">
+          <div className="chart-skeleton-grid">
+            {axisPositions.map((position) => <span style={{ top: `${position}%` }} key={position} />)}
+          </div>
+          <div className="chart-skeleton-periods">
+            {periods.map((_, index) => (
+              <span className={`chart-skeleton-period skeleton-period-${(index % 8) + 1}`} key={index}>
+                <SkeletonBlock className="skeleton-bar skeleton-bar-primary" />
+                {isPaired ? <SkeletonBlock className="skeleton-bar skeleton-bar-secondary" /> : null}
+                {hasLine ? <SkeletonBlock className="skeleton-line-point" /> : null}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="chart-skeleton-x-axis" aria-hidden="true">
+          <div className="chart-skeleton-x-labels">
+            {periods.map((_, index) => (
+              <span key={index}><SkeletonText width="24px" height="7px" /></span>
+            ))}
+          </div>
+        </div>
       </div>
-      <SkeletonBlock className="chart-readout skeleton-readout" />
+      <ChartInspectorSkeleton itemCount={inspectorItemCount} columnCount={inspectorColumnCount} />
     </>
   );
 }
@@ -4223,31 +5124,6 @@ function DataTableSkeleton({ rowCount = 12 }: DataTableSkeletonProps) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function ForecastDetail({
-  current,
-  delta,
-  formattedDelta,
-  base,
-  label,
-}: {
-  readonly current: string;
-  readonly delta: number;
-  readonly formattedDelta: string;
-  readonly base: number;
-  readonly label: string;
-}) {
-  return (
-    <span className="forecast-detail">
-      <span>{current}</span>
-      {label ? (
-        <span className={deltaTone(delta)}>
-          {`${formattedDelta} ${formatDeltaPct(delta, base)} ${label}`.replaceAll(" ", "\u00a0")}
-        </span>
-      ) : null}
-    </span>
   );
 }
 
@@ -4299,12 +5175,15 @@ function PlantComparisonSection({
   readonly onDeltaInfo: (title: string, body: React.ReactNode) => void;
 }) {
   const displayedResult = result?.mode === plantComparisonMode ? result : null;
-  const comparisonUpdated = displayedResult?.plants
-    .filter((plant) => plant.plantId !== activePlantId)
-    .map((plant) => ({
-      plantId: plant.plantId,
-      updated: plant.sheetUpdatedAt ? formatDateTimeLabel(plant.sheetUpdatedAt, lang) : "-",
-    })) ?? [];
+  const updatedAtByPlant = new Map(displayedResult?.plants.map((plant) => [plant.plantId, plant.sheetUpdatedAt] as const) ?? []);
+  const updateLabel = (plantId: string) => {
+    const updatedAt = updatedAtByPlant.get(plantId);
+    if (!updatedAt) return "";
+    const prefix = lang === "uk" ? "оновлено" : "updated at";
+    return `(${prefix} ${formatDateTimeLabel(updatedAt, lang)})`;
+  };
+  const firstPlantUpdateLabel = updateLabel(firstPlantId);
+  const secondPlantUpdateLabel = updateLabel(secondPlantId);
   const compareDisabled =
     isLoading ||
     !firstPlantId ||
@@ -4313,10 +5192,10 @@ function PlantComparisonSection({
   const plantOptionLabel = (plantId: string) => `${plantId}${plantId === activePlantId ? ` (${t.activePlant})` : ""}`;
 
   return (
-    <section className="plant-comparison-section">
+    <div className="plant-comparison-view">
+      <section className="plant-comparison-section">
       <div className="section-heading">
         <div>
-          <h2>{t.plantComparison}</h2>
           <p>{t.comparisonHint}</p>
         </div>
         <div className="segmented plant-comparison-mode" aria-label={t.plantComparison}>
@@ -4331,45 +5210,59 @@ function PlantComparisonSection({
         {plantComparisonMode === "monthly" ? (
           <label>
             <span>{t.compareYear}</span>
-            <select value={plantComparisonYear} onChange={(event) => setPlantComparisonYear(event.target.value)}>
-              {plantComparisonYearOptions.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
+            <div className="plant-comparison-select-wrap">
+              <select value={plantComparisonYear} onChange={(event) => setPlantComparisonYear(event.target.value)}>
+                {plantComparisonYearOptions.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
           </label>
         ) : (
           <label>
             <span>{t.compareMonth}</span>
-            <select value={plantComparisonMonth} onChange={(event) => setPlantComparisonMonth(event.target.value)}>
-              {plantComparisonMonthOptions.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <div className="plant-comparison-select-wrap">
+              <select value={plantComparisonMonth} onChange={(event) => setPlantComparisonMonth(event.target.value)}>
+                {plantComparisonMonthOptions.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </label>
         )}
         <label>
-          <span>{t.compareFirstPlant}</span>
-          <select value={firstPlantId} onChange={(event) => setFirstPlantId(event.target.value)}>
-            {availablePlantIds.map((plantId) => (
-              <option key={plantId} value={plantId}>
-                {plantOptionLabel(plantId)}
-              </option>
-            ))}
-          </select>
+          <span>
+            {t.compareFirstPlant}
+            {firstPlantUpdateLabel ? <small className="plant-comparison-update-label"> {firstPlantUpdateLabel}</small> : null}
+          </span>
+          <div className="plant-comparison-select-wrap">
+            <select value={firstPlantId} onChange={(event) => setFirstPlantId(event.target.value)}>
+              {availablePlantIds.map((plantId) => (
+                <option key={plantId} value={plantId}>
+                  {plantOptionLabel(plantId)}
+                </option>
+              ))}
+            </select>
+          </div>
         </label>
         <label>
-          <span>{t.compareSecondPlant}</span>
-          <select value={secondPlantId} onChange={(event) => setSecondPlantId(event.target.value)}>
-            {availablePlantIds.map((plantId) => (
-              <option key={plantId} value={plantId}>
-                {plantOptionLabel(plantId)}
-              </option>
-            ))}
-          </select>
+          <span>
+            {t.compareSecondPlant}
+            {secondPlantUpdateLabel ? <small className="plant-comparison-update-label"> {secondPlantUpdateLabel}</small> : null}
+          </span>
+          <div className="plant-comparison-select-wrap">
+            <select value={secondPlantId} onChange={(event) => setSecondPlantId(event.target.value)}>
+              {availablePlantIds.map((plantId) => (
+                <option key={plantId} value={plantId}>
+                  {plantOptionLabel(plantId)}
+                </option>
+              ))}
+            </select>
+          </div>
         </label>
         <button
           type="button"
@@ -4382,6 +5275,7 @@ function PlantComparisonSection({
         </button>
       </div>
       {error ? <small className="negative">{error}</small> : null}
+      </section>
       <PlantPeriodComparisonCharts
         plants={displayedResult?.plants ?? []}
         mode={plantComparisonMode}
@@ -4391,20 +5285,7 @@ function PlantComparisonSection({
         lang={lang}
         onDeltaInfo={onDeltaInfo}
       />
-      {comparisonUpdated.length ? (
-        <div className="plant-comparison-updated">
-          <small>{t.updated}:</small>
-          <ul>
-            {comparisonUpdated.map((plant) => (
-              <li key={plant.plantId}>
-                <span>{plant.plantId}</span>
-                <span>{plant.updated}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </section>
+    </div>
   );
 }
 
@@ -4502,17 +5383,12 @@ function PlantPeriodComparisonCharts({
   ];
 
   return (
-    <div className="plant-comparison-chart-grid">
+    <section className="chart-grid plant-comparison-chart-grid">
       {items.map((item) => (
         <article className="plant-comparison-chart chart-panel" key={item.title}>
-          <div className="chart-head plant-line-chart-head">
-            <h3>{item.title}</h3>
-            <div className="legend">
-              {periodPlants.map((plant, index) => (
-                <span key={plant.plantId}>
-                  <i style={{ background: comparisonLineColors[index % comparisonLineColors.length] }} /> {plant.plantId}
-                </span>
-              ))}
+          <div className="chart-head chart-head-without-legend">
+            <div className="chart-title">
+              <h2>{item.title}</h2>
             </div>
           </div>
           <PlantPeriodLineChart
@@ -4531,7 +5407,7 @@ function PlantPeriodComparisonCharts({
           />
         </article>
       ))}
-    </div>
+    </section>
   );
 }
 
@@ -4569,20 +5445,29 @@ function PlantPeriodLineChart({
     const keys = [...new Set(plants.flatMap((plant) => plant.rows.map((row) => dateKey(row.date))))].sort();
     return isMobile ? keys.reverse() : keys;
   }, [isMobile, plants]);
-  const width = chartWidthForItemCount(periodKeys.length, isMobile);
+  const latestPeriod = [...periodKeys].sort().at(-1);
+  const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(
+    isMobile,
+    true,
+    periodKeys.length,
+    periodKeys[0],
+    latestPeriod,
+  );
   const height = 280;
-  const pad = { left: 56, right: 22, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
+  const pad = { left: 40, right: 0, top: 18, bottom: 42 };
+  const dimensions = chartDimensionsForItemCount(periodKeys.length, isMobile, true, pad.left, pad.right, chartViewportWidth);
+  const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
-  const band = chartBand(innerW, periodKeys.length);
-  const plotWidth = Math.min(innerW, band * Math.max(periodKeys.length, 1));
-  const plotStart = pad.left;
+  const band = dimensions.band;
+  const plotStart = dimensions.plotStart;
   const values = plants.flatMap((plant) => plant.rows.map(value)).filter((item) => Number.isFinite(item));
+  const usesMwhAxis = unit === energyUnit(lang) && values.some(shouldDisplayMwh);
   const rawMin = Math.min(...values, 0);
   const rawMax = Math.max(...values, 1);
   const spread = rawMax - rawMin || 1;
   const min = rawMin < 0 ? rawMin - spread * 0.04 : 0;
   const max = rawMax + spread * 0.04;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => min + (max - min) * tick);
   const x = (date: string) => {
     const index = Math.max(0, periodKeys.indexOf(date));
     return plotStart + index * band + band / 2;
@@ -4670,28 +5555,23 @@ function PlantPeriodLineChart({
       ),
     [capacityByPlant, capacityContext, deltaByPeriod, format, higherIsBetter, invertDeltaSign, lang, metricTitle, mode, periodKeys, plants, rowByPlantAndDay, value],
   );
-  const latestPeriod = [...periodKeys].sort().at(-1);
-  const { selection, target } = useChartInspector(latestPeriod ? inspectors.get(latestPeriod) ?? null : null);
-  const selectedPeriod = [...inspectors.entries()].find(([, inspector]) => inspector.month === selection?.month)?.[0];
+  const { selection, selectedKey: selectedPeriod, target } = useChartInspector(inspectors, latestPeriod);
 
   return (
     <>
-      <div className={`${chartScrollClassName(periodKeys.length)} plant-line-chart-scroll`}>
-        <svg className="chart plant-line-chart" viewBox={`0 0 ${width} ${height}`} role="img">
-          <g className="grid">
-            {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-              const tickValue = min + (max - min) * tick;
-              const tickY = y(tickValue);
-              return (
-                <g key={tick}>
-                  <line x1={pad.left} x2={width - pad.right} y1={tickY} y2={tickY} />
-                  <text x={pad.left - 10} y={tickY + 4} textAnchor="end">
-                    {formatAxisValue(tickValue)}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
+      <div className="fixed-axis-chart-wrap">
+        <FixedChartAxis
+          ticks={ticks}
+          topForValue={(tick) => ((y(tick) - pad.top) / innerH) * 100}
+          formatValue={usesMwhAxis ? (tick) => formatNumber(tick / 1000, 2) : undefined}
+        />
+        <div className={`${chartScrollClassName(periodKeys.length, true)} plant-line-chart-scroll`} ref={chartScrollRef}>
+          <svg className="chart plant-line-chart" viewBox={`0 0 ${width} ${height}`} role="img" style={{ width, maxWidth: "none" }}>
+            <g className="grid">
+              {ticks.map((tick) => (
+                <line key={tick} x1={0} x2={width} y1={y(tick)} y2={y(tick)} />
+              ))}
+            </g>
           {min < 0 && max > 0 ? <line className="plant-line-zero" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} /> : null}
           {plants.map((plant, plantIndex) => {
             const points = plant.rows
@@ -4723,21 +5603,16 @@ function PlantPeriodLineChart({
             const inspector = inspectors.get(periodKey);
             const date = new Date(`${periodKey}T00:00:00`);
             const xPosition = x(periodKey);
-            const targetWidth = Math.min(
-              innerW,
-              isMobile ? 56 : 72,
-              Math.max(isMobile ? 24 : 18, band * 0.72),
-            );
-            const targetX = Math.min(width - pad.right - targetWidth, Math.max(pad.left, xPosition - targetWidth / 2));
+            const targetX = plotStart + periodKeys.indexOf(periodKey) * band;
             return (
               <g key={periodKey}>
                 {inspector && (
                   <MonthTarget
                     x={targetX}
                     y={pad.top}
-                    width={targetWidth}
+                    width={band}
                     height={innerH}
-                    selection={inspector}
+                    periodKey={periodKey}
                     active={selectedPeriod === periodKey}
                     target={target}
                   />
@@ -4748,10 +5623,11 @@ function PlantPeriodLineChart({
               </g>
             );
           })}
-          <text x={width - pad.right} y={pad.top + 4} textAnchor="end" className="plant-line-unit">
-            {unit}
-          </text>
-        </svg>
+            <text x={width - pad.right} y={pad.top + 4} textAnchor="end" className="plant-line-unit">
+              {usesMwhAxis ? "MWh" : unit}
+            </text>
+          </svg>
+        </div>
       </div>
       <ChartInspector
         selection={selection}
@@ -4937,35 +5813,42 @@ function ComparisonBar({
   );
 }
 
-function KpiCard({
-  icon,
-  label,
-  value,
-  detail,
-  tone,
-  infoLabel,
-  onInfo,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  detail: React.ReactNode;
-  tone: string;
-  infoLabel?: string;
-  onInfo?: () => void;
-}) {
+interface ChartSummaryItem {
+  readonly label: string;
+  readonly value: React.ReactNode;
+}
+
+type ChartLegendItem = readonly [
+  label: string,
+  color: string,
+  value?: React.ReactNode,
+  infoLabel?: string,
+  onInfo?: () => void,
+];
+
+interface ChartSummaryProps {
+  readonly items: readonly ChartSummaryItem[];
+  readonly infoLabel?: string;
+  readonly onInfo?: () => void;
+}
+
+function ChartSummary({ items, infoLabel, onInfo }: ChartSummaryProps) {
   return (
-    <article className={`kpi-card ${tone}`}>
-      {onInfo && (
-        <button type="button" className="kpi-info-button" onClick={onInfo} aria-label={infoLabel}>
-          <Info size={16} />
-        </button>
-      )}
-      <div className="kpi-icon">{icon}</div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </article>
+    <dl className="chart-summary">
+      {items.map((item, index) => (
+        <div key={`${item.label}-${index}`}>
+          <dt>{item.label}</dt>
+          <dd>
+            <strong>{item.value}</strong>
+            {index === 0 && onInfo ? (
+              <button type="button" className="chart-summary-info-button" aria-label={infoLabel ?? item.label} onClick={onInfo}>
+                <Info size={14} />
+              </button>
+            ) : null}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -4973,81 +5856,130 @@ function ChartPanel({
   title,
   legend,
   children,
+  className,
+  headerActions,
   infoLabel,
   onInfo,
+  infoDisabled = false,
+  summary,
+  summaryInfoLabel,
+  onSummaryInfo,
+  totalSummary,
+  totalSummaryLoading = false,
+  totalSummarySkeletonItemCount = 2,
+  totalSummarySkeletonColumnCount = 1,
 }: {
-  title: string;
-  legend: [string, string][];
-  children: React.ReactNode;
-  infoLabel?: string;
-  onInfo?: () => void;
+  readonly title: string;
+  readonly legend: readonly ChartLegendItem[];
+  readonly children: React.ReactNode;
+  readonly className?: string;
+  readonly headerActions?: React.ReactNode;
+  readonly infoLabel?: string;
+  readonly onInfo?: () => void;
+  readonly infoDisabled?: boolean;
+  readonly summary?: readonly ChartSummaryItem[];
+  readonly summaryInfoLabel?: string;
+  readonly onSummaryInfo?: () => void;
+  readonly totalSummary?: ChartInspectorSelection;
+  readonly totalSummaryLoading?: boolean;
+  readonly totalSummarySkeletonItemCount?: number;
+  readonly totalSummarySkeletonColumnCount?: number;
 }) {
   return (
-    <article className="chart-panel">
-      <div className="chart-head">
-        <div>
-          <h2 className={onInfo ? "heading-with-info" : undefined}>
-            <span>{title}</span>
-            {onInfo && (
-              <button type="button" className="section-info-button" aria-label={infoLabel ?? title} onClick={onInfo}>
-                <Info size={16} />
-              </button>
-            )}
-          </h2>
+    <article className={`chart-panel${className ? ` ${className}` : ""}`}>
+      <div className={`chart-head${summary ? " chart-head-with-summary" : ""}${legend.length ? "" : " chart-head-without-legend"}`}>
+        <div className="chart-title">
+          <h2>{title}</h2>
+          {headerActions || onInfo ? (
+            <div className="chart-title-actions">
+              {headerActions}
+              {onInfo ? (
+                <button type="button" className="chart-summary-info-button chart-panel-info-button" aria-label={infoLabel ?? title} onClick={onInfo} disabled={infoDisabled}>
+                  <Info size={14} />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
-        <div className="legend">
-          {legend.map(([label, color]) => (
-            <span key={label}>
-              <i style={{ background: color }} /> {label}
-            </span>
-          ))}
-        </div>
+        {summary ? <ChartSummary items={summary} infoLabel={summaryInfoLabel} onInfo={onSummaryInfo} /> : null}
+        {legend.length ? (
+          <div className={`legend${legend.some(([, , value]) => value !== undefined) ? " legend-with-values" : ""}`}>
+            {legend.map(([label, color, value, infoLabel, onInfo]) => (
+              <span className="legend-item" key={label}>
+                <i style={{ background: color }} />
+                <span className="legend-label">{label}</span>
+                {value !== undefined ? <strong>{value}</strong> : null}
+                {onInfo ? (
+                  <button type="button" className="legend-info-button" aria-label={infoLabel ?? label} onClick={onInfo}>
+                    <Info size={14} />
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
       {children}
+      {totalSummaryLoading ? (
+        <ChartInspectorSkeleton
+          itemCount={totalSummarySkeletonItemCount}
+          columnCount={totalSummarySkeletonColumnCount}
+        />
+      ) : totalSummary ? (
+        <ChartInspector selection={totalSummary} hint="" />
+      ) : null}
     </article>
   );
 }
 
-function PvSpecList({
+function PvSpecTable({
   field,
   t,
   lang,
   showLocation,
+  title,
 }: {
   readonly field: PvMetadata;
   readonly t: Record<string, string>;
   readonly lang: Lang;
   readonly showLocation: boolean;
+  readonly title: string;
 }) {
-  const rows = [
-    [t.power, formatKwp(field.power / 1000, lang)],
-    [t.azimuth, `${formatNumber(field.azimuth, 0, 0)}°`],
-    [t.slope, `${formatNumber(field.slope, 0, 0)}°`],
-    [t.loss, `${formatNumber(field.loss, 2, 0)}%`],
-    [t.mounting, formatMounting(field.mounting, lang)],
-    [t.elevation, `${formatNumber(field.elevation, 0, 0)} m`],
-    ...(showLocation ? [[
-      t.location,
-      <a
-        className="pv-location-link"
-        href={`https://www.google.com/maps?q=${field.lat},${field.lng}`}
-        target="_blank"
-        rel="noreferrer"
-      >
-        {formatNumber(field.lat, 6, 4)}, {formatNumber(field.lng, 6, 4)}
-      </a>,
-    ] as const] : []),
-  ] as const;
+  const location = `${formatNumber(field.lat, 6, 4)}, ${formatNumber(field.lng, 6, 4)}`;
+  const items: readonly ChartInspectorItem[] = [
+    { label: t.power, color: colors.amber, value: formatKwp(field.power / 1000, lang), cells: [formatKwp(field.power / 1000, lang)] },
+    { label: t.azimuth, color: colors.blue, value: `${formatNumber(field.azimuth, 0, 0)}°`, cells: [`${formatNumber(field.azimuth, 0, 0)}°`] },
+    { label: t.slope, color: colors.indigo, value: `${formatNumber(field.slope, 0, 0)}°`, cells: [`${formatNumber(field.slope, 0, 0)}°`] },
+    { label: t.loss, color: colors.rose, value: `${formatNumber(field.loss, 2, 0)}%`, cells: [`${formatNumber(field.loss, 2, 0)}%`] },
+    { label: t.mounting, color: colors.green, value: formatMounting(field.mounting, lang), cells: [formatMounting(field.mounting, lang)] },
+    { label: t.elevation, color: colors.ink, value: `${formatNumber(field.elevation, 0, 0)} m`, cells: [`${formatNumber(field.elevation, 0, 0)} m`] },
+    ...(showLocation ? [{
+      label: t.location,
+      color: colors.ink,
+      value: location,
+      cells: [
+        <a
+          className="pv-location-link"
+          href={`https://www.google.com/maps?q=${field.lat},${field.lng}`}
+          target="_blank"
+          rel="noreferrer"
+          key="location"
+        >
+          {location}
+        </a>,
+      ],
+    }] : []),
+  ];
 
   return (
-    <dl className="info-list pv-spec-list">
-      {rows.map(([label, value]) => (
-        <div key={label}>
-          <dt>{label}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
-    </dl>
+    <ChartInspector
+      hint=""
+      selection={{
+        month: title,
+        columns: [t.value],
+        items,
+      }}
+    />
   );
 }
 
@@ -5078,63 +6010,76 @@ function axisTicksWithZero(min: number, max: number, height: number) {
 
 interface ChartInspectorItem {
   readonly label: string;
-  readonly value: string;
+  readonly subLabel?: string;
+  readonly value: React.ReactNode;
+  readonly cells?: readonly React.ReactNode[];
+  readonly cellTitles?: readonly (string | undefined)[];
+  readonly cellClassNames?: readonly (string | undefined)[];
   readonly color: string;
   readonly wide?: boolean;
 }
 
 interface ChartInspectorSelection {
   readonly month: string;
+  readonly hideHeader?: boolean;
   readonly delta?: string;
   readonly deltaTone?: string;
   readonly infoLabel?: string;
   readonly infoAction?: () => void;
   readonly deltaInfoTitle?: string;
   readonly deltaInfo?: React.ReactNode;
+  readonly columns?: readonly string[];
+  readonly columnWidths?: readonly string[];
   readonly items: readonly ChartInspectorItem[];
 }
 
-function useChartInspector(initialSelection: ChartInspectorSelection | null) {
-  const [selection, setSelection] = useState<ChartInspectorSelection | null>(initialSelection);
+function useChartInspector(inspectors: ReadonlyMap<string, ChartInspectorSelection>, initialKey?: string) {
+  const [selectedKey, setSelectedKey] = useState<string | null>(initialKey ?? null);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  const previousInitialMonth = useRef(initialSelection?.month ?? null);
+  const previousInitialKey = useRef(initialKey ?? null);
   useEffect(() => {
-    const initialMonth = initialSelection?.month ?? null;
-    setSelection((current) => {
-      if (previousInitialMonth.current !== initialMonth) {
-        previousInitialMonth.current = initialMonth;
-        return initialSelection;
+    const nextInitialKey = initialKey ?? null;
+    setSelectedKey((current) => {
+      if (previousInitialKey.current !== nextInitialKey) {
+        previousInitialKey.current = nextInitialKey;
+        return nextInitialKey;
       }
 
-      return current ?? initialSelection;
+      return current && inspectors.has(current) ? current : nextInitialKey;
     });
-  }, [initialSelection]);
-  const target = (nextSelection: ChartInspectorSelection) => ({
-    role: "button",
-    tabIndex: 0,
-    className: "chart-hit chart-month-target",
-    "aria-label": `${nextSelection.month}: ${nextSelection.items.map((item) => `${item.label} ${item.value}`).join(", ")}`,
-    onPointerDown: (event: React.PointerEvent<SVGElement>) => {
-      pointerStart.current = { x: event.clientX, y: event.clientY };
-    },
-    onPointerUp: (event: React.PointerEvent<SVGElement>) => {
-      const start = pointerStart.current;
-      pointerStart.current = null;
-      if (!start) return;
-      const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-      if (moved <= 8) setSelection(nextSelection);
-    },
-    onPointerCancel: () => {
-      pointerStart.current = null;
-    },
-    onKeyDown: (event: React.KeyboardEvent<SVGElement>) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        setSelection(nextSelection);
-      }
-    },
-  });
-  return { selection, target };
+  }, [initialKey, inspectors]);
+  const selection = selectedKey ? inspectors.get(selectedKey) ?? null : null;
+  const target = (nextKey: string) => {
+    const nextSelection = inspectors.get(nextKey);
+    return {
+      role: "button",
+      tabIndex: 0,
+      className: "chart-hit chart-month-target",
+      "aria-label": nextSelection
+        ? `${nextSelection.month}: ${nextSelection.items.map((item) => `${item.label} ${item.value}`).join(", ")}`
+        : nextKey,
+      onPointerDown: (event: React.PointerEvent<SVGElement>) => {
+        pointerStart.current = { x: event.clientX, y: event.clientY };
+      },
+      onPointerUp: (event: React.PointerEvent<SVGElement>) => {
+        const start = pointerStart.current;
+        pointerStart.current = null;
+        if (!start) return;
+        const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+        if (moved <= 8) setSelectedKey(nextKey);
+      },
+      onPointerCancel: () => {
+        pointerStart.current = null;
+      },
+      onKeyDown: (event: React.KeyboardEvent<SVGElement>) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          setSelectedKey(nextKey);
+        }
+      },
+    };
+  };
+  return { selection, selectedKey, target };
 }
 
 function MonthTarget({
@@ -5142,7 +6087,7 @@ function MonthTarget({
   y,
   width,
   height,
-  selection,
+  periodKey,
   active,
   target,
 }: {
@@ -5150,13 +6095,13 @@ function MonthTarget({
   y: number;
   width: number;
   height: number;
-  selection: ChartInspectorSelection;
+  periodKey: string;
   active: boolean;
-  target: (selection: ChartInspectorSelection) => React.SVGProps<SVGRectElement>;
+  target: (periodKey: string) => React.SVGProps<SVGRectElement>;
 }) {
   return (
     <rect
-      {...target(selection)}
+      {...target(periodKey)}
       className={`chart-hit chart-month-target${active ? " active" : ""}`}
       x={x}
       y={y}
@@ -5164,6 +6109,23 @@ function MonthTarget({
       height={height}
       rx="5"
     />
+  );
+}
+
+function StackedDateValue({
+  date,
+  duration,
+  durationBold = true,
+}: {
+  readonly date: string;
+  readonly duration?: string;
+  readonly durationBold?: boolean;
+}) {
+  return (
+    <span className="stacked-date-value" aria-label={[date, duration].filter(Boolean).join(", ")}>
+      <strong>{date}</strong>
+      {duration ? <span className={durationBold ? "is-bold" : undefined}>{duration}</span> : null}
+    </span>
   );
 }
 
@@ -5178,40 +6140,72 @@ function ChartInspector({
 }) {
   if (!selection) return <div className="chart-inspector chart-inspector-empty">{hint}</div>;
   const hasInfo = Boolean(selection.infoAction || (selection.deltaInfo && onDeltaInfo));
+  const columns = selection.columns ?? [];
   return (
     <div className={`chart-inspector${hasInfo ? " has-delta-info" : ""}`}>
-      <strong className="chart-inspector-period">
-        <span>{selection.month}</span>
-        {selection.delta ? <em className={selection.deltaTone}>{selection.delta}</em> : null}
-        {hasInfo ? (
-          <button
-            type="button"
-            className="table-info-button chart-inspector-info"
-            aria-label={selection.infoLabel ?? "Delta details"}
-            onClick={() => {
-              if (selection.infoAction) {
-                selection.infoAction();
-                return;
-              }
-              if (selection.deltaInfo && onDeltaInfo) {
-                onDeltaInfo(selection.deltaInfoTitle ?? selection.month, selection.deltaInfo);
-              }
-            }}
-          >
-            <Info size={12} />
-          </button>
+      <table className={`chart-inspector-table${columns.length <= 1 ? " is-two-column" : ""}`}>
+        {selection.columnWidths ? (
+          <colgroup>
+            {selection.columnWidths.map((width, index) => <col style={{ width }} key={`${width}-${index}`} />)}
+          </colgroup>
+        ) : columns.length <= 1 ? (
+          <colgroup>
+            <col className="chart-inspector-label-column" />
+            <col className="chart-inspector-value-column" />
+          </colgroup>
         ) : null}
-      </strong>
-      <div className="chart-inspector-items">
-        {selection.items.map((item) => (
-          <React.Fragment key={`${item.label}-${item.color}`}>
-            <span className="chart-inspector-label">
-              <i style={{ background: item.color }} /> {item.label}
-            </span>
-            <b>{item.value}</b>
-          </React.Fragment>
-        ))}
-      </div>
+        {!selection.hideHeader ? (
+          <thead>
+            <tr>
+              <th colSpan={columns.length ? 1 : 2}>
+                <span className="chart-inspector-period">
+                  <span>{selection.month}</span>
+                  {selection.delta ? <em className={selection.deltaTone}>{selection.delta}</em> : null}
+                </span>
+                {hasInfo ? (
+                  <button
+                    type="button"
+                    className="table-info-button chart-inspector-info"
+                    aria-label={selection.infoLabel ?? "Delta details"}
+                    onClick={() => {
+                      if (selection.infoAction) {
+                        selection.infoAction();
+                        return;
+                      }
+                      if (selection.deltaInfo && onDeltaInfo) {
+                        onDeltaInfo(selection.deltaInfoTitle ?? selection.month, selection.deltaInfo);
+                      }
+                    }}
+                  >
+                    <Info size={12} />
+                  </button>
+                ) : null}
+              </th>
+              {columns.map((column) => <th scope="col" key={column}>{column}</th>)}
+            </tr>
+          </thead>
+        ) : null}
+        <tbody>
+          {selection.items.map((item) => (
+            <tr key={`${item.label}-${item.color}`}>
+              <th scope="row">
+                <span className="chart-inspector-label">
+                  <i style={{ background: item.color }} />
+                  <span className={`chart-inspector-label-text${item.subLabel ? " has-sub-label" : ""}`}>
+                    <span>{item.label}</span>
+                    {item.subLabel ? <small>{item.subLabel}</small> : null}
+                  </span>
+                </span>
+              </th>
+              {columns.length
+                ? columns.map((column, index) => (
+                    <td key={column} title={item.cellTitles?.[index]} className={item.cellClassNames?.[index]}>{item.cells?.[index] ?? ""}</td>
+                  ))
+                : <td>{item.value}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -5220,14 +6214,33 @@ function newestFirst(rows: readonly MonthRow[]) {
   return [...rows].reverse();
 }
 
+interface FixedChartAxisProps {
+  readonly ticks: readonly number[];
+  readonly topForValue: (value: number) => number;
+  readonly currency?: Currency;
+  readonly formatValue?: (value: number) => string;
+}
+
+function FixedChartAxis({ ticks, topForValue, currency, formatValue }: FixedChartAxisProps) {
+  return (
+    <div className="fixed-chart-axis" aria-hidden="true">
+      {ticks.map((tick, index) => (
+        <span key={`${tick}-${index}`} style={{ top: `${topForValue(tick)}%` }}>
+          {formatValue ? formatValue(tick) : formatAxisValue(tick, currency)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function ProductionExportChart({
   rows,
   projection,
-  onInfo,
+  fixedBarDensity = false,
 }: {
   readonly rows: readonly MonthRow[];
   readonly projection?: ProductionProjection | null;
-  readonly onInfo?: () => void;
+  readonly fixedBarDensity?: boolean;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
@@ -5242,52 +6255,83 @@ function ProductionExportChart({
       new Map(
         displayRows.map((row) => {
           const expected = expectedByMonth.get(row.month);
+          const expectedValue = expected ? formatChartEnergy(expected, "down", lang) : "";
+          const actualValue = formatChartEnergy(row.production, "down", lang);
+          const actualPerformance =
+            expected && Number.isFinite(expected) && expected > 0
+              ? `${formatNumber((row.production / expected) * 100, 2, 2)}%`
+              : "";
+          const exported = exportTotal(row);
+          const exportValue = formatChartEnergy(exported, "down", lang);
+          const exportPerformance = row.production
+            ? `${formatNumber((exported / row.production) * 100, 2, 2)}%`
+            : "";
           return [
             row.month,
             {
               month: formatPeriodLabel(row, lang),
-              infoLabel: onInfo ? `${t.production} PVGIS` : undefined,
-              infoAction: onInfo,
+              columns: [t.value, t.performance],
               items: [
-              { label: t.production, value: formatKwh(row.production, lang), color: colors.amber },
-              { label: t.export, value: formatKwh(exportTotal(row), lang), color: colors.green },
-              ...(expected ? [{ label: t.expected, value: formatKwh(expected, lang), color: colors.blue }] : []),
+                ...(expected
+                  ? [{ label: t.expected, value: expectedValue, cells: [expectedValue, ""], color: colors.blue }]
+                  : []),
+                {
+                  label: t.actual,
+                  value: actualPerformance ? `${actualValue} (${actualPerformance})` : actualValue,
+                  cells: [actualValue, actualPerformance],
+                  color: colors.amber,
+                },
+                {
+                  label: t.export,
+                  value: exportPerformance ? `${exportValue} (${exportPerformance})` : exportValue,
+                  cells: [exportValue, exportPerformance],
+                  color: colors.green,
+                },
               ],
             },
           ];
         }),
       ),
-    [displayRows, expectedByMonth, lang, onInfo, t.export, t.expected, t.production],
+    [displayRows, expectedByMonth, lang, t.actual, t.export, t.expected, t.performance, t.value],
   );
   const latestRow = rows.at(-1);
-  const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = chartWidthForItemCount(displayRows.length, isMobile);
+  const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
+  const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
   const height = 300;
-  const pad = { left: 48, right: 18, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
+  const pad = { left: 40, right: 18, top: 18, bottom: 42 };
+  const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
+  const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
   const expectedValues = displayRows
     .map((row) => expectedByMonth.get(row.month))
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
   const max = axisMax(displayRows.flatMap((row) => [row.production, exportTotal(row), expectedByMonth.get(row.month) ?? 0]));
-  const band = chartBand(innerW, displayRows.length);
-  const bar = pairedChartBarWidth(band, 14, 0.24);
+  const band = dimensions.band;
+  const bar = PAIRED_CHART_BAR_WIDTH;
+  const plotStart = dimensions.plotStart;
   const y = (value: number) => pad.top + innerH - (value / max) * innerH;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => max * tick);
   const expectedPoints = displayRows
     .map((row, index) => {
       const expected = expectedByMonth.get(row.month);
-      return expected ? `${pad.left + band * index + band / 2},${y(expected)}` : "";
+      return expected ? `${plotStart + band * index + band / 2},${y(expected)}` : "";
     })
     .filter(Boolean)
     .join(" ");
 
   return (
     <>
-      <div className={chartScrollClassName(displayRows.length)}>
-        <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
-          <Grid width={width} height={height} pad={pad} max={max} />
+      <div className="fixed-axis-chart-wrap">
+        <FixedChartAxis
+          ticks={ticks}
+          topForValue={(value) => ((y(value) - pad.top) / innerH) * 100}
+          formatValue={shouldDisplayMwh(max) ? (value) => formatNumber(value / 1000, 2) : undefined}
+        />
+        <div className={chartScrollClassName(displayRows.length, fixedBarDensity)} ref={chartScrollRef}>
+          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" style={fixedBarDensity ? { width, maxWidth: "none" } : undefined}>
+            <Grid width={width} height={height} pad={pad} max={max} />
           {displayRows.map((row, index) => {
-            const x = pad.left + band * index + band / 2;
+            const x = plotStart + band * index + band / 2;
             const inspector = inspectors.get(row.month);
             return (
               <g key={row.month}>
@@ -5313,8 +6357,8 @@ function ProductionExportChart({
                     y={pad.top}
                     width={band}
                     height={innerH}
-                    selection={inspector}
-                    active={selection?.month === inspector.month}
+                    periodKey={row.month}
+                    active={selectedKey === row.month}
                     target={target}
                   />
                 )}
@@ -5341,7 +6385,7 @@ function ProductionExportChart({
                 return (
                   <circle
                     key={`${row.month}-expected`}
-                    cx={pad.left + band * index + band / 2}
+                    cx={plotStart + band * index + band / 2}
                     cy={y(expected)}
                     r="4"
                     fill="var(--panel)"
@@ -5353,7 +6397,8 @@ function ProductionExportChart({
               })}
             </>
           )}
-        </svg>
+          </svg>
+        </div>
       </div>
       <ChartInspector selection={selection} hint={t.tapBar} />
     </>
@@ -5364,25 +6409,25 @@ interface FinanceRoiPoint {
   readonly row: MonthRow;
   readonly savings: number;
   readonly payment: number;
+  readonly roiPct: number;
   readonly cumulative: number;
   readonly cumulativePct: number;
-  readonly spending: number;
 }
 
 interface FinanceRoiChartProps {
   readonly rows: readonly MonthRow[];
   readonly currency: Currency;
   readonly investmentByMonth: ReadonlyMap<string, number>;
-  readonly spendingMoneyByMonth: ReadonlyMap<string, number>;
-  readonly onInfo: (row: MonthRow) => void;
+  readonly onSelectionChange: (row: MonthRow | null) => void;
+  readonly fixedBarDensity?: boolean;
 }
 
 function FinanceRoiChart({
   rows,
   currency,
   investmentByMonth,
-  spendingMoneyByMonth,
-  onInfo,
+  onSelectionChange,
+  fixedBarDensity = false,
 }: FinanceRoiChartProps) {
   const lang = useLanguage();
   const t = i18n[lang];
@@ -5392,50 +6437,87 @@ function FinanceRoiChart({
       rows.reduce<FinanceRoiPoint[]>((items, row) => {
         const savings = moneyFromUah(row.electricitySavings, currency, row.usdRate);
         const payment = moneyFromUah(row.electricityPayment, currency, row.usdRate);
-        const cumulative = (items.at(-1)?.cumulative ?? 0) + rowRoiMoney(row, currency);
+        const roi = rowRoiMoney(row, currency);
+        const cumulative = (items.at(-1)?.cumulative ?? 0) + roi;
         const investment = investmentByMonth.get(row.month) ?? 0;
-        const spending = spendingMoneyByMonth.get(row.month) ?? 0;
+        const roiPct = investment > 0 ? (roi / investment) * 100 : 0;
         const cumulativePct = investment > 0 ? (cumulative / investment) * 100 : 0;
-        items.push({ row, savings, payment, cumulative, cumulativePct, spending });
+        items.push({ row, savings, payment, roiPct, cumulative, cumulativePct });
         return items;
       }, []),
-    [currency, investmentByMonth, rows, spendingMoneyByMonth],
+    [currency, investmentByMonth, rows],
   );
   const displayRows = useMemo(() => (isMobile ? [...chronologicalRows].reverse() : chronologicalRows), [chronologicalRows, isMobile]);
   const inspectors = useMemo(
     () =>
       new Map(
-        displayRows.map((item) => [
-          item.row.month,
-          {
-            month: formatPeriodLabel(item.row, lang),
-            infoLabel: item.spending > 0 ? t.expenses : undefined,
-            infoAction: item.spending > 0 ? () => onInfo(item.row) : undefined,
-            items: [
-              { label: t.savings, value: formatDisplayMoney(item.savings, currency, lang), color: colors.mint },
-              {
-                label: t.payment,
-                value: formatDisplayMoney(item.payment, currency, lang),
-                color: item.payment >= 0 ? colors.green : colors.rose,
-              },
-              {
-                label: `${t.cumulative} ${t.roi}`,
-                value: `${formatDisplayMoney(item.cumulative, currency, lang)} (${formatNumber(item.cumulativePct)}%)`,
-                color: colors.ink,
-                wide: true,
-              },
-            ],
-          },
-        ]),
+        displayRows.map((item) => {
+          const savingsValue = formatDisplayMoney(item.savings, currency, lang);
+          const savingsPerformance = `${formatNumber(item.roiPct)}%`;
+          const paymentValue = formatDisplayMoney(item.payment, currency, lang);
+          const paymentPerformance = item.savings
+            ? `${formatNumber((item.payment / item.savings) * 100, 2, 2)}%`
+            : "";
+          const consumptionValue = formatDisplayMoney(item.savings - item.payment, currency, lang);
+          const consumptionPerformance = item.savings
+            ? `${formatNumber(((item.savings - item.payment) / item.savings) * 100, 2, 2)}%`
+            : "";
+          return [
+            item.row.month,
+            {
+              month: formatPeriodLabel(item.row, lang),
+              columns: [t.value, t.performance],
+              items: [
+                {
+                  label: t.savings,
+                  value: `${savingsValue} (${savingsPerformance})`,
+                  cells: [savingsValue, savingsPerformance],
+                  cellTitles: [undefined, t.monthlyRoiPerformanceTitle],
+                  color: colors.mint,
+                },
+                {
+                  label: t.payment,
+                  value: paymentPerformance ? `${paymentValue} (${paymentPerformance})` : paymentValue,
+                  cells: [paymentValue, paymentPerformance],
+                  cellTitles: [undefined, t.monthlyPaymentPerformanceTitle],
+                  color: item.payment >= 0 ? colors.green : colors.rose,
+                },
+                {
+                  label: t.consumption,
+                  value: consumptionPerformance ? `${consumptionValue} (${consumptionPerformance})` : consumptionValue,
+                  cells: [consumptionValue, consumptionPerformance],
+                  cellTitles: [undefined, t.monthlyConsumptionPerformanceTitle],
+                  color: colors.ink,
+                },
+              ],
+            },
+          ];
+        }),
       ),
-    [currency, displayRows, lang, onInfo, t.cumulative, t.expenses, t.payment, t.roi, t.savings],
+    [
+      currency,
+      displayRows,
+      lang,
+      t.consumption,
+      t.monthlyConsumptionPerformanceTitle,
+      t.monthlyPaymentPerformanceTitle,
+      t.monthlyRoiPerformanceTitle,
+      t.payment,
+      t.performance,
+      t.savings,
+      t.value,
+    ],
   );
   const latestRow = rows.at(-1);
-  const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = chartWidthForItemCount(displayRows.length, isMobile);
+  const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
+  useEffect(() => {
+    onSelectionChange(chronologicalRows.find((item) => item.row.month === selectedKey)?.row ?? latestRow ?? null);
+  }, [chronologicalRows, latestRow, onSelectionChange, selectedKey]);
+  const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
   const height = 300;
-  const pad = { left: 70, right: 58, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
+  const pad = { left: 56, right: 40, top: 18, bottom: 42 };
+  const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, pad.right, chartViewportWidth);
+  const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
   const moneyValues = displayRows.flatMap((item) => [item.savings, item.payment]);
   const cumulativePct = displayRows.map((item) => item.cumulativePct);
@@ -5447,8 +6529,9 @@ function FinanceRoiChart({
   const pctMaxValue = Math.max(0, ...cumulativePct);
   const pctMin = pctMinValue < 0 ? -axisMax(cumulativePct.filter((value) => value < 0).map(Math.abs)) : 0;
   const pctMax = pctMaxValue > 0 ? axisMax(cumulativePct.filter((value) => value > 0)) : 1;
-  const band = chartBand(innerW, displayRows.length);
-  const bar = pairedChartBarWidth(band, 13, 0.24);
+  const band = dimensions.band;
+  const bar = PAIRED_CHART_BAR_WIDTH;
+  const plotStart = dimensions.plotStart;
   const moneyY = (value: number) => pad.top + ((moneyMax - value) / (moneyMax - moneyMin || 1)) * innerH;
   const zeroY = moneyY(0);
   const plotBottom = pad.top + innerH;
@@ -5459,32 +6542,31 @@ function FinanceRoiChart({
   const moneyTicks = axisTicksWithZero(moneyMin, moneyMax, innerH);
   const pctTicks = axisTicksWithZero(pctMin, pctMax, innerH);
   const points = cumulativePct
-    .map((value, index) => `${pad.left + band * index + band / 2},${pctY(value)}`)
+    .map((value, index) => `${plotStart + band * index + band / 2},${pctY(value)}`)
     .join(" ");
 
   return (
     <>
       <div className="finance-roi-chart-wrap">
-        <div className={chartScrollClassName(displayRows.length)}>
-          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t.financeAndRoi}>
+        <div className="finance-roi-axis finance-roi-axis-money" aria-hidden="true">
+          {moneyTicks.map((tick) => (
+            <span key={tick} style={{ top: `${((moneyY(tick) - pad.top) / innerH) * 100}%` }}>
+              {formatAxisValue(tick, currency)}
+            </span>
+          ))}
+        </div>
+        <div className={chartScrollClassName(displayRows.length, fixedBarDensity)} ref={chartScrollRef}>
+          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t.financeAndRoi} style={fixedBarDensity ? { width, maxWidth: "none" } : undefined}>
           <g className="grid">
             {moneyTicks.map((tick) => (
               <g key={tick}>
-                <line x1={pad.left} x2={width - pad.right} y1={moneyY(tick)} y2={moneyY(tick)} />
-                <text x={pad.left - 10} y={moneyY(tick) + 4} textAnchor="end">
-                  {formatAxisValue(tick, currency)}
-                </text>
+                <line x1={0} x2={width} y1={moneyY(tick)} y2={moneyY(tick)} />
               </g>
             ))}
           </g>
-          {pctTicks.map((tick) => (
-            <text className="finance-roi-right-axis" key={tick} x={width - pad.right + 10} y={pctY(tick) + 4} textAnchor="start">
-              {formatNumber(tick)}%
-            </text>
-          ))}
           <line x1={pad.left} x2={width - pad.right} y1={zeroY} y2={zeroY} stroke={colors.ink} strokeWidth="1.5" />
           {displayRows.map(({ row, savings, payment }, index) => {
-            const x = pad.left + band * index + band / 2;
+            const x = plotStart + band * index + band / 2;
             const inspector = inspectors.get(row.month);
             const savingsY = moneyY(savings);
             const paymentY = moneyY(payment);
@@ -5495,7 +6577,7 @@ function FinanceRoiChart({
                   y={Math.min(savingsY, zeroY)}
                   width={bar}
                   height={Math.abs(zeroY - savingsY)}
-                  rx="3"
+                  rx="2"
                   fill={colors.mint}
                 />
                 <rect
@@ -5503,7 +6585,7 @@ function FinanceRoiChart({
                   y={Math.min(paymentY, zeroY)}
                   width={bar}
                   height={Math.abs(zeroY - paymentY)}
-                  rx="3"
+                  rx="2"
                   fill={payment >= 0 ? colors.green : colors.rose}
                 />
                 {inspector && (
@@ -5512,8 +6594,8 @@ function FinanceRoiChart({
                     y={pad.top}
                     width={band}
                     height={innerH}
-                    selection={inspector}
-                    active={selection?.month === inspector.month}
+                    periodKey={row.month}
+                    active={selectedKey === row.month}
                     target={target}
                   />
                 )}
@@ -5534,7 +6616,7 @@ function FinanceRoiChart({
           {displayRows.map(({ row, cumulativePct: value }, index) => (
             <circle
               key={`${row.month}-${value}`}
-              cx={pad.left + band * index + band / 2}
+              cx={plotStart + band * index + band / 2}
               cy={pctY(value)}
               r="5"
               fill="var(--panel)"
@@ -5545,7 +6627,7 @@ function FinanceRoiChart({
           ))}
           </svg>
         </div>
-        <div className="finance-roi-mobile-axis" aria-hidden="true">
+        <div className="finance-roi-axis finance-roi-axis-percent" aria-hidden="true">
           {pctTicks.map((tick) => (
             <span key={tick} style={{ top: `${((pctY(tick) - pad.top) / innerH) * 100}%` }}>
               {formatNumber(tick)}%
@@ -5558,7 +6640,19 @@ function FinanceRoiChart({
   );
 }
 
-function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; readonly currency: Currency }) {
+interface MoneyChartProps {
+  readonly rows: readonly MonthRow[];
+  readonly currency: Currency;
+  readonly investmentByPeriod?: ReadonlyMap<string, number>;
+  readonly fixedBarDensity?: boolean;
+}
+
+function MoneyChart({
+  rows,
+  currency,
+  investmentByPeriod,
+  fixedBarDensity = false,
+}: MoneyChartProps) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
@@ -5569,26 +6663,73 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
         displayRows.map((row) => {
           const electricityPayment = moneyFromUah(row.electricityPayment, currency, row.usdRate);
           const savings = moneyFromUah(row.electricitySavings, currency, row.usdRate);
+          const savingsValue = formatDisplayMoney(savings, currency, lang);
+          const investment = investmentByPeriod?.get(row.month) ?? 0;
+          const savingsPerformance = investment > 0
+            ? pct((rowRoiMoney(row, currency) / investment) * 100)
+            : "";
+          const paymentValue = formatDisplayMoney(electricityPayment, currency, lang);
+          const paymentPerformance = savings
+            ? `${formatNumber((electricityPayment / savings) * 100, 2, 2)}%`
+            : "";
+          const consumptionValue = formatDisplayMoney(savings - electricityPayment, currency, lang);
+          const consumptionPerformance = savings
+            ? `${formatNumber(((savings - electricityPayment) / savings) * 100, 2, 2)}%`
+            : "";
           return [
             row.month,
             {
               month: formatPeriodLabel(row, lang),
+              columns: [t.value, t.performance],
               items: [
-                { label: t.savings, value: formatDisplayMoney(savings, currency, lang), color: colors.mint },
-                { label: t.payment, value: formatDisplayMoney(electricityPayment, currency, lang), color: electricityPayment >= 0 ? colors.green : colors.rose },
+                {
+                  label: t.savings,
+                  value: savingsPerformance ? `${savingsValue} (${savingsPerformance})` : savingsValue,
+                  cells: [savingsValue, savingsPerformance],
+                  cellTitles: [undefined, t.dailyRoiPerformanceTitle],
+                  color: colors.mint,
+                },
+                {
+                  label: t.payment,
+                  value: paymentPerformance ? `${paymentValue} (${paymentPerformance})` : paymentValue,
+                  cells: [paymentValue, paymentPerformance],
+                  cellTitles: [undefined, t.dailyPaymentPerformanceTitle],
+                  color: electricityPayment >= 0 ? colors.green : colors.rose,
+                },
+                {
+                  label: t.consumption,
+                  value: consumptionPerformance ? `${consumptionValue} (${consumptionPerformance})` : consumptionValue,
+                  cells: [consumptionValue, consumptionPerformance],
+                  cellTitles: [undefined, t.dailyConsumptionPerformanceTitle],
+                  color: colors.ink,
+                },
               ],
             },
           ];
         }),
       ),
-    [currency, displayRows, lang, t.payment, t.savings],
+    [
+      currency,
+      displayRows,
+      investmentByPeriod,
+      lang,
+      t.consumption,
+      t.dailyConsumptionPerformanceTitle,
+      t.dailyPaymentPerformanceTitle,
+      t.dailyRoiPerformanceTitle,
+      t.payment,
+      t.performance,
+      t.savings,
+      t.value,
+    ],
   );
   const latestRow = rows.at(-1);
-  const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = chartWidthForItemCount(displayRows.length, isMobile);
+  const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
+  const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
   const height = 300;
-  const pad = { left: 70, right: 18, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
+  const pad = { left: 56, right: 18, top: 18, bottom: 42 };
+  const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
+  const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
   const values = displayRows.flatMap((row) => [
     moneyFromUah(row.electricityPayment, currency, row.usdRate),
@@ -5598,29 +6739,31 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
   const maxValue = Math.max(0, ...values);
   const min = minValue < 0 ? -axisMax(values.filter((value) => value < 0).map(Math.abs)) : 0;
   const max = maxValue > 0 ? axisMax(values.filter((value) => value > 0)) : 1;
-  const band = chartBand(innerW, displayRows.length);
-  const bar = pairedChartBarWidth(band, 13, 0.24);
+  const band = dimensions.band;
+  const bar = PAIRED_CHART_BAR_WIDTH;
+  const plotStart = dimensions.plotStart;
   const y = (value: number) => pad.top + ((max - value) / (max - min || 1)) * innerH;
   const zeroY = y(0);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => min + (max - min) * tick);
 
   return (
     <>
-      <div className={chartScrollClassName(displayRows.length)}>
-        <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
-          <g className="grid">
-            {ticks.map((tick) => (
-              <g key={tick}>
-                <line x1={pad.left} x2={width - pad.right} y1={y(tick)} y2={y(tick)} />
-                <text x={pad.left - 10} y={y(tick) + 4} textAnchor="end">
-                  {formatAxisValue(tick, currency)}
-                </text>
-              </g>
-            ))}
-          </g>
+      <div className="fixed-axis-chart-wrap fixed-axis-chart-wrap-money">
+        <FixedChartAxis
+          ticks={ticks}
+          topForValue={(value) => ((y(value) - pad.top) / innerH) * 100}
+          currency={currency}
+        />
+        <div className={chartScrollClassName(displayRows.length, fixedBarDensity)} ref={chartScrollRef}>
+          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" style={fixedBarDensity ? { width, maxWidth: "none" } : undefined}>
+            <g className="grid">
+              {ticks.map((tick) => (
+                <line key={tick} x1={0} x2={width} y1={y(tick)} y2={y(tick)} />
+              ))}
+            </g>
           <line x1={pad.left} x2={width - pad.right} y1={zeroY} y2={zeroY} stroke={colors.ink} strokeWidth="1.5" />
           {displayRows.map((row, index) => {
-            const x = pad.left + band * index + band / 2;
+            const x = plotStart + band * index + band / 2;
             const electricityPayment = moneyFromUah(row.electricityPayment, currency, row.usdRate);
             const savings = moneyFromUah(row.electricitySavings, currency, row.usdRate);
             const savingsY = y(savings);
@@ -5650,8 +6793,8 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
                     y={pad.top}
                     width={band}
                     height={innerH}
-                    selection={inspector}
-                    active={selection?.month === inspector.month}
+                    periodKey={row.month}
+                    active={selectedKey === row.month}
                     target={target}
                   />
                 )}
@@ -5661,14 +6804,21 @@ function MoneyChart({ rows, currency }: { readonly rows: readonly MonthRow[]; re
               </g>
             );
           })}
-        </svg>
+          </svg>
+        </div>
       </div>
       <ChartInspector selection={selection} hint={t.tapBar} />
     </>
   );
 }
 
-function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
+function ImportMixChart({
+  rows,
+  fixedBarDensity = false,
+}: {
+  readonly rows: readonly MonthRow[];
+  readonly fixedBarDensity?: boolean;
+}) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
@@ -5679,33 +6829,44 @@ function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
         displayRows.map((row) => [
           row.month,
           {
-            month: `${formatPeriodLabel(row, lang)} · ${formatKwh(row.importDay + row.importNight, lang)}`,
+            month: formatPeriodLabel(row, lang),
+            columns: [t.value],
             items: [
-              { label: t.day, value: formatKwh(row.importDay, lang), color: colors.blue },
-              { label: t.night, value: formatKwh(row.importNight, lang), color: colors.indigo },
+              { label: t.day, value: formatChartEnergy(row.importDay, "up", lang), cells: [formatChartEnergy(row.importDay, "up", lang)], color: colors.blue },
+              { label: t.night, value: formatChartEnergy(row.importNight, "up", lang), cells: [formatChartEnergy(row.importNight, "up", lang)], color: colors.indigo },
+              { label: t.total, value: formatChartEnergy(row.importTotal, "up", lang), cells: [formatChartEnergy(row.importTotal, "up", lang)], color: colors.ink },
             ],
           },
         ]),
       ),
-    [displayRows, lang, t.day, t.night],
+    [displayRows, lang, t.day, t.night, t.total, t.value],
   );
   const latestRow = rows.at(-1);
-  const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = chartWidthForItemCount(displayRows.length, isMobile);
+  const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
+  const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
   const height = 300;
-  const pad = { left: 48, right: 18, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
+  const pad = { left: 40, right: 18, top: 18, bottom: 42 };
+  const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
+  const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
   const max = axisMax(displayRows.map((row) => row.importDay + row.importNight));
-  const band = chartBand(innerW, displayRows.length);
-  const bar = Math.max(18, band * 0.48);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => max * tick);
+  const band = dimensions.band;
+  const bar = STACKED_CHART_BAR_WIDTH;
+  const plotStart = dimensions.plotStart;
   return (
     <>
-      <div className={chartScrollClassName(displayRows.length)}>
-        <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
-          <Grid width={width} height={height} pad={pad} max={max} />
+      <div className="fixed-axis-chart-wrap">
+        <FixedChartAxis
+          ticks={ticks}
+          topForValue={(value) => 100 - (value / max) * 100}
+          formatValue={shouldDisplayMwh(max) ? (value) => formatNumber(value / 1000, 2) : undefined}
+        />
+        <div className={chartScrollClassName(displayRows.length, fixedBarDensity)} ref={chartScrollRef}>
+          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" style={fixedBarDensity ? { width, maxWidth: "none" } : undefined}>
+            <Grid width={width} height={height} pad={pad} max={max} />
           {displayRows.map((row, index) => {
-            const x = pad.left + band * index + band / 2 - bar / 2;
+            const x = plotStart + band * index + band / 2 - bar / 2;
             const dayH = (row.importDay / max) * innerH;
             const nightH = (row.importNight / max) * innerH;
             const base = pad.top + innerH;
@@ -5734,8 +6895,8 @@ function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
                     y={pad.top}
                     width={band}
                     height={innerH}
-                    selection={inspector}
-                    active={selection?.month === inspector.month}
+                    periodKey={row.month}
+                    active={selectedKey === row.month}
                     target={target}
                   />
                 )}
@@ -5745,14 +6906,21 @@ function ImportMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
               </g>
             );
           })}
-        </svg>
+          </svg>
+        </div>
       </div>
       <ChartInspector selection={selection} hint={t.tapBar} />
     </>
   );
 }
 
-function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
+function ConsumptionMixChart({
+  rows,
+  fixedBarDensity = false,
+}: {
+  readonly rows: readonly MonthRow[];
+  readonly fixedBarDensity?: boolean;
+}) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
@@ -5763,33 +6931,44 @@ function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
         displayRows.map((row) => [
           row.month,
           {
-            month: `${formatPeriodLabel(row, lang)} · ${formatKwh(row.consumedDay + row.consumedNight, lang)}`,
+            month: formatPeriodLabel(row, lang),
+            columns: [t.value, t.solarCoverage],
             items: [
-              { label: t.day, value: formatKwh(row.consumedDay, lang), color: colors.blue },
-              { label: t.night, value: formatKwh(row.consumedNight, lang), color: colors.indigo },
+              { label: t.day, value: formatConsumptionWithSolar(row.consumedDay, row.importDay, lang), cells: [formatChartEnergy(row.consumedDay, "up", lang), formatChartEnergy(row.consumedDay - row.importDay, "up", lang)], color: colors.blue },
+              { label: t.night, value: formatConsumptionWithSolar(row.consumedNight, row.importNight, lang), cells: [formatChartEnergy(row.consumedNight, "up", lang), formatChartEnergy(row.consumedNight - row.importNight, "up", lang)], color: colors.indigo },
+              { label: t.total, value: formatConsumptionWithSolar(row.consumedTotal, row.importTotal, lang), cells: [formatChartEnergy(row.consumedTotal, "up", lang), formatChartEnergy(row.consumedTotal - row.importTotal, "up", lang)], color: colors.ink },
             ],
           },
         ]),
       ),
-    [displayRows, lang, t.day, t.night],
+    [displayRows, lang, t.day, t.night, t.solarCoverage, t.total, t.value],
   );
   const latestRow = rows.at(-1);
-  const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = chartWidthForItemCount(displayRows.length, isMobile);
+  const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
+  const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
   const height = 300;
-  const pad = { left: 48, right: 18, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
+  const pad = { left: 40, right: 18, top: 18, bottom: 42 };
+  const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
+  const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
   const max = axisMax(displayRows.map((row) => row.consumedDay + row.consumedNight));
-  const band = chartBand(innerW, displayRows.length);
-  const bar = Math.max(18, band * 0.48);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => max * tick);
+  const band = dimensions.band;
+  const bar = STACKED_CHART_BAR_WIDTH;
+  const plotStart = dimensions.plotStart;
   return (
     <>
-      <div className={chartScrollClassName(displayRows.length)}>
-        <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
-          <Grid width={width} height={height} pad={pad} max={max} />
+      <div className="fixed-axis-chart-wrap">
+        <FixedChartAxis
+          ticks={ticks}
+          topForValue={(value) => 100 - (value / max) * 100}
+          formatValue={shouldDisplayMwh(max) ? (value) => formatNumber(value / 1000, 2) : undefined}
+        />
+        <div className={chartScrollClassName(displayRows.length, fixedBarDensity)} ref={chartScrollRef}>
+          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" style={fixedBarDensity ? { width, maxWidth: "none" } : undefined}>
+            <Grid width={width} height={height} pad={pad} max={max} />
           {displayRows.map((row, index) => {
-            const x = pad.left + band * index + band / 2 - bar / 2;
+            const x = plotStart + band * index + band / 2 - bar / 2;
             const dayH = (row.consumedDay / max) * innerH;
             const nightH = (row.consumedNight / max) * innerH;
             const base = pad.top + innerH;
@@ -5818,8 +6997,8 @@ function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
                     y={pad.top}
                     width={band}
                     height={innerH}
-                    selection={inspector}
-                    active={selection?.month === inspector.month}
+                    periodKey={row.month}
+                    active={selectedKey === row.month}
                     target={target}
                   />
                 )}
@@ -5829,14 +7008,21 @@ function ConsumptionMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
               </g>
             );
           })}
-        </svg>
+          </svg>
+        </div>
       </div>
       <ChartInspector selection={selection} hint={t.tapBar} />
     </>
   );
 }
 
-function LossesMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
+function LossesMixChart({
+  rows,
+  fixedBarDensity = false,
+}: {
+  readonly rows: readonly MonthRow[];
+  readonly fixedBarDensity?: boolean;
+}) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
@@ -5850,36 +7036,47 @@ function LossesMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
           return [
             row.month,
             {
-              month: `${formatPeriodLabel(row, lang)} · ${formatKwh(lossesDay + lossesNight, lang)}`,
+              month: formatPeriodLabel(row, lang),
+              columns: [t.value],
               items: [
-                { label: t.day, value: formatKwh(lossesDay, lang), color: colors.orange },
-                { label: t.night, value: formatKwh(lossesNight, lang), color: colors.rose },
+                { label: t.day, value: formatChartEnergy(lossesDay, "up", lang), cells: [formatChartEnergy(lossesDay, "up", lang)], color: colors.orange },
+                { label: t.night, value: formatChartEnergy(lossesNight, "up", lang), cells: [formatChartEnergy(lossesNight, "up", lang)], color: colors.rose },
+                { label: t.total, value: formatChartEnergy(lossesDay + lossesNight, "up", lang), cells: [formatChartEnergy(lossesDay + lossesNight, "up", lang)], color: colors.ink },
               ],
             },
           ];
         }),
       ),
-    [displayRows, lang, t.day, t.night],
+    [displayRows, lang, t.day, t.night, t.total, t.value],
   );
   const latestRow = rows.at(-1);
-  const { selection, target } = useChartInspector(latestRow ? inspectors.get(latestRow.month) ?? null : null);
-  const width = chartWidthForItemCount(displayRows.length, isMobile);
+  const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
+  const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
   const height = 300;
-  const pad = { left: 48, right: 18, top: 18, bottom: 42 };
-  const innerW = width - pad.left - pad.right;
+  const pad = { left: 40, right: 18, top: 18, bottom: 42 };
+  const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
+  const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
   const max = axisMax(displayRows.map(lossesTotal));
-  const band = chartBand(innerW, displayRows.length);
-  const bar = Math.max(18, band * 0.48);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => max * tick);
+  const band = dimensions.band;
+  const bar = STACKED_CHART_BAR_WIDTH;
+  const plotStart = dimensions.plotStart;
   return (
     <>
-      <div className={chartScrollClassName(displayRows.length)}>
-        <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img">
-          <Grid width={width} height={height} pad={pad} max={max} />
+      <div className="fixed-axis-chart-wrap">
+        <FixedChartAxis
+          ticks={ticks}
+          topForValue={(value) => 100 - (value / max) * 100}
+          formatValue={shouldDisplayMwh(max) ? (value) => formatNumber(value / 1000, 2) : undefined}
+        />
+        <div className={chartScrollClassName(displayRows.length, fixedBarDensity)} ref={chartScrollRef}>
+          <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" style={fixedBarDensity ? { width, maxWidth: "none" } : undefined}>
+            <Grid width={width} height={height} pad={pad} max={max} />
           {displayRows.map((row, index) => {
             const lossesDay = row.lossesDay ?? 0;
             const lossesNight = row.lossesNight ?? 0;
-            const x = pad.left + band * index + band / 2 - bar / 2;
+            const x = plotStart + band * index + band / 2 - bar / 2;
             const dayH = (lossesDay / max) * innerH;
             const nightH = (lossesNight / max) * innerH;
             const base = pad.top + innerH;
@@ -5908,8 +7105,8 @@ function LossesMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
                     y={pad.top}
                     width={band}
                     height={innerH}
-                    selection={inspector}
-                    active={selection?.month === inspector.month}
+                    periodKey={row.month}
+                    active={selectedKey === row.month}
                     target={target}
                   />
                 )}
@@ -5919,7 +7116,8 @@ function LossesMixChart({ rows }: { readonly rows: readonly MonthRow[] }) {
               </g>
             );
           })}
-        </svg>
+          </svg>
+        </div>
       </div>
       <ChartInspector selection={selection} hint={t.tapBar} />
     </>
@@ -5931,13 +7129,11 @@ function Grid({
   height,
   pad,
   max,
-  currency,
 }: {
   width: number;
   height: number;
   pad: { left: number; right: number; top: number; bottom: number };
   max: number;
-  currency?: Currency;
 }) {
   const innerH = height - pad.top - pad.bottom;
   return (
@@ -5946,10 +7142,7 @@ function Grid({
         const y = pad.top + innerH - tick * innerH;
         return (
           <g key={tick}>
-            <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} />
-            <text x={pad.left - 10} y={y + 4} textAnchor="end">
-              {formatAxisValue(max * tick, currency)}
-            </text>
+            <line x1={0} x2={width} y1={y} y2={y} />
           </g>
         );
       })}
@@ -5969,6 +7162,8 @@ function DailyDashboard({
   t,
   currency,
   lang,
+  investmentByDay,
+  selectedRangeRoiPercent,
   onUsdRateInfo,
   onImportPriceInfo,
   onNetPaymentHeaderInfo,
@@ -5993,6 +7188,8 @@ function DailyDashboard({
   readonly t: Record<string, string>;
   readonly currency: Currency;
   readonly lang: Lang;
+  readonly investmentByDay: ReadonlyMap<string, number>;
+  readonly selectedRangeRoiPercent: number;
   readonly onUsdRateInfo: () => void;
   readonly onImportPriceInfo: () => void;
   readonly onNetPaymentHeaderInfo: () => void;
@@ -6007,23 +7204,37 @@ function DailyDashboard({
   readonly onRoiValueInfo: (row: MonthRow) => void;
 }) {
   const selectedRows = rows;
-  const latest = selectedRows.at(-1);
   const chartRows = selectedRows;
-  const dayOptions = useMemo(() => [...selectedRows].reverse(), [selectedRows]);
-  const first = selectedRows.find((row) => row.month === firstDay) ?? selectedRows.at(-2) ?? selectedRows.at(-1);
-  const second = selectedRows.find((row) => row.month === secondDay) ?? selectedRows.at(-1);
-  const paymentDisplay = latest ? moneyFromUah(latest.electricityPayment, currency, latest.usdRate) : 0;
-  const roiDisplay = latest ? rowRoiMoney(latest, currency) : 0;
-
-  useEffect(() => {
-    if (!isCompareOpen) return undefined;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setCompareOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [isCompareOpen]);
-
+  const totals = useMemo(() => selectedRows.reduce(
+    (sum, row) => ({
+      production: sum.production + row.production,
+      export: sum.export + exportTotal(row),
+      consumedDay: sum.consumedDay + row.consumedDay,
+      consumedNight: sum.consumedNight + row.consumedNight,
+      importDay: sum.importDay + row.importDay,
+      importNight: sum.importNight + row.importNight,
+      lossesDay: sum.lossesDay + (row.lossesDay ?? 0),
+      lossesNight: sum.lossesNight + (row.lossesNight ?? 0),
+    }),
+    {
+      production: 0,
+      export: 0,
+      consumedDay: 0,
+      consumedNight: 0,
+      importDay: 0,
+      importNight: 0,
+      lossesDay: 0,
+      lossesNight: 0,
+    },
+  ), [selectedRows]);
+  const paymentDisplay = useMemo(
+    () => sumRowsFromUah(selectedRows, (row) => row.electricityPayment, currency),
+    [currency, selectedRows],
+  );
+  const savingsDisplay = useMemo(
+    () => sumRowsFromUah(selectedRows, (row) => row.electricitySavings, currency),
+    [currency, selectedRows],
+  );
   if (!allRows.length) {
     return (
       <div className="notice">
@@ -6034,136 +7245,162 @@ function DailyDashboard({
 
   return (
     <>
-      {latest && (
-        <section className="kpi-grid daily-kpi-grid">
-          <KpiCard
-            icon={<SunMedium size={20} />}
-            label={t.production}
-            value={formatKwh(latest.production, lang)}
-            detail={formatDayLabel(latest.date, lang)}
-            tone="amber"
-          />
-          <KpiCard
-            icon={<ArrowUpFromLine size={20} />}
-            label={t.export}
-            value={formatKwh(exportTotal(latest), lang)}
-            detail={`${pct((exportTotal(latest) / latest.production) * 100)} ${t.exported}`}
-            tone="mint"
-          />
-          <KpiCard
-            icon={<ArrowDownToLine size={20} />}
-            label={t.import}
-            value={formatKwh(latest.importTotal, lang)}
-            detail={`${t.day} ${formatKwh(latest.importDay, lang)} · ${t.night} ${formatKwh(latest.importNight, lang)}`}
-            tone="blue"
-          />
-          <KpiCard
-            icon={<WalletCards size={20} />}
-            label={t.latestRoi}
-            value={formatDisplayMoney(roiDisplay, currency, lang)}
-            detail={`${t.net} ${formatDisplayMoney(paymentDisplay, currency, lang)}`}
-            tone={paymentDisplay >= 0 ? "green" : "rose"}
-          />
-        </section>
-      )}
+      <PeriodCompareModal
+        period="daily"
+        rows={allRows}
+        firstValue={firstDay}
+        secondValue={secondDay}
+        setFirstValue={setFirstDay}
+        setSecondValue={setSecondDay}
+        isOpen={isCompareOpen}
+        setOpen={setCompareOpen}
+        t={t}
+        currency={currency}
+        lang={lang}
+      />
 
-      {isCompareOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setCompareOpen(false)}>
-          <section
-            className="daily-compare modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="daily-compare-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="section-heading modal-heading">
-              <div>
-                <h2 id="daily-compare-title">{t.compareDays}</h2>
-              </div>
-              <button type="button" className="icon-button" onClick={() => setCompareOpen(false)} aria-label={t.close}>
-                <X size={18} />
-              </button>
-            </div>
-            <div className="filter-controls daily-selects">
-              <label className="filter-box">
-                <select value={first?.month ?? ""} onChange={(event) => setFirstDay(event.target.value)} aria-label={t.firstDay}>
-                  {dayOptions.map((row) => (
-                    <option key={row.month} value={row.month}>
-                      {formatDayLabel(row.date, lang)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="filter-box">
-                <select value={second?.month ?? ""} onChange={(event) => setSecondDay(event.target.value)} aria-label={t.secondDay}>
-                  {dayOptions.map((row) => (
-                    <option key={row.month} value={row.month}>
-                      {formatDayLabel(row.date, lang)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {first && second && <DailyCompareTable first={first} second={second} t={t} currency={currency} lang={lang} />}
-          </section>
-        </div>
-      )}
-
+      <div className="dashboard-charts">
       <section id="energy" className="chart-grid">
         <ChartPanel
+          className="dashboard-chart-production"
           title={t.production}
-          legend={[
-            [t.production, colors.amber],
-            [t.export, colors.green],
-          ]}
+          legend={[]}
+          totalSummary={{
+            month: t.totals,
+            columns: [t.value, t.performance],
+            items: [
+              {
+                label: t.actual,
+                color: colors.amber,
+                value: formatChartEnergy(totals.production, "down", lang),
+                cells: [formatChartEnergy(totals.production, "down", lang), ""],
+              },
+              {
+                label: t.export,
+                color: colors.green,
+                value: formatChartEnergy(totals.export, "down", lang),
+                cells: [
+                  formatChartEnergy(totals.export, "down", lang),
+                  totals.production
+                    ? `${formatNumber((totals.export / totals.production) * 100, 2, 2)}%`
+                    : "",
+                ],
+              },
+            ],
+          }}
         >
-          <ProductionExportChart rows={chartRows} />
+          <ProductionExportChart rows={chartRows} fixedBarDensity />
         </ChartPanel>
         <ChartPanel
+          className="dashboard-chart-finance"
           title={t.finance}
-          legend={[
-            [t.savings, colors.mint],
-            [t.payment, colors.green],
-          ]}
+          legend={[]}
+          totalSummary={{
+            month: t.totals,
+            columns: [t.value, t.performance],
+            items: [
+              {
+                label: t.savings,
+                color: colors.mint,
+                value: formatDisplayMoney(savingsDisplay, currency, lang),
+                cells: [formatDisplayMoney(savingsDisplay, currency, lang), pct(selectedRangeRoiPercent)],
+                cellTitles: [undefined, t.dailyRangeRoiPerformanceTitle],
+                cellClassNames: [undefined, "finance-roi-highlight"],
+              },
+              {
+                label: t.payment,
+                color: colors.green,
+                value: formatDisplayMoney(paymentDisplay, currency, lang),
+                cells: [
+                  formatDisplayMoney(paymentDisplay, currency, lang),
+                  savingsDisplay
+                    ? `${formatNumber((paymentDisplay / savingsDisplay) * 100, 2, 2)}%`
+                    : "",
+                ],
+                cellTitles: [undefined, t.dailyRangePaymentPerformanceTitle],
+              },
+              {
+                label: t.consumption,
+                color: colors.ink,
+                value: formatDisplayMoney(savingsDisplay - paymentDisplay, currency, lang),
+                cells: [
+                  formatDisplayMoney(savingsDisplay - paymentDisplay, currency, lang),
+                  savingsDisplay
+                    ? `${formatNumber(((savingsDisplay - paymentDisplay) / savingsDisplay) * 100, 2, 2)}%`
+                    : "",
+                ],
+                cellTitles: [undefined, t.dailyRangeConsumptionPerformanceTitle],
+              },
+            ],
+          }}
         >
-          <MoneyChart rows={chartRows} currency={currency} />
+          <MoneyChart rows={chartRows} currency={currency} investmentByPeriod={investmentByDay} fixedBarDensity />
         </ChartPanel>
       </section>
 
       <section id="finance" className="chart-grid">
         <ChartPanel
+          className="dashboard-chart-consumption"
           title={t.consumptionMix}
-          legend={[
-            [t.day, colors.blue],
-            [t.night, colors.indigo],
-          ]}
+          legend={[]}
+          totalSummary={{
+            month: t.totals,
+            columns: [t.value, t.solarCoverage],
+            items: [
+              { label: t.day, color: colors.blue, value: formatConsumptionWithSolar(totals.consumedDay, totals.importDay, lang), cells: [formatChartEnergy(totals.consumedDay, "up", lang), formatChartEnergy(totals.consumedDay - totals.importDay, "up", lang)] },
+              { label: t.night, color: colors.indigo, value: formatConsumptionWithSolar(totals.consumedNight, totals.importNight, lang), cells: [formatChartEnergy(totals.consumedNight, "up", lang), formatChartEnergy(totals.consumedNight - totals.importNight, "up", lang)] },
+              { label: t.total, color: colors.ink, value: formatConsumptionWithSolar(totals.consumedDay + totals.consumedNight, totals.importDay + totals.importNight, lang), cells: [formatChartEnergy(totals.consumedDay + totals.consumedNight, "up", lang), formatChartEnergy((totals.consumedDay + totals.consumedNight) - (totals.importDay + totals.importNight), "up", lang)] },
+            ],
+          }}
         >
-          <ConsumptionMixChart rows={chartRows} />
+          <ConsumptionMixChart rows={chartRows} fixedBarDensity />
         </ChartPanel>
         <ChartPanel
-          title={t.importMix}
-          legend={[
-            [t.day, colors.blue],
-            [t.night, colors.indigo],
-          ]}
+          className="dashboard-chart-import"
+          title={t.import}
+          legend={[]}
+          totalSummary={{
+            month: t.totals,
+            columns: [t.value],
+            items: [
+              { label: t.day, color: colors.blue, value: formatChartEnergy(totals.importDay, "up", lang), cells: [formatChartEnergy(totals.importDay, "up", lang)] },
+              { label: t.night, color: colors.indigo, value: formatChartEnergy(totals.importNight, "up", lang), cells: [formatChartEnergy(totals.importNight, "up", lang)] },
+              { label: t.total, color: colors.ink, value: formatChartEnergy(totals.importDay + totals.importNight, "up", lang), cells: [formatChartEnergy(totals.importDay + totals.importNight, "up", lang)] },
+            ],
+          }}
         >
-          <ImportMixChart rows={chartRows} />
+          <ImportMixChart rows={chartRows} fixedBarDensity />
         </ChartPanel>
         <ChartPanel
+          className="dashboard-chart-losses"
           title={t.losses}
-          legend={[
-            [t.day, colors.orange],
-            [t.night, colors.rose],
-          ]}
+          legend={[]}
+          totalSummary={{
+            month: t.totals,
+            columns: [t.value],
+            items: [
+              { label: t.day, color: colors.orange, value: formatChartEnergy(totals.lossesDay, "up", lang), cells: [formatChartEnergy(totals.lossesDay, "up", lang)] },
+              { label: t.night, color: colors.rose, value: formatChartEnergy(totals.lossesNight, "up", lang), cells: [formatChartEnergy(totals.lossesNight, "up", lang)] },
+              { label: t.total, color: colors.ink, value: formatChartEnergy(totals.lossesDay + totals.lossesNight, "up", lang), cells: [formatChartEnergy(totals.lossesDay + totals.lossesNight, "up", lang)] },
+            ],
+          }}
         >
-          <LossesMixChart rows={chartRows} />
+          <LossesMixChart rows={chartRows} fixedBarDensity />
         </ChartPanel>
       </section>
+      </div>
 
       <section id="data" className="data-section">
         <div className="section-heading">
           <div>
-            <h2>{t.table}</h2>
+            <h2>{formatDataRowCount(selectedRows.length, "daily", lang)}</h2>
+          </div>
+          <div className="data-section-actions">
+            <PeriodCompareButton
+              label={t.compare}
+              isOpen={isCompareOpen}
+              onClick={() => setCompareOpen(true)}
+            />
           </div>
         </div>
         <DataTable
@@ -6190,21 +7427,123 @@ function DailyDashboard({
   );
 }
 
-function DailyCompareTable({
-  first,
-  second,
+interface PeriodCompareModalProps {
+  readonly period: "monthly" | "daily";
+  readonly rows: readonly MonthRow[];
+  readonly firstValue: string;
+  readonly secondValue: string;
+  readonly setFirstValue: React.Dispatch<React.SetStateAction<string>>;
+  readonly setSecondValue: React.Dispatch<React.SetStateAction<string>>;
+  readonly isOpen: boolean;
+  readonly setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}
+
+function PeriodCompareModal({
+  period,
+  rows,
+  firstValue,
+  secondValue,
+  setFirstValue,
+  setSecondValue,
+  isOpen,
+  setOpen,
   t,
   currency,
   lang,
-}: {
-  first: MonthRow;
-  second: MonthRow;
-  t: Record<string, string>;
-  currency: Currency;
-  lang: Lang;
-}) {
+}: PeriodCompareModalProps) {
+  const keyForRow = period === "monthly" ? monthKey : dateKey;
+  const firstAvailableValue = rows[0] ? keyForRow(rows[0].date) : "";
+  const lastAvailableValue = rows.at(-1) ? keyForRow(rows.at(-1)!.date) : "";
+  const first = rows.find((row) => keyForRow(row.date) === firstValue);
+  const second = rows.find((row) => keyForRow(row.date) === secondValue);
+  const title = period === "monthly" ? t.compareMonths : t.compareDays;
+  const firstLabel = period === "monthly" ? t.firstMonth : t.firstDay;
+  const secondLabel = period === "monthly" ? t.secondMonth : t.secondDay;
+  const titleId = `${period}-compare-title`;
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isOpen, setOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={() => setOpen(false)}>
+      <section
+        className="daily-compare modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="section-heading modal-heading">
+          <div>
+            <h2 id={titleId}>{title}</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label={t.close}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="daily-compare-dates">
+          <label className="daily-compare-date">
+            <span>{firstLabel}</span>
+            <input
+              type={period === "monthly" ? "month" : "date"}
+              value={firstValue}
+              min={firstAvailableValue}
+              max={lastAvailableValue}
+              onChange={(event) => setFirstValue(event.target.value)}
+            />
+          </label>
+          <label className="daily-compare-date">
+            <span>{secondLabel}</span>
+            <input
+              type={period === "monthly" ? "month" : "date"}
+              value={secondValue}
+              min={firstAvailableValue}
+              max={lastAvailableValue}
+              onChange={(event) => setSecondValue(event.target.value)}
+            />
+          </label>
+        </div>
+        {first && second ? (
+          <PeriodCompareTable first={first} second={second} period={period} t={t} currency={currency} lang={lang} />
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+interface PeriodCompareTableProps {
+  readonly first: MonthRow;
+  readonly second: MonthRow;
+  readonly period: "monthly" | "daily";
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}
+
+function PeriodCompareTable({
+  first,
+  second,
+  period,
+  t,
+  currency,
+  lang,
+}: PeriodCompareTableProps) {
   const firstPayment = moneyFromUah(first.electricityPayment, currency, first.usdRate);
   const secondPayment = moneyFromUah(second.electricityPayment, currency, second.usdRate);
+  const firstLosses = lossesTotal(first);
+  const secondLosses = lossesTotal(second);
+  const formatPeriodLabel = period === "monthly" ? formatMonthYear : formatDayLabel;
   const rows = [
     {
       label: t.production,
@@ -6244,6 +7583,16 @@ function DailyCompareTable({
       firstValue: first.consumedTotal,
       secondValue: second.consumedTotal,
       value: second.consumedTotal - first.consumedTotal,
+      higherIsBetter: false,
+    },
+    {
+      label: t.losses,
+      first: formatKwh(firstLosses, lang),
+      second: formatKwh(secondLosses, lang),
+      delta: formatSignedKwh(secondLosses - firstLosses, lang),
+      firstValue: firstLosses,
+      secondValue: secondLosses,
+      value: secondLosses - firstLosses,
       higherIsBetter: false,
     },
     {
@@ -6295,11 +7644,11 @@ function DailyCompareTable({
             <div className="compare-card-values">
               <span>
                 <b>{row.first}</b>
-                <small>{formatDayLabel(first.date, lang)}</small>
+                <small>{formatPeriodLabel(first.date, lang)}</small>
               </span>
               <span>
                 <b>{row.second}</b>
-                <small>{formatDayLabel(second.date, lang)}</small>
+                <small>{formatPeriodLabel(second.date, lang)}</small>
               </span>
             </div>
           </article>
@@ -6307,6 +7656,126 @@ function DailyCompareTable({
       })}
     </div>
   );
+}
+
+interface StickyDataTableLayout {
+  readonly left: number;
+  readonly width: number;
+  readonly tableWidth: number;
+  readonly scrollOverflow: number;
+  readonly columnWidths: readonly number[];
+  readonly headerHeight: number;
+  readonly footerHeight: number;
+  readonly footerBottom: number;
+  readonly showHeader: boolean;
+  readonly showFooter: boolean;
+}
+
+function useStickyDataTableRows(
+  wrapRef: React.RefObject<HTMLDivElement | null>,
+  tableRef: React.RefObject<HTMLTableElement | null>,
+) {
+  const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
+  const stickyFooterRef = useRef<HTMLDivElement | null>(null);
+  const [layout, setLayout] = useState<StickyDataTableLayout | null>(null);
+  const usesNativeHorizontalSync = typeof CSS !== "undefined"
+    && CSS.supports("animation-timeline: --data-table-horizontal")
+    && CSS.supports("scroll-timeline-name: --data-table-horizontal")
+    && CSS.supports("timeline-scope: --data-table-horizontal");
+
+  const syncScrollLeft = (scrollLeft: number) => {
+    const wrap = wrapRef.current;
+    const stickyHeader = stickyHeaderRef.current;
+    const stickyFooter = stickyFooterRef.current;
+    if (wrap && wrap.scrollLeft !== scrollLeft) wrap.scrollLeft = scrollLeft;
+    if (stickyHeader && stickyHeader.scrollLeft !== scrollLeft) stickyHeader.scrollLeft = scrollLeft;
+    if (stickyFooter && stickyFooter.scrollLeft !== scrollLeft) stickyFooter.scrollLeft = scrollLeft;
+  };
+
+  React.useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const table = tableRef.current;
+    if (!wrap || !table) return undefined;
+
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const rect = wrap.getBoundingClientRect();
+      const tableRect = table.getBoundingClientRect();
+      const headerCells = [...table.querySelectorAll<HTMLTableCellElement>("thead th")];
+      const headerHeight = table.tHead?.getBoundingClientRect().height ?? 0;
+      const footerHeight = table.tFoot?.getBoundingClientRect().height ?? 0;
+      const mobileNav = document.querySelector<HTMLElement>(".mobile-bottom-nav");
+      const footerBottom = mobileNav && getComputedStyle(mobileNav).display !== "none"
+        ? mobileNav.getBoundingClientRect().height
+        : 0;
+      const viewportBottom = window.innerHeight - footerBottom;
+      const next: StickyDataTableLayout = {
+        left: rect.left + wrap.clientLeft,
+        width: wrap.clientWidth,
+        tableWidth: tableRect.width,
+        scrollOverflow: Math.max(0, wrap.scrollWidth - wrap.clientWidth),
+        columnWidths: headerCells.map((cell) => cell.getBoundingClientRect().width),
+        headerHeight,
+        footerHeight,
+        footerBottom,
+        showHeader: rect.top < 0 && rect.bottom > headerHeight,
+        showFooter: rect.top < viewportBottom - footerHeight && rect.bottom > viewportBottom,
+      };
+
+      setLayout((previous) => {
+        const sameColumns = previous?.columnWidths.length === next.columnWidths.length
+          && previous.columnWidths.every((width, index) => Math.abs(width - next.columnWidths[index]) < 0.5);
+        if (
+          previous
+          && Math.abs(previous.left - next.left) < 0.5
+          && Math.abs(previous.width - next.width) < 0.5
+          && Math.abs(previous.tableWidth - next.tableWidth) < 0.5
+          && previous.scrollOverflow === next.scrollOverflow
+          && Math.abs(previous.headerHeight - next.headerHeight) < 0.5
+          && Math.abs(previous.footerHeight - next.footerHeight) < 0.5
+          && Math.abs(previous.footerBottom - next.footerBottom) < 0.5
+          && previous.showHeader === next.showHeader
+          && previous.showFooter === next.showFooter
+          && sameColumns
+        ) return previous;
+        return next;
+      });
+    };
+    const queueMeasure = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(measure);
+    };
+    const syncFromTable = () => {
+      syncScrollLeft(wrap.scrollLeft);
+    };
+    const resizeObserver = new ResizeObserver(queueMeasure);
+
+    measure();
+    resizeObserver.observe(wrap);
+    resizeObserver.observe(table);
+    if (!usesNativeHorizontalSync) wrap.addEventListener("scroll", syncFromTable, { passive: true });
+    window.addEventListener("scroll", queueMeasure, { passive: true });
+    window.addEventListener("resize", queueMeasure, { passive: true });
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      if (!usesNativeHorizontalSync) wrap.removeEventListener("scroll", syncFromTable);
+      window.removeEventListener("scroll", queueMeasure);
+      window.removeEventListener("resize", queueMeasure);
+    };
+  }, [tableRef, usesNativeHorizontalSync, wrapRef]);
+
+  useEffect(() => {
+    if (!usesNativeHorizontalSync) syncScrollLeft(wrapRef.current?.scrollLeft ?? 0);
+  }, [layout, usesNativeHorizontalSync, wrapRef]);
+
+  return {
+    layout,
+    stickyHeaderRef,
+    stickyFooterRef,
+  };
 }
 
 function DataTable({
@@ -6379,24 +7848,66 @@ function DataTable({
       roi: 0,
     },
   );
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const {
+    layout: stickyLayout,
+    stickyHeaderRef,
+    stickyFooterRef,
+  } = useStickyDataTableRows(wrapRef, tableRef);
+  const tableClassName = period === "monthly" ? "monthly-data-table" : undefined;
+  const stickyScrollOverflow = stickyLayout?.scrollOverflow ?? 0;
+  const renderHeaderRow = () => (
+    <tr>
+      <Th label={period === "daily" ? t.tableDay : t.month} />
+      <Th label={t.production} />
+      <Th label={t.export} />
+      <Th label={t.import} />
+      <Th label={t.consumed} />
+      <Th label={t.losses} />
+      <Th label={t.balance} />
+      <Th label={`${t.netExport} (${money}/${kwh})`} />
+      <Th label={`${t.import} (${money}/${kwh})`} infoLabel={t.import} onInfo={onImportPriceInfo} />
+      <Th label={`${t.netPayment} (${money})`} infoLabel={t.netPayment} onInfo={onNetPaymentHeaderInfo} />
+      <Th label={`${t.roi} (${money})`} infoLabel={t.roi} onInfo={onRoiInfo} />
+      <Th label="USD/UAH" infoLabel="USD/UAH" onInfo={onUsdRateInfo} />
+    </tr>
+  );
+  const renderFooterRow = () => (
+    <tr>
+      <th>{t.total}</th>
+      <td>{formatKwh(totals.production, lang)}</td>
+      <td>{formatKwh(totals.export, lang)}</td>
+      <td>{formatKwh(totals.importTotal, lang)}</td>
+      <td>
+        <TableValueInfo value={formatKwh(totals.consumedTotal, lang)} label={t.consumed} onInfo={() => onConsumedTotalsInfo(rows)} />
+      </td>
+      <td>{formatKwh(totals.lossesTotal, lang)}</td>
+      <td className={totals.balance < 0 ? "positive" : totals.balance > 0 ? "negative" : "muted"}>
+        {formatKwh(totals.balance, lang)}
+      </td>
+      <td className="muted">-</td>
+      <td className="muted">-</td>
+      <td className={totals.electricityPayment >= 0 ? "positive" : "negative"}>
+        {formatTableMoney(totals.electricityPayment, currency, lang)}
+      </td>
+      <td className="positive">{formatTableMoney(totals.roi, currency, lang)}</td>
+      <td className="muted">-</td>
+    </tr>
+  );
+  const renderStickyColgroup = () => (
+    <colgroup>
+      {stickyLayout?.columnWidths.map((width, index) => (
+        <col key={index} style={{ width }} />
+      ))}
+    </colgroup>
+  );
   return (
-    <div className="table-wrap">
-      <table className={period === "monthly" ? "monthly-data-table" : undefined}>
+    <>
+    <div className={`table-wrap data-table-scroll-source data-table-scroll-source-${period}`} ref={wrapRef}>
+      <table className={tableClassName} ref={tableRef}>
         <thead>
-          <tr>
-            <Th label={period === "daily" ? t.tableDay : t.month} />
-            <Th label={`${t.production} (${kwh})`} />
-            <Th label={`${t.export} (${kwh})`} />
-            <Th label={`${t.import} (${kwh})`} />
-            <Th label={`${t.consumed} (${kwh})`} />
-            <Th label={`${t.losses} (${kwh})`} />
-            <Th label={`${t.balance} (${kwh})`} />
-            <Th label={`${t.netExport} (${money}/${kwh})`} />
-            <Th label={`${t.import} (${money}/${kwh})`} infoLabel={t.import} onInfo={onImportPriceInfo} />
-            <Th label={`${t.netPayment} (${money})`} infoLabel={t.netPayment} onInfo={onNetPaymentHeaderInfo} />
-            <Th label={`${t.roi} (${money})`} infoLabel={t.roi} onInfo={onRoiInfo} />
-            <Th label="USD/UAH" infoLabel="USD/UAH" onInfo={onUsdRateInfo} />
-          </tr>
+          {renderHeaderRow()}
         </thead>
         <tbody>
           {newestFirst.map((row) => {
@@ -6421,23 +7932,23 @@ function DataTable({
                     onDocumentsInfo={onDocumentsInfo}
                     onUtilityMeterInfo={onUtilityMeterInfo}
                   />
-                ) : formatDayMonthLabel(row.date, lang)}
+                ) : formatDayLabel(row.date, lang)}
               </th>
-              <td>{formatNumber(row.production, 2, 2)}</td>
+              <td>{formatKwh(row.production, lang)}</td>
               <td>
-                <TableValueInfo value={formatNumber(exportTotal(row), 2, 2)} label={t.export} onInfo={() => onExportSplitInfo(row)} />
+                <TableValueInfo value={formatKwh(exportTotal(row), lang)} label={t.export} onInfo={() => onExportSplitInfo(row)} />
               </td>
               <td>
-                <TableValueInfo value={formatNumber(row.importTotal, 2, 2)} label={t.import} onInfo={() => onImportSplitInfo(row)} />
+                <TableValueInfo value={formatKwh(row.importTotal, lang)} label={t.import} onInfo={() => onImportSplitInfo(row)} />
               </td>
               <td>
-                <TableValueInfo value={formatNumber(row.consumedTotal, 2, 2)} label={t.consumed} onInfo={() => onConsumedSplitInfo(row)} />
+                <TableValueInfo value={formatKwh(row.consumedTotal, lang)} label={t.consumed} onInfo={() => onConsumedSplitInfo(row)} />
               </td>
               <td>
-                <TableValueInfo value={formatNumber(lossesTotal(row), 2, 2)} label={t.losses} onInfo={() => onLossesSplitInfo(row)} />
+                <TableValueInfo value={formatKwh(lossesTotal(row), lang)} label={t.losses} onInfo={() => onLossesSplitInfo(row)} />
               </td>
               <td className={row.balance < 0 ? "positive" : row.balance > 0 ? "negative" : "muted"}>
-                {formatNumber(row.balance, 2, 2)}
+                {formatKwh(row.balance, lang)}
               </td>
               <td className={`what-if-price-cell${changedCells?.has("export") ? " has-scenario" : ""}`}>
                 <TableValueInfo
@@ -6481,29 +7992,76 @@ function DataTable({
           })}
         </tbody>
         <tfoot>
-          <tr>
-            <th>{t.total}</th>
-            <td>{formatNumber(totals.production, 2, 2)}</td>
-            <td>{formatNumber(totals.export, 2, 2)}</td>
-            <td>{formatNumber(totals.importTotal, 2, 2)}</td>
-            <td>
-              <TableValueInfo value={formatNumber(totals.consumedTotal, 2, 2)} label={t.consumed} onInfo={() => onConsumedTotalsInfo(rows)} />
-            </td>
-            <td>{formatNumber(totals.lossesTotal, 2, 2)}</td>
-            <td className={totals.balance < 0 ? "positive" : totals.balance > 0 ? "negative" : "muted"}>
-              {formatNumber(totals.balance, 2, 2)}
-            </td>
-            <td className="muted">-</td>
-            <td className="muted">-</td>
-            <td className={totals.electricityPayment >= 0 ? "positive" : "negative"}>
-              {formatTableMoney(totals.electricityPayment, currency, lang)}
-            </td>
-            <td className="positive">{formatTableMoney(totals.roi, currency, lang)}</td>
-            <td className="muted">-</td>
-          </tr>
+          {renderFooterRow()}
         </tfoot>
       </table>
     </div>
+    {stickyLayout?.showHeader ? createPortal(
+      <div
+        className={`sticky-data-table-row sticky-data-table-${period}-view sticky-data-table-header`}
+        style={{
+          left: stickyLayout.left,
+          width: stickyLayout.width,
+          height: stickyLayout.headerHeight,
+          "--sticky-data-table-overflow": `${stickyScrollOverflow}px`,
+        } as React.CSSProperties}
+      >
+        <div
+          className="sticky-data-table-scroll"
+          ref={stickyHeaderRef}
+        >
+          <table
+            className={tableClassName}
+            style={{ width: stickyLayout.tableWidth, minWidth: stickyLayout.tableWidth }}
+          >
+            {renderStickyColgroup()}
+            <thead>{renderHeaderRow()}</thead>
+          </table>
+        </div>
+        <div
+          aria-hidden="true"
+          className="sticky-data-table-frozen-cell sticky-data-table-frozen-header"
+          style={{ width: stickyLayout.columnWidths[0] ?? 0 }}
+        >
+          {period === "daily" ? t.tableDay : t.month}
+        </div>
+      </div>,
+      document.body,
+    ) : null}
+    {stickyLayout?.showFooter ? createPortal(
+      <div
+        className={`sticky-data-table-row sticky-data-table-${period}-view sticky-data-table-footer`}
+        style={{
+          left: stickyLayout.left,
+          width: stickyLayout.width,
+          height: stickyLayout.footerHeight,
+          bottom: stickyLayout.footerBottom,
+          "--sticky-data-table-overflow": `${stickyScrollOverflow}px`,
+        } as React.CSSProperties}
+      >
+        <div
+          className="sticky-data-table-scroll"
+          ref={stickyFooterRef}
+        >
+          <table
+            className={tableClassName}
+            style={{ width: stickyLayout.tableWidth, minWidth: stickyLayout.tableWidth }}
+          >
+            {renderStickyColgroup()}
+            <tfoot>{renderFooterRow()}</tfoot>
+          </table>
+        </div>
+        <div
+          aria-hidden="true"
+          className="sticky-data-table-frozen-cell sticky-data-table-frozen-footer"
+          style={{ width: stickyLayout.columnWidths[0] ?? 0 }}
+        >
+          {t.total}
+        </div>
+      </div>,
+      document.body,
+    ) : null}
+    </>
   );
 }
 
@@ -7035,7 +8593,6 @@ function GreenTariffReconciliationDetails({
   readonly usdRate: number;
 }) {
   const summary = reconciliation.summary;
-  const formatEnergy = (value: number) => formatNumber(value, 2, 2);
   const formatMoneyValue = (value: number) => formatNumber(moneyFromUah(value, currency, usdRate), 2, 2);
 
   return (
@@ -7066,22 +8623,22 @@ function GreenTariffReconciliationDetails({
       </p>
       <ReceiptComparisonTable
         title={t.receiptGridEnergy}
-        unit={energyUnit(lang)}
+        unit=""
         columns={[
           { label: t.import, value: reconciliation.grid.importKwh },
           { label: t.export, value: reconciliation.grid.exportKwh },
         ]}
-        formatValue={formatEnergy}
+        formatValue={(value) => formatKwh(value, lang)}
         t={t}
       />
       <ReceiptComparisonTable
         title={t.receiptPayableBalance}
-        unit={energyUnit(lang)}
+        unit=""
         columns={[
           { label: t.receiptConsumer, value: reconciliation.payable.consumerKwh },
           { label: t.receiptSupplier, value: reconciliation.payable.supplierKwh },
         ]}
-        formatValue={formatEnergy}
+        formatValue={(value) => formatKwh(value, lang)}
         t={t}
       />
       <ReceiptComparisonTable
@@ -7128,7 +8685,7 @@ function ReceiptComparisonTable({
 }) {
   return (
     <section className="receipt-comparison-section">
-      <h3>{title}<span>{unit}</span></h3>
+      <h3>{title}{unit ? <span>{unit}</span> : null}</h3>
       <table className="receipt-comparison-table">
         <thead>
           <tr>
@@ -7411,7 +8968,7 @@ function ConsumedInfo({
   return (
     <div className="info-stack">
       <ConsumedInfoTable
-        label={energyUnit(lang)}
+        label={t.energy}
         values={[
           formatKwh(totals.total, lang),
           formatKwh(totals.day, lang),
@@ -7429,6 +8986,119 @@ function ConsumedInfo({
         t={t}
       />
     </div>
+  );
+}
+
+function WithoutPlantConsumptionInfo({
+  t,
+  lang,
+  currency,
+  rows,
+}: {
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly currency: Currency;
+  readonly rows: readonly MonthRow[];
+}) {
+  const totals = rows.reduce(
+    (sum, row) => {
+      const projection = projectConsumptionWithoutPlant(
+        row.consumedDay,
+        row.consumedNight,
+        lossesTotal(row),
+        tariffFromRow(row),
+      );
+      return {
+        consumedDay: sum.consumedDay + projection.consumedDay,
+        consumedNight: sum.consumedNight + projection.consumedNight,
+        consumedTotal: sum.consumedTotal + projection.consumedTotal,
+        lossesDay: sum.lossesDay + projection.lossesDay,
+        lossesNight: sum.lossesNight + projection.lossesNight,
+        lossesTotal: sum.lossesTotal + projection.lossesTotal,
+        projectedDay: sum.projectedDay + projection.projectedDay,
+        projectedNight: sum.projectedNight + projection.projectedNight,
+        projectedTotal: sum.projectedTotal + projection.projectedTotal,
+        dayCost: sum.dayCost + moneyFromUah(projection.dayCost, currency, row.usdRate),
+        nightCost: sum.nightCost + moneyFromUah(projection.nightCost, currency, row.usdRate),
+        totalCost: sum.totalCost + moneyFromUah(projection.totalCost, currency, row.usdRate),
+      };
+    },
+    {
+      consumedDay: 0,
+      consumedNight: 0,
+      consumedTotal: 0,
+      lossesDay: 0,
+      lossesNight: 0,
+      lossesTotal: 0,
+      projectedDay: 0,
+      projectedNight: 0,
+      projectedTotal: 0,
+      dayCost: 0,
+      nightCost: 0,
+      totalCost: 0,
+    },
+  );
+
+  const projectedValue = formatKwh(totals.projectedTotal, lang);
+  const lossesValue = formatKwh(totals.lossesTotal, lang);
+  const costValue = formatDisplayMoney(totals.totalCost, currency, lang);
+
+  return (
+    <section className="info-modal-section">
+      <h3>{t.withoutPlantProjection}</h3>
+      <p>
+        {lang === "uk" ? (
+          <>Без станції та інвертора інверторних втрат не було б. Розрахунок віднімає <strong>{lossesValue}</strong> втрат від споживання пропорційно денній і нічній часткам. Решта <strong>{projectedValue}</strong> оцінюється за історичними тарифами кожного періоду — за електроенергію довелося б сплатити <strong>{costValue}</strong>.</>
+        ) : (
+          <>Without the plant and inverter, inverter losses would not exist. This estimate subtracts <strong>{lossesValue}</strong> of losses from consumption in proportion to the day and night shares. The remaining <strong>{projectedValue}</strong> is priced with each period's historical tariffs—you would have paid <strong>{costValue}</strong> for electricity.</>
+        )}
+      </p>
+      <MathInfo
+        rows={[
+          {
+            label: t.inverterLossesRemoved,
+            value: (
+              <StackedValues rows={[
+                { label: t.day, value: formatKwh(totals.lossesDay, lang), tone: "day" },
+                { label: t.night, value: formatKwh(totals.lossesNight, lang), tone: "night" },
+                { label: t.total, value: <FormulaResult>{lossesValue}</FormulaResult> },
+              ]} />
+            ),
+          },
+          {
+            label: t.projectedConsumption,
+            value: (
+              <StackedValues rows={[
+                {
+                  label: t.day,
+                  value: <><FormulaResult>{formatKwh(totals.projectedDay, lang)}</FormulaResult> = {formatKwh(totals.consumedDay, lang)} - {formatKwh(totals.lossesDay, lang)}</>,
+                  tone: "day",
+                },
+                {
+                  label: t.night,
+                  value: <><FormulaResult>{formatKwh(totals.projectedNight, lang)}</FormulaResult> = {formatKwh(totals.consumedNight, lang)} - {formatKwh(totals.lossesNight, lang)}</>,
+                  tone: "night",
+                },
+                {
+                  label: t.total,
+                  value: <><FormulaResult>{projectedValue}</FormulaResult> = {formatKwh(totals.consumedTotal, lang)} - {lossesValue}</>,
+                },
+              ]} />
+            ),
+          },
+          {
+            label: t.amountDue,
+            value: (
+              <StackedValues rows={[
+                { label: t.day, value: <FormulaResult>{formatDisplayMoney(totals.dayCost, currency, lang)}</FormulaResult>, tone: "day" },
+                { label: t.night, value: <FormulaResult>{formatDisplayMoney(totals.nightCost, currency, lang)}</FormulaResult>, tone: "night" },
+                { label: t.total, value: <FormulaResult>{costValue}</FormulaResult> },
+              ]} />
+            ),
+          },
+        ]}
+      />
+    </section>
   );
 }
 
@@ -7709,13 +9379,13 @@ function formatUtilityRecordDate(value: string, lang: Lang) {
 
   if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat(lang === "uk" ? "uk-UA" : "en-US", {
+  return formatLocalizedDate(date, lang, {
     day: "numeric",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+  });
 }
 
 function RoiInfo({
@@ -8198,47 +9868,90 @@ function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefine
 function InvestmentBreakdown({
   t,
   lang,
-  currency,
   initialInvestmentUsd,
   launchDate,
   launchUsdRate,
   spendings,
   spendingUsdRateById,
-  total,
 }: {
   readonly t: Record<string, string>;
   readonly lang: Lang;
-  readonly currency: Currency;
   readonly initialInvestmentUsd: number;
   readonly launchDate?: Date;
   readonly launchUsdRate: number;
   readonly spendings: readonly PlantSpending[];
   readonly spendingUsdRateById: ReadonlyMap<number, number>;
-  readonly total: number;
 }) {
   const sortedSpendings = [...spendings].sort((first, second) => (
     first.date.getTime() - second.date.getTime() || first.id - second.id
   ));
+  const investmentRows = [
+    {
+      id: "initial",
+      label: t.initialInvestment,
+      date: launchDate ? formatLaunchDate(launchDate, lang) : "-",
+      amountUsd: initialInvestmentUsd,
+      usdRate: launchUsdRate,
+      tone: "green",
+    },
+    ...sortedSpendings.map((spending) => ({
+      id: `spending-${spending.id}`,
+      label: t.damageReplacement,
+      date: formatLaunchDate(spending.date, lang),
+      amountUsd: spending.amountUsd,
+      usdRate: spendingUsdRateById.get(spending.id) ?? 1,
+      tone: "rose",
+    })),
+  ];
+  const totalUsd = investmentRows.reduce((sum, row) => sum + row.amountUsd, 0);
+  const totalUah = investmentRows.reduce((sum, row) => sum + moneyFromUsd(row.amountUsd, "UAH", row.usdRate), 0);
 
   return (
     <div className="info-stack investment-breakdown">
-      <MathInfo
-        rows={[
-          {
-            label: [t.initialInvestment, launchDate ? formatLaunchDate(launchDate, lang) : ""].filter(Boolean).join(" · "),
-            value: <StackedValues rows={investmentAmountRows(initialInvestmentUsd, launchUsdRate, currency, t, lang)} />,
-          },
-          ...sortedSpendings.map((spending) => ({
-            label: `${t.damageReplacement} · ${formatLaunchDate(spending.date, lang)}`,
-            value: <StackedValues rows={investmentAmountRows(spending.amountUsd, spendingUsdRateById.get(spending.id) ?? 1, currency, t, lang)} />,
-          })),
-          {
-            label: t.total,
-            value: <FormulaResult>{formatDisplayMoney(total, currency, lang)}</FormulaResult>,
-          },
-        ]}
-      />
       <p>{t.investmentInfo}</p>
+      <div className="chart-inspector investment-breakdown-inspector">
+        <table className="chart-inspector-table investment-breakdown-table">
+          <colgroup>
+            <col style={{width: "30%"}} />
+            <col style={{width: "23%"}} />
+            <col style={{width: "47%"}} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">USD</th>
+              <th scope="col">USD/UAH</th>
+              <th scope="col">UAH</th>
+            </tr>
+          </thead>
+          <tbody>
+            {investmentRows.map((row) => (
+              <React.Fragment key={row.id}>
+                <tr className={`investment-breakdown-subheading ${row.tone}`}>
+                  <th colSpan={3} scope="rowgroup">
+                    <span className="investment-breakdown-subheading-content">
+                      <span>{row.label}</span>
+                      <span className="investment-breakdown-subheading-date">{row.date}</span>
+                    </span>
+                  </th>
+                </tr>
+                <tr className="investment-breakdown-values">
+                  <td>{formatDisplayMoney(row.amountUsd, "USD", lang)}</td>
+                  <td>{formatDisplayMoney(row.usdRate, "UAH", lang)}</td>
+                  <td>{formatDisplayMoney(moneyFromUsd(row.amountUsd, "UAH", row.usdRate), "UAH", lang)}</td>
+                </tr>
+              </React.Fragment>
+            ))}
+            <tr className="investment-breakdown-subheading investment-breakdown-total-heading">
+              <th colSpan={3} scope="rowgroup">{t.total}</th>
+            </tr>
+            <tr className="investment-breakdown-values investment-breakdown-total-values">
+              <td>{formatDisplayMoney(totalUsd, "USD", lang)}</td>
+              <td />
+              <td>{formatDisplayMoney(totalUah, "UAH", lang)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -8267,22 +9980,6 @@ function ExpensesInfo({ t, lang, currency, spendings, spendingUsdRateById }: Exp
       }))}
     />
   );
-}
-
-function investmentAmountRows(
-  amountUsd: number,
-  usdRate: number,
-  currency: Currency,
-  t: Record<string, string>,
-  lang: Lang,
-): readonly StackedValueRow[] {
-  return currency === "USD"
-    ? [{ label: t.amount, value: formatDisplayMoney(amountUsd, "USD", lang) }]
-    : [
-      { label: "USD", value: formatDisplayMoney(amountUsd, "USD", lang) },
-      { label: t.usdRate, value: `${formatNumber(usdRate, 2, 2)} UAH/USD` },
-      { label: t.amount, value: formatDisplayMoney(moneyFromUsd(amountUsd, "UAH", usdRate), "UAH", lang) },
-    ];
 }
 
 function MathInfo({
@@ -8316,8 +10013,8 @@ function StackedValues({
 }) {
   return (
     <span className="stacked-values">
-      {rows.map((row) => (
-        <span key={row.label} className={row.wide ? "stacked-values-wide" : undefined}>
+      {rows.map((row, index) => (
+        <span key={`${row.label}-${index}`} className={row.wide ? "stacked-values-wide" : undefined}>
           {row.wide ? (
             <>
               <b aria-hidden="true" />

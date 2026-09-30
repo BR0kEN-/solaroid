@@ -298,8 +298,10 @@ DAM price refresh:
 Dashboard modes:
 
 - Monthly: ROI, finance, production, import, consumption, inverter losses, forecast, monthly data table.
-- Daily: daily KPIs, daily charts, daily data table with month selector and inverter losses.
+- Daily: selected-range aggregate KPIs, daily charts, daily data table with month selector and inverter losses.
 - Comparison: compares two readable plants by selected daily or monthly period.
+
+On mobile, Solaroid uses a compact icon-only bottom navigation ordered as Refresh, Overview, Comparison, and Settings. Its surface is white in HA mode, and framed HA dashboards leave safe-area spacing to Home Assistant; standalone and portal views retain their own bottom inset. Overview keeps the Monthly/Daily and range controls at the top of its content. Settings opens a bottom sheet for language and currency. The ROI recovery block exposes compact Forecast and Breakdown actions for its existing detail popups. The desktop toolbar remains unchanged.
 
 ### In-product guide
 

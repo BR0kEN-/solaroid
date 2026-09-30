@@ -105,6 +105,11 @@ export function importTotal(row: EnergySnapshot) {
   return row.importDay + row.importNight
 }
 
+export function solarCoveragePercent(consumed: number, imported: number) {
+  if (consumed <= 0) return 0
+  return ((consumed - imported) / consumed) * PERCENT_DIVISOR
+}
+
 export function exportTotal(row: EnergySnapshot) {
   return row.exportDay + row.exportNight
 }
@@ -341,6 +346,57 @@ export function importCostBreakdown(importDay: number, importNight: number, tari
 
 export function importEnergyCost(importDay: number, importNight: number, tariff: Tariff) {
   return importCostBreakdown(importDay, importNight, tariff).total
+}
+
+export interface ConsumptionWithoutPlantProjection {
+  readonly consumedDay: number
+  readonly consumedNight: number
+  readonly consumedTotal: number
+  readonly lossesDay: number
+  readonly lossesNight: number
+  readonly lossesTotal: number
+  readonly projectedDay: number
+  readonly projectedNight: number
+  readonly projectedTotal: number
+  readonly dayCost: number
+  readonly nightCost: number
+  readonly totalCost: number
+}
+
+export function projectConsumptionWithoutPlant(
+  consumedDay: number,
+  consumedNight: number,
+  inverterLosses: number,
+  tariff: Tariff,
+): ConsumptionWithoutPlantProjection {
+  const safeConsumedDay = Math.max(0, consumedDay)
+  const safeConsumedNight = Math.max(0, consumedNight)
+  const consumedTotal = safeConsumedDay + safeConsumedNight
+  const lossesTotal = Math.min(Math.max(0, inverterLosses), consumedTotal)
+  const dayShare = consumedTotal > 0 ? safeConsumedDay / consumedTotal : 0
+  const lossesDay = lossesTotal * dayShare
+  const lossesNight = lossesTotal - lossesDay
+  const projectedDay = safeConsumedDay - lossesDay
+  const projectedNight = safeConsumedNight - lossesNight
+  const projectedTotal = projectedDay + projectedNight
+  const cost = importCostBreakdown(projectedDay, projectedNight, tariff)
+  const dayCost = cost.discountedDay * tariff.importDay + cost.regularDay * regularImportDayPrice(tariff)
+  const nightCost = cost.discountedNight * tariff.importNight + cost.regularNight * regularImportNightPrice(tariff)
+
+  return {
+    consumedDay: safeConsumedDay,
+    consumedNight: safeConsumedNight,
+    consumedTotal,
+    lossesDay,
+    lossesNight,
+    lossesTotal,
+    projectedDay,
+    projectedNight,
+    projectedTotal,
+    dayCost,
+    nightCost,
+    totalCost: dayCost + nightCost,
+  }
 }
 
 export function consumedPrice(row: EnergySnapshot, tariff: Tariff) {
