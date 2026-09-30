@@ -78,7 +78,7 @@ const spendings: readonly Solaroid.Supabase.Plant.Spending.Record[] = [
     id: 2,
     plant_id: 'bondas',
     date: '2026-08-20',
-    type: 'damage_replacement',
+    type: 'improvement',
     amount_usd: 500,
     created_at: '2026-08-21 00:00:00.000+00',
     updated_at: '2026-08-21 00:00:00.000+00',

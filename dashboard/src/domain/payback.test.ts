@@ -45,13 +45,14 @@ describe('date durations', () => {
 })
 
 describe('payback', () => {
-  it('adds damage replacement to payback while keeping monthly operational ROI unchanged', () => {
+  it('adds both spending types to payback while keeping monthly operational ROI unchanged', () => {
     const rows = [month(5_000, '2026-08-01', 50)]
     const result = calculatePayback({
       rows,
       investmentUsd: 100,
       spendings: [
-        { id: 1, date: new Date('2026-08-20T00:00:00'), type: 'damage_replacement', amountUsd: 50 },
+        { id: 1, date: new Date('2026-08-20T00:00:00'), type: 'damage_replacement', amountUsd: 25 },
+        { id: 2, date: new Date('2026-08-21T00:00:00'), type: 'improvement', amountUsd: 25 },
       ],
       spendingUsdRate: () => 50,
       currency: 'USD',

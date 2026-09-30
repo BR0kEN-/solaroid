@@ -61,6 +61,23 @@ describe('Supabase data mapping', () => {
     })
   })
 
+  it('maps an improvement spending without changing its USD amount or exact date', () => {
+    const spending = toPlantSpending({
+      id: 8,
+      plant_id: 'bondas',
+      date: '2026-09-05',
+      type: 'improvement',
+      amount_usd: 750,
+    })
+
+    expect(spending).toEqual({
+      id: 8,
+      date: new Date('2026-09-05T00:00:00'),
+      type: 'improvement',
+      amountUsd: 750,
+    })
+  })
+
   it('uses the latest positive daily USD rate in a month before manual fallback', () => {
     const loaded = toLoadedPlant({
       plant,
