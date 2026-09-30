@@ -17,12 +17,14 @@ import {
   netExportNightPrice,
   payment,
   plantCapacityKwp,
+  projectConsumptionWithoutPlant,
   productionYieldKwhPerKwp,
   reconciliationValue,
   repriceMonthRow,
   savings,
   selfConsumed,
   selfConsumptionSavings,
+  solarCoveragePercent,
   spendingUsdInMonth,
   totalInvestmentMoney,
   totalInvestmentUsd,
@@ -102,6 +104,30 @@ describe('energy totals', () => {
     expect(balance(row)).toBe(0)
     expect(commercialBalance(row, true)).toBe(0)
     expect(commercialBalance(row, false)).toBe(30)
+    expect(solarCoveragePercent(100, 30)).toBe(70)
+    expect(solarCoveragePercent(0, 30)).toBe(0)
+  })
+
+  it('projects no-plant consumption by removing inverter losses proportionally', () => {
+    const projection = projectConsumptionWithoutPlant(80, 20, 10, tariff)
+
+    expect(projection.lossesDay).toBe(8)
+    expect(projection.lossesNight).toBe(2)
+    expect(projection.projectedDay).toBe(72)
+    expect(projection.projectedNight).toBe(18)
+    expect(projection.projectedTotal).toBe(90)
+    expect(projection.dayCost).toBeCloseTo(311.04)
+    expect(projection.nightCost).toBeCloseTo(38.88)
+    expect(projection.totalCost).toBeCloseTo(349.92)
+  })
+
+  it('never projects negative consumption when losses exceed consumption', () => {
+    const projection = projectConsumptionWithoutPlant(4, 6, 20, tariff)
+
+    expect(projection.lossesTotal).toBe(10)
+    expect(projection.projectedDay).toBe(0)
+    expect(projection.projectedNight).toBe(0)
+    expect(projection.totalCost).toBe(0)
   })
 })
 
