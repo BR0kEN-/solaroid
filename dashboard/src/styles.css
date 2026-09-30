@@ -2184,6 +2184,11 @@ h2 {
   background: color-mix(in srgb, var(--rose) 9%, var(--panel));
 }
 
+.investment-breakdown-table tbody .investment-breakdown-subheading.indigo th {
+  color: var(--indigo);
+  background: color-mix(in srgb, var(--indigo) 9%, var(--panel));
+}
+
 .investment-breakdown-table tbody .investment-breakdown-total-values td {
   font-weight: 600;
 }
@@ -2202,6 +2207,10 @@ h2 {
 
 .investment-breakdown-table tbody tr.investment-breakdown-subheading.rose:hover > * {
   background: color-mix(in srgb, var(--rose) 9%, var(--panel));
+}
+
+.investment-breakdown-table tbody tr.investment-breakdown-subheading.indigo:hover > * {
+  background: color-mix(in srgb, var(--indigo) 9%, var(--panel));
 }
 
 .chart-inspector tbody td.finance-roi-highlight,

@@ -9907,7 +9907,7 @@ function InvestmentBreakdown({
       date: formatLaunchDate(spending.date, lang),
       amountUsd: spending.amountUsd,
       usdRate: spendingUsdRateById.get(spending.id) ?? 1,
-      tone: "rose",
+      tone: spending.type === "damage_replacement" ? "rose" : "indigo",
     })),
   ];
   const totalUsd = investmentRows.reduce((sum, row) => sum + row.amountUsd, 0);
