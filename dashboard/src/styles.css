@@ -4775,7 +4775,7 @@ tbody tr:hover {
     margin-bottom: 6px;
   }
 
-  .app-shell.ha-iframe .content {
+  .app-shell.ha-mode .content {
     padding-bottom: 66px;
   }
 
@@ -4908,7 +4908,7 @@ tbody tr:hover {
     border-bottom: 1px solid var(--border);
   }
 
-  .app-shell.ha-iframe .mobile-bottom-nav {
+  .app-shell.ha-mode .mobile-bottom-nav {
     min-height: 52px;
     padding-bottom: 4px;
   }
