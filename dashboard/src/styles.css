@@ -4747,6 +4747,7 @@ tbody tr:hover {
   }
 
   .portal-dashboard .content {
+    padding-top: calc(10px + env(safe-area-inset-top));
     padding-bottom: calc(66px + env(safe-area-inset-bottom));
   }
 

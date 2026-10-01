@@ -7899,12 +7899,12 @@ function DataTable({
   const renderHeaderRow = () => (
     <tr>
       <Th label={period === "daily" ? t.tableDay : t.month} />
-      <Th label={t.production} />
-      <Th label={t.export} />
-      <Th label={t.import} />
-      <Th label={t.consumed} />
-      <Th label={t.losses} />
-      <Th label={t.balance} />
+      <Th label={`${t.production} (${kwh})`} />
+      <Th label={`${t.export} (${kwh})`} />
+      <Th label={`${t.import} (${kwh})`} />
+      <Th label={`${t.consumed} (${kwh})`} />
+      <Th label={`${t.losses} (${kwh})`} />
+      <Th label={`${t.balance} (${kwh})`} />
       <Th label={`${t.netExport} (${money}/${kwh})`} />
       <Th label={`${t.import} (${money}/${kwh})`} infoLabel={t.import} onInfo={onImportPriceInfo} />
       <Th label={`${t.netPayment} (${money})`} infoLabel={t.netPayment} onInfo={onNetPaymentHeaderInfo} />
@@ -7915,15 +7915,15 @@ function DataTable({
   const renderFooterRow = () => (
     <tr>
       <th>{t.total}</th>
-      <td>{formatKwh(totals.production, lang)}</td>
-      <td>{formatKwh(totals.export, lang)}</td>
-      <td>{formatKwh(totals.importTotal, lang)}</td>
+      <td>{formatNumber(totals.production, 2, 2)}</td>
+      <td>{formatNumber(totals.export, 2, 2)}</td>
+      <td>{formatNumber(totals.importTotal, 2, 2)}</td>
       <td>
-        <TableValueInfo value={formatKwh(totals.consumedTotal, lang)} label={t.consumed} onInfo={() => onConsumedTotalsInfo(rows)} />
+        <TableValueInfo value={formatNumber(totals.consumedTotal, 2, 2)} label={t.consumed} onInfo={() => onConsumedTotalsInfo(rows)} />
       </td>
-      <td>{formatKwh(totals.lossesTotal, lang)}</td>
+      <td>{formatNumber(totals.lossesTotal, 2, 2)}</td>
       <td className={totals.balance < 0 ? "positive" : totals.balance > 0 ? "negative" : "muted"}>
-        {formatKwh(totals.balance, lang)}
+        {formatNumber(totals.balance, 2, 2)}
       </td>
       <td className="muted">-</td>
       <td className="muted">-</td>
@@ -7973,21 +7973,21 @@ function DataTable({
                   />
                 ) : formatDayLabel(row.date, lang)}
               </th>
-              <td>{formatKwh(row.production, lang)}</td>
+              <td>{formatNumber(row.production, 2, 2)}</td>
               <td>
-                <TableValueInfo value={formatKwh(exportTotal(row), lang)} label={t.export} onInfo={() => onExportSplitInfo(row)} />
+                <TableValueInfo value={formatNumber(exportTotal(row), 2, 2)} label={t.export} onInfo={() => onExportSplitInfo(row)} />
               </td>
               <td>
-                <TableValueInfo value={formatKwh(row.importTotal, lang)} label={t.import} onInfo={() => onImportSplitInfo(row)} />
+                <TableValueInfo value={formatNumber(row.importTotal, 2, 2)} label={t.import} onInfo={() => onImportSplitInfo(row)} />
               </td>
               <td>
-                <TableValueInfo value={formatKwh(row.consumedTotal, lang)} label={t.consumed} onInfo={() => onConsumedSplitInfo(row)} />
+                <TableValueInfo value={formatNumber(row.consumedTotal, 2, 2)} label={t.consumed} onInfo={() => onConsumedSplitInfo(row)} />
               </td>
               <td>
-                <TableValueInfo value={formatKwh(lossesTotal(row), lang)} label={t.losses} onInfo={() => onLossesSplitInfo(row)} />
+                <TableValueInfo value={formatNumber(lossesTotal(row), 2, 2)} label={t.losses} onInfo={() => onLossesSplitInfo(row)} />
               </td>
               <td className={row.balance < 0 ? "positive" : row.balance > 0 ? "negative" : "muted"}>
-                {formatKwh(row.balance, lang)}
+                {formatNumber(row.balance, 2, 2)}
               </td>
               <td className={`what-if-price-cell${changedCells?.has("export") ? " has-scenario" : ""}`}>
                 <TableValueInfo
