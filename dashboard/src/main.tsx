@@ -4065,6 +4065,7 @@ interface DashboardToolbarProps {
   readonly refresh?: () => void;
   readonly isLoading: boolean;
   readonly onSignOut?: () => void;
+  readonly showSignOut?: boolean;
 }
 
 function DashboardToolbar({
@@ -4095,6 +4096,7 @@ function DashboardToolbar({
   refresh,
   isLoading,
   onSignOut,
+  showSignOut = false,
 }: DashboardToolbarProps) {
   const [isRangePickerOpen, setRangePickerOpen] = useState(false);
   const [isDailyRangePickerOpen, setDailyRangePickerOpen] = useState(false);
@@ -4374,11 +4376,12 @@ function DashboardToolbar({
             >
               <RefreshCw size={18} />
             </button>
-            {onSignOut ? (
+            {onSignOut || showSignOut ? (
               <button
                 type="button"
                 className="portal-logout-button"
                 onClick={onSignOut}
+                disabled={isLoading || !onSignOut}
                 aria-label={t.signOut}
                 title={t.signOut}
               >
@@ -4403,6 +4406,7 @@ interface MobileBottomNavigationProps {
   readonly onSettings: () => void;
   readonly onRefresh: () => void;
   readonly onSignOut?: () => void;
+  readonly showSignOut?: boolean;
 }
 
 function MobileBottomNavigation({
@@ -4416,11 +4420,17 @@ function MobileBottomNavigation({
   onSettings,
   onRefresh,
   onSignOut,
+  showSignOut = false,
 }: MobileBottomNavigationProps) {
   const isOverview = viewMode !== "comparison";
 
   return (
     <nav className="mobile-bottom-nav" aria-label="Navigation">
+      {onSignOut || showSignOut ? (
+        <button type="button" onClick={onSignOut} disabled={isLoading || !onSignOut} aria-label={t.signOut} title={t.signOut}>
+          <LogOut size={21} />
+        </button>
+      ) : null}
       <button
         type="button"
         className={isRefreshing ? "is-refreshing" : ""}
@@ -4431,11 +4441,6 @@ function MobileBottomNavigation({
       >
         <RefreshCw size={21} />
       </button>
-      {onSignOut ? (
-        <button type="button" onClick={onSignOut} aria-label={t.signOut} title={t.signOut}>
-          <LogOut size={21} />
-        </button>
-      ) : null}
       <button
         type="button"
         className={isOverview ? "is-active" : ""}
@@ -4543,8 +4548,10 @@ function MobileSettingsSheet({
 
 function PortalLoading({ label, lang }: { readonly label: string; readonly lang: Lang }) {
   const t = i18n[lang];
+  const mobileSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const disabledAction = () => undefined;
   return (
-    <main className="app-shell portal-loading-app" aria-label={label} aria-busy="true">
+    <main className="app-shell portal-dashboard portal-loading-app" aria-label={label} aria-busy="true">
       <section className="content">
         <DashboardToolbar
           t={t}
@@ -4555,8 +4562,21 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
           range="all"
           isRefreshing
           isLoading
+          showSignOut
         />
         <MonthlyPageSkeletonTail />
+        <MobileBottomNavigation
+          t={t}
+          viewMode="monthly"
+          isRefreshing
+          isLoading
+          settingsButtonRef={mobileSettingsButtonRef}
+          onOverview={disabledAction}
+          onCompare={disabledAction}
+          onSettings={disabledAction}
+          onRefresh={disabledAction}
+          showSignOut
+        />
       </section>
     </main>
   );
