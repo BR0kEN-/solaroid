@@ -59,7 +59,6 @@ const monthRangePresets = [1, 3, 6, 12] as const;
 const dailyRangePresets = [7, 14, 21, 30] as const;
 type Lang = "en" | "uk";
 const IS_HA_MODE = APP_MODE === "ha";
-const IS_HA_IFRAME = APP_MODE === "ha" && window.self !== window.top;
 interface PlantComparisonResult {
   readonly mode: PlantComparisonMode;
   readonly month: string;
@@ -3129,7 +3128,7 @@ function App({
 
   return (
     <LanguageContext.Provider value={lang}>
-    <main className={`app-shell dashboard-view-mode-${viewMode}${IS_HA_MODE ? " ha-mode" : ""}${IS_HA_IFRAME ? " ha-iframe" : ""}`}>
+    <main className={`app-shell dashboard-view-mode-${viewMode}${IS_HA_MODE ? " ha-mode" : ""}`}>
       <section className="content">
         <DashboardToolbar
           variant="desktop"
