@@ -2109,6 +2109,66 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.chart-inspector tbody td.positive {
+  color: var(--green);
+}
+
+.chart-inspector tbody td.negative {
+  color: var(--rose);
+}
+
+.chart-inspector tbody td.muted {
+  color: var(--muted);
+}
+
+.utility-meter-inspector .chart-inspector-table {
+  table-layout: auto;
+}
+
+.utility-meter-inspector .chart-inspector-table th:first-child {
+  width: 1%;
+  padding-right: 20px;
+}
+
+.utility-meter-inspector .chart-inspector-table tbody th:first-child,
+.utility-meter-inspector .chart-inspector-table tbody th:first-child .chart-inspector-label-text {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.utility-meter-inspector .chart-inspector-table thead th:first-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.utility-meter-inspector .chart-inspector-table tbody .chart-inspector-label i {
+  display: none;
+}
+
+.utility-meter-inspector .chart-inspector-table thead th:nth-child(2)::before,
+.utility-meter-inspector .chart-inspector-table thead th:nth-child(3)::before,
+.utility-meter-inspector .chart-inspector-table thead th:nth-child(4)::before {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 3px;
+  vertical-align: middle;
+  content: "";
+}
+
+.utility-meter-inspector .chart-inspector-table thead th:nth-child(2)::before {
+  background: #3175c7;
+}
+
+.utility-meter-inspector .chart-inspector-table thead th:nth-child(3)::before {
+  background: #6266c9;
+}
+
+.utility-meter-inspector .chart-inspector-table thead th:nth-child(4)::before {
+  background: currentColor;
+}
+
 .investment-breakdown-table col:first-child {
   width: 30%;
 }
@@ -2777,6 +2837,10 @@ h2 {
   line-height: 1.5;
 }
 
+.info-modal-body .chart-inspector + p {
+  margin-top: 10px;
+}
+
 .info-modal-actions {
   display: none;
 }
@@ -2811,15 +2875,18 @@ h2 {
 
 .utility-comparison-section {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .utility-comparison-title {
   margin: 0;
-  color: color-mix(in srgb, var(--text), var(--muted) 24%);
-  font-size: var(--fs-base);
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-heading);
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .info-list {
@@ -3881,13 +3948,64 @@ h2 {
 
 .net-payment-math dd,
 .net-payment-math .stacked-values > span > span,
-.net-payment-math .input-values > span,
 .net-payment-math .formula-result,
 .net-payment-math .tax-inline-values,
 .net-payment-math .positive,
 .net-payment-math .negative,
 .net-payment-math .muted {
   font-weight: 500;
+}
+
+.net-payment-breakdown {
+  counter-reset: calculation-step;
+  gap: 8px;
+}
+
+.net-payment-breakdown > div {
+  gap: 6px;
+  padding: 7px 0;
+  border-bottom: 0;
+}
+
+.net-payment-breakdown > div:nth-child(n + 2) > dt::before {
+  counter-increment: calculation-step;
+  content: counter(calculation-step) ". ";
+}
+
+.net-payment-breakdown > div:nth-child(n + 2) > dd {
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.net-payment-breakdown > div:nth-child(n + 2) > dd::-webkit-scrollbar {
+  display: none;
+}
+
+.roi-calculation-breakdown {
+  counter-reset: calculation-step;
+  gap: 8px;
+}
+
+.roi-calculation-breakdown > div {
+  gap: 6px;
+  padding: 7px 0;
+  border-bottom: 0;
+}
+
+.roi-calculation-breakdown > div:nth-child(n + 2) > dt::before {
+  counter-increment: calculation-step;
+  content: counter(calculation-step) ". ";
+}
+
+.roi-calculation-breakdown > div:nth-child(n + 2) > dd {
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.roi-calculation-breakdown > div:nth-child(n + 2) > dd::-webkit-scrollbar {
+  display: none;
 }
 
 .math-note-stack {
@@ -4304,62 +4422,135 @@ h2 {
   color: var(--input-night-text) !important;
 }
 
-.input-values {
+.calculation-input-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.calculation-input-group {
+  display: grid;
+  gap: 6px;
+}
+
+.calculation-input-group h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.calculation-input-group dl {
   display: grid;
   gap: 5px;
+  margin: 0;
 }
 
-.input-values > span {
+.calculation-input-group dl > div {
   display: grid;
-  grid-template-columns: minmax(118px, auto) minmax(0, 1fr);
-  gap: 10px;
-  align-items: baseline;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.calculation-input-group dt {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.calculation-input-group dd {
+  display: grid;
+  justify-items: end;
   min-width: 0;
+  margin: 0;
   color: var(--text);
-  font-size: var(--fs-base);
-  font-weight: 700;
-  line-height: 1.45;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: right;
 }
 
-.net-payment-math .input-values > span {
-  grid-template-columns: 130px minmax(0, 1fr);
+.calculation-input-group dd small {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: normal;
 }
 
-.input-values b {
+.calculation-trace-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.calculation-trace-rows > div {
+  display: grid;
+  gap: 2px;
+}
+
+.calculation-trace-label {
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: 600;
   line-height: 1.35;
 }
 
-.input-values > span > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.input-values-day,
-.input-values-night {
-  font-weight: 800;
-}
-
-.input-values-day {
+.calculation-trace-label.day {
   color: var(--input-day-text);
 }
 
-.input-values-night {
+.calculation-trace-label.night {
   color: var(--input-night-text);
+}
+
+.calculation-trace-divider {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.calculation-trace-formula {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.calculation-trace-formula::-webkit-scrollbar {
+  display: none;
+}
+
+.calculation-trace-detail {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.calculation-trace-detail::-webkit-scrollbar {
+  display: none;
 }
 
 .net-payment-math dd,
 .net-payment-math .stacked-values > span > span,
-.net-payment-math .input-values > span,
 .net-payment-math .formula-result,
 .net-payment-math .tax-inline-values,
 .net-payment-math .positive,
 .net-payment-math .negative,
-.net-payment-math .muted,
-.net-payment-math .input-values-day,
-.net-payment-math .input-values-night {
+.net-payment-math .muted {
   font-weight: 500;
 }
 

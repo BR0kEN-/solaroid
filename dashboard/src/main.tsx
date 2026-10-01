@@ -217,6 +217,7 @@ const i18n = {
     dailyRangePaymentPerformanceTitle: "Selected days' payment ÷ selected days' savings.",
     dailyRangeConsumptionPerformanceTitle: "Selected days' savings minus payment ÷ selected days' savings.",
     cost: "Cost",
+    consumedCostInfo: "Not an amount you owe — it is the money-worth of this consumption, what you would have paid for it. The actual bill is lower by however much solar covered.",
     compareMonths: "Compare months",
     firstMonth: "First month",
     secondMonth: "Second month",
@@ -506,6 +507,7 @@ const i18n = {
     dailyRangePaymentPerformanceTitle: "Виплати за вибрані дні ÷ заощадження за вибрані дні.",
     dailyRangeConsumptionPerformanceTitle: "Заощадження мінус виплати за вибрані дні ÷ заощадження за вибрані дні.",
     cost: "Вартість",
+    consumedCostInfo: "Це не сума до сплати — це грошовий еквівалент цього споживання: скільки б за нього довелося заплатити. Фактичний рахунок менший на суму, яку покрила сонячна генерація.",
     compareMonths: "Порівняти місяці",
     firstMonth: "Перший місяць",
     secondMonth: "Другий місяць",
@@ -2603,12 +2605,32 @@ function App({
       return {
         title: `${t.import} · ${row.month}`,
         body: (
-          <SplitInfo
-            t={t}
-            lang={lang}
-            total={row.importTotal}
-            day={row.importDay}
-            night={row.importNight}
+          <ChartInspector
+            hint=""
+            selection={{
+              month: "",
+              hideHeader: true,
+              items: [
+                {
+                  label: t.total,
+                  color: colors.ink,
+                  value: formatKwh(row.importTotal, lang),
+                  cells: [formatKwh(row.importTotal, lang)],
+                },
+                {
+                  label: t.day,
+                  color: colors.blue,
+                  value: formatKwh(row.importDay, lang),
+                  cells: [formatKwh(row.importDay, lang)],
+                },
+                {
+                  label: t.night,
+                  color: colors.indigo,
+                  value: formatKwh(row.importNight, lang),
+                  cells: [formatKwh(row.importNight, lang)],
+                },
+              ],
+            }}
           />
         ),
       };
@@ -2618,12 +2640,32 @@ function App({
       return {
         title: `${t.export} · ${row.month}`,
         body: (
-          <SplitInfo
-            t={t}
-            lang={lang}
-            total={exportTotal(row)}
-            day={row.exportDay}
-            night={row.exportNight}
+          <ChartInspector
+            hint=""
+            selection={{
+              month: "",
+              hideHeader: true,
+              items: [
+                {
+                  label: t.total,
+                  color: colors.ink,
+                  value: formatKwh(exportTotal(row), lang),
+                  cells: [formatKwh(exportTotal(row), lang)],
+                },
+                {
+                  label: t.day,
+                  color: colors.blue,
+                  value: formatKwh(row.exportDay, lang),
+                  cells: [formatKwh(row.exportDay, lang)],
+                },
+                {
+                  label: t.night,
+                  color: colors.indigo,
+                  value: formatKwh(row.exportNight, lang),
+                  cells: [formatKwh(row.exportNight, lang)],
+                },
+              ],
+            }}
           />
         ),
       };
@@ -2660,14 +2702,36 @@ function App({
       return {
         title: `${t.losses} · ${row.month}`,
         body: (
-          <SplitInfo
-            t={t}
-            lang={lang}
-            total={lossesTotal(row)}
-            day={row.lossesDay ?? 0}
-            night={row.lossesNight ?? 0}
-            note={t.lossesInfo}
-          />
+          <>
+            <ChartInspector
+              hint=""
+              selection={{
+                month: "",
+                hideHeader: true,
+                items: [
+                  {
+                    label: t.total,
+                    color: colors.ink,
+                    value: formatKwh(lossesTotal(row), lang),
+                    cells: [formatKwh(lossesTotal(row), lang)],
+                  },
+                  {
+                    label: t.day,
+                    color: colors.orange,
+                    value: formatKwh(row.lossesDay ?? 0, lang),
+                    cells: [formatKwh(row.lossesDay ?? 0, lang)],
+                  },
+                  {
+                    label: t.night,
+                    color: colors.rose,
+                    value: formatKwh(row.lossesNight ?? 0, lang),
+                    cells: [formatKwh(row.lossesNight ?? 0, lang)],
+                  },
+                ],
+              }}
+            />
+            <p>{t.lossesInfo}</p>
+          </>
         ),
       };
     }
@@ -2680,7 +2744,7 @@ function App({
       return {
         title: `${t.exportPrice} · ${row.month}`,
         body: (
-          <ExportPriceInfo
+          <ExportPricePopupInfo
             t={t}
             grossDay={formatDisplayMoney(grossDayPrice, currency, lang)}
             grossNight={formatDisplayMoney(grossNightPrice, currency, lang)}
@@ -3927,7 +3991,7 @@ function PortalRoot() {
 
   if (busy) {
     return shell(
-      <PortalLoading label={t.loading} lang={lang} />,
+      <PortalLoading label={t.loading} lang={lang} setLang={setLang} />,
     );
   }
 
@@ -3999,7 +4063,7 @@ function PortalRoot() {
     );
   }
 
-  if (!selectedPlant) return shell(<PortalLoading label={t.loading} lang={lang} />);
+  if (!selectedPlant) return shell(<PortalLoading label={t.loading} lang={lang} setLang={setLang} />);
 
   return shell(
     <div className="portal-dashboard">
@@ -4200,7 +4264,7 @@ function DashboardToolbar({
             ))}
           </div>
         ) : null}
-        {variant === "desktop" && setLang ? <LanguageSwitcher lang={lang} setLang={setLang} variant="toolbar" /> : null}
+        {variant === "desktop" && setLang ? <LanguageSwitcher lang={lang} setLang={setLang} variant="toolbar" disabled={isLoading} /> : null}
         <div className={`segmented view view-${viewOptions.length}`} aria-label="View">
           {viewOptions.map((item) => (
             <button key={item} className={viewMode === item ? "selected" : ""} onClick={() => setViewMode?.(item)} disabled={isLoading}>
@@ -4546,7 +4610,13 @@ function MobileSettingsSheet({
   );
 }
 
-function PortalLoading({ label, lang }: { readonly label: string; readonly lang: Lang }) {
+interface PortalLoadingProps {
+  readonly label: string;
+  readonly lang: Lang;
+  readonly setLang: (lang: Lang) => void;
+}
+
+function PortalLoading({ label, lang, setLang }: PortalLoadingProps) {
   const t = i18n[lang];
   const mobileSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
   const disabledAction = () => undefined;
@@ -4554,11 +4624,25 @@ function PortalLoading({ label, lang }: { readonly label: string; readonly lang:
     <main className="app-shell portal-dashboard portal-loading-app" aria-label={label} aria-busy="true">
       <section className="content">
         <DashboardToolbar
+          variant="desktop"
+          t={t}
+          lang={lang}
+          setLang={setLang}
+          currency="UAH"
+          viewMode="monthly"
+          viewOptions={["monthly", "daily", "comparison"]}
+          range="all"
+          isRefreshing
+          isLoading
+          showSignOut
+        />
+        <DashboardToolbar
+          variant="mobile"
           t={t}
           lang={lang}
           currency="UAH"
           viewMode="monthly"
-          viewOptions={["monthly", "daily", "comparison"]}
+          viewOptions={["monthly", "daily"]}
           range="all"
           isRefreshing
           isLoading
@@ -5025,9 +5109,10 @@ interface LanguageSwitcherProps {
   readonly lang: Lang;
   readonly setLang: (lang: Lang) => void;
   readonly variant?: "default" | "toolbar";
+  readonly disabled?: boolean;
 }
 
-function LanguageSwitcher({ lang, setLang, variant = "default" }: LanguageSwitcherProps) {
+function LanguageSwitcher({ lang, setLang, variant = "default", disabled = false }: LanguageSwitcherProps) {
   const isToolbar = variant === "toolbar";
   return (
     <div className={isToolbar ? "segmented currency toolbar-language-switcher" : "language-switcher"} aria-label="Language">
@@ -5037,6 +5122,7 @@ function LanguageSwitcher({ lang, setLang, variant = "default" }: LanguageSwitch
           type="button"
           className={option === lang ? (isToolbar ? "selected" : "active") : ""}
           onClick={() => setLang(option)}
+          disabled={disabled}
           aria-pressed={option === lang}
         >
           {option.toUpperCase()}
@@ -8939,42 +9025,6 @@ function formatReportDate(value: string, lang: Lang) {
   return Number.isNaN(date.valueOf()) ? value : formatDayLabel(date, lang);
 }
 
-function SplitInfo({
-  t,
-  lang,
-  total,
-  day,
-  night,
-  note,
-}: {
-  readonly t: Record<string, string>;
-  readonly lang: Lang;
-  readonly total: number;
-  readonly day: number;
-  readonly night: number;
-  readonly note?: string;
-}) {
-  return (
-    <>
-      {note ? <p>{note}</p> : null}
-      <dl className="split-info">
-        <div>
-          <dt>{t.total}</dt>
-          <dd>{formatKwh(total, lang)}</dd>
-        </div>
-        <div>
-          <dt>{t.day}</dt>
-          <dd>{formatKwh(day, lang)}</dd>
-        </div>
-        <div>
-          <dt>{t.night}</dt>
-          <dd>{formatKwh(night, lang)}</dd>
-        </div>
-      </dl>
-    </>
-  );
-}
-
 function ConsumedInfo({
   t,
   lang,
@@ -9024,6 +9074,7 @@ function ConsumedInfo({
         ]}
         t={t}
       />
+      <p>{t.consumedCostInfo}</p>
     </div>
   );
 }
@@ -9151,22 +9202,20 @@ function ConsumedInfoTable({
   readonly t: Record<string, string>;
 }) {
   return (
-    <section className="info-stack">
+    <section className="utility-comparison-section">
       <h3 className="utility-comparison-title">{label}</h3>
-      <dl className="split-info">
-        <div>
-          <dt>{t.total}</dt>
-          <dd>{values[0]}</dd>
-        </div>
-        <div>
-          <dt>{t.day}</dt>
-          <dd>{values[1]}</dd>
-        </div>
-        <div>
-          <dt>{t.night}</dt>
-          <dd>{values[2]}</dd>
-        </div>
-      </dl>
+      <ChartInspector
+        hint=""
+        selection={{
+          month: "",
+          hideHeader: true,
+          items: [
+            { label: t.total, color: colors.ink, value: values[0], cells: [values[0]] },
+            { label: t.day, color: colors.blue, value: values[1], cells: [values[1]] },
+            { label: t.night, color: colors.indigo, value: values[2], cells: [values[2]] },
+          ],
+        }}
+      />
     </section>
   );
 }
@@ -9196,7 +9245,7 @@ function DayNightInfo({
   );
 }
 
-function ExportPriceInfo({
+function ExportPricePopupInfo({
   t,
   grossDay,
   grossNight,
@@ -9214,24 +9263,50 @@ function ExportPriceInfo({
   readonly military: string;
 }) {
   return (
-    <StackedValues
-      rows={[
-        { label: t.day, value: grossDay, tone: "day" as const },
-        { label: t.night, value: grossNight, tone: "night" as const },
-        {
-          label: t.taxes,
-          value: (
-            <span className="tax-inline-values">
-              <span>{personalIncomeTax} {t.personalIncomeTax}</span>
-              {", "}
-              <span>{military} {t.militaryTax}</span>
-            </span>
-          ),
-        },
-        { label: t.day, value: netDay, tone: "day" as const },
-        { label: t.night, value: netNight, tone: "night" as const },
-      ]}
-    />
+    <div className="info-stack">
+      <section className="utility-comparison-section">
+        <h3 className="utility-comparison-title">{t.grossExportPrice}</h3>
+        <ChartInspector
+          hint=""
+          selection={{
+            month: "",
+            hideHeader: true,
+            items: [
+              { label: t.day, color: colors.blue, value: grossDay, cells: [grossDay] },
+              { label: t.night, color: colors.indigo, value: grossNight, cells: [grossNight] },
+            ],
+          }}
+        />
+      </section>
+      <section className="utility-comparison-section">
+        <h3 className="utility-comparison-title">{t.taxes}</h3>
+        <ChartInspector
+          hint=""
+          selection={{
+            month: "",
+            hideHeader: true,
+            items: [
+              { label: t.personalIncomeTax, color: colors.rose, value: personalIncomeTax, cells: [personalIncomeTax] },
+              { label: t.militaryTax, color: colors.orange, value: military, cells: [military] },
+            ],
+          }}
+        />
+      </section>
+      <section className="utility-comparison-section">
+        <h3 className="utility-comparison-title">{t.netExportPrice}</h3>
+        <ChartInspector
+          hint=""
+          selection={{
+            month: "",
+            hideHeader: true,
+            items: [
+              { label: t.day, color: colors.blue, value: netDay, cells: [netDay] },
+              { label: t.night, color: colors.indigo, value: netNight, cells: [netNight] },
+            ],
+          }}
+        />
+      </section>
+    </div>
   );
 }
 
@@ -9342,7 +9417,7 @@ function UtilityComparisonTable({
       <span>{formatUnsignedPercentFromDelta(delta, base)}</span>
     </span>
   );
-  const columns = [
+  const zones = [
     day,
     night,
     {
@@ -9355,41 +9430,39 @@ function UtilityComparisonTable({
   ];
 
   return (
-    <div className="utility-comparison-section">
+    <section className="utility-comparison-section">
       <h3 className="utility-comparison-title">{title}</h3>
-      <table className="price-comparison-table utility-comparison-table">
-        <thead>
-          <tr>
-            <th />
-            {columns.map((column) => (
-              <th key={column.zone}>{column.zone}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th>{t.dashboardValues}</th>
-            {columns.map((column) => (
-              <td key={column.zone}>{formatValue(column.dashboard)}</td>
-            ))}
-          </tr>
-          <tr>
-            <th>{t.meterValues}</th>
-            {columns.map((column) => (
-              <td key={column.zone}>{formatValue(column.utility)}</td>
-            ))}
-          </tr>
-          <tr>
-            <th>{t.delta}</th>
-            {columns.map((column) => (
-              <td key={column.zone} className={comparisonDeltaTone(column.delta, column.higherIsBetter)}>
-                {deltaValue(column.delta, column.dashboard)}
-              </td>
-            ))}
-          </tr>
-        </tbody>
-      </table>
-    </div>
+      <div className="utility-meter-inspector">
+        <ChartInspector
+          hint=""
+          selection={{
+            month: "",
+            columns: zones.map((zone) => zone.zone),
+            items: [
+              {
+                label: t.dashboardValues,
+                color: colors.ink,
+                value: formatValue(zones[0].dashboard),
+                cells: zones.map((zone) => formatValue(zone.dashboard)),
+              },
+              {
+                label: t.meterValues,
+                color: colors.ink,
+                value: formatValue(zones[0].utility),
+                cells: zones.map((zone) => formatValue(zone.utility)),
+              },
+              {
+                label: t.delta,
+                color: colors.ink,
+                value: formatValue(zones[0].delta),
+                cells: zones.map((zone) => deltaValue(zone.delta, zone.dashboard)),
+                cellClassNames: zones.map((zone) => comparisonDeltaTone(zone.delta, zone.higherIsBetter)),
+              },
+            ],
+          }}
+        />
+      </div>
+    </section>
   );
 }
 
@@ -9446,8 +9519,24 @@ function RoiInfo({
   const breakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
   const costRows: StackedValueRow[] = [];
   const costParts: number[] = [];
-  const pushCostRow = (label: string, kwh: number, price: number, tone?: "day" | "night", showZero = false) => {
-    if (kwh <= 0 && !showZero) return;
+  const consumedTotal = row.consumedDay + row.consumedNight;
+  const tierShareFormula = (
+    result: number,
+    tierTotal: React.ReactNode,
+    zoneTotal: number,
+  ) => (
+    <>
+      {formatKwh(result, lang)} = {tierTotal} × {formatNumber(zoneTotal, 2, 2)} / {formatNumber(consumedTotal, 2, 2)}
+    </>
+  );
+  const pushCostRow = (
+    label: string,
+    kwh: number,
+    price: number,
+    tone?: "day" | "night",
+    detail?: React.ReactNode,
+  ) => {
+    if (kwh <= 0) return;
     const cost = kwh * price;
     costParts.push(cost);
     costRows.push({
@@ -9458,15 +9547,50 @@ function RoiInfo({
           {displayMoney(cost)} = {displayMoney(price)} × {formatKwh(kwh, lang)}
         </>
       ),
+      detail,
     });
   };
 
   if (row.electricHeatingThresholdKwh) {
-    pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day", true);
-    pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night", true);
-    costRows.push({ label: t.after, value: formatKwh(row.electricHeatingThresholdKwh, lang) });
-    pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day", true);
-    pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night", true);
+    const threshold = row.electricHeatingThresholdKwh;
+    const regularTotal = Math.max(0, consumedTotal - threshold);
+    costRows.push({ label: `${t.electricHeatingTier} · ${formatKwh(threshold, lang)}`, wide: true });
+    pushCostRow(
+      t.day,
+      breakdown.discountedDay,
+      row.importPriceDay,
+      "day",
+      tierShareFormula(breakdown.discountedDay, formatNumber(threshold, 2, 2), row.consumedDay),
+    );
+    pushCostRow(
+      t.night,
+      breakdown.discountedNight,
+      row.importPriceNight,
+      "night",
+      tierShareFormula(breakdown.discountedNight, formatNumber(threshold, 2, 2), row.consumedNight),
+    );
+    if (breakdown.regularDay > 0 || breakdown.regularNight > 0) {
+      costRows.push({ label: `${t.regularTier} · ${t.after} ${formatKwh(threshold, lang)}`, wide: true });
+    }
+    const regularTierTotal = (
+      <>
+        ({formatNumber(consumedTotal, 2, 2)} - {formatNumber(threshold, 2, 2)})
+      </>
+    );
+    pushCostRow(
+      t.day,
+      breakdown.regularDay,
+      regularImportDayPrice(tariff),
+      "day",
+      tierShareFormula(breakdown.regularDay, regularTierTotal, row.consumedDay),
+    );
+    pushCostRow(
+      t.night,
+      breakdown.regularNight,
+      regularImportNightPrice(tariff),
+      "night",
+      tierShareFormula(breakdown.regularNight, regularTierTotal, row.consumedNight),
+    );
   } else {
     pushCostRow(t.day, breakdown.regularDay, row.importPriceDay, "day");
     pushCostRow(t.night, breakdown.regularNight, row.importPriceNight, "night");
@@ -9491,8 +9615,46 @@ function RoiInfo({
   return (
     <MathInfo
       rows={[
-        { label: t.electricityCostWithoutSolar, value: <StackedValues rows={costRows} /> },
-        { label: t.netPayment, value: displayMoney(row.electricityPayment) },
+        {
+          key: "inputs",
+          label: t.formulaInputs,
+          hideLabel: true,
+          value: (
+            <div className="calculation-input-groups">
+              <CalculationInputGroup
+                title={t.energy}
+                rows={[
+                  {
+                    label: t.consumed,
+                    value: formatKwh(row.consumedTotal, lang),
+                    detail: `${t.day} ${formatKwh(row.consumedDay, lang)} · ${t.night} ${formatKwh(row.consumedNight, lang)}`,
+                  },
+                ]}
+              />
+              <CalculationInputGroup
+                title={t.importPrices}
+                rows={[
+                  { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
+                  { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
+                ]}
+              />
+              {row.electricHeatingThresholdKwh ? (
+                <CalculationInputGroup
+                  title={`${t.after} ${formatKwh(row.electricHeatingThresholdKwh, lang)}`}
+                  rows={[
+                    { label: t.day, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}` },
+                    { label: t.night, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}` },
+                  ]}
+                />
+              ) : null}
+              <CalculationInputGroup
+                title={t.netPayment}
+                rows={[{ label: t.total, value: displayMoney(row.electricityPayment) }]}
+              />
+            </div>
+          ),
+        },
+        { label: t.electricityCostWithoutSolar, value: <CalculationTraceRows rows={costRows} /> },
         {
           label: t.roi,
           value: (
@@ -9502,7 +9664,7 @@ function RoiInfo({
           ),
         },
       ]}
-      className="net-payment-math"
+      className="net-payment-math roi-calculation-breakdown"
     />
   );
 }
@@ -9532,6 +9694,7 @@ function NetPaymentInfo({
       </>
     );
   };
+  const displayEnergyMath = (value: number) => formatNumber(value, 2, 2);
   const tariff = tariffFromRow(row);
   const importCostRows = (
     breakdown: ImportCostBreakdown,
@@ -9549,18 +9712,20 @@ function NetPaymentInfo({
         tone,
         value: (
           <>
-            {displayMoneyMath(cost)} = {displayMoney(price)} × {formatKwh(kwh, lang)}
+            {displayMoneyMath(cost)} = {displayMoney(price)} × {displayEnergyMath(kwh)}
           </>
         ),
       });
     };
 
     if (row.electricHeatingThresholdKwh) {
-      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day", true);
-      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night", true);
-      rows.push({ label: t.after, value: formatKwh(row.electricHeatingThresholdKwh, lang) });
-      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day", true);
-      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night", true);
+      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day");
+      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night");
+      if (breakdown.regularDay > 0 || breakdown.regularNight > 0) {
+        rows.push({ label: `${t.after} ${formatKwh(row.electricHeatingThresholdKwh, lang)}`, wide: true });
+      }
+      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day");
+      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night");
     } else {
       pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day");
       pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night");
@@ -9605,57 +9770,66 @@ function NetPaymentInfo({
   const transitionRows = commercialTransitionRows(row, commercialDate, dailyRows);
   const inputRows: MathInfoRow[] = [
     {
+      key: "inputs",
       label: t.formulaInputs,
+      hideLabel: true,
       value: (
-        <InputValues
-          rows={[
-            { label: t.import, total: row.importTotal, day: row.importDay, night: row.importNight },
-            { label: t.export, total: exportTotal(row), day: row.exportDay, night: row.exportNight },
-            {
-              label: t.balance,
-              value: (
-                <span className={row.balance < 0 ? "positive" : row.balance > 0 ? "negative" : "muted"}>
-                  {formatKwh(row.balance, lang)}
-                </span>
-              ),
-            },
-          ]}
-          lang={lang}
-        />
-      ),
-    },
-    {
-      label: t.importPrices,
-      value: (
-        <StackedValues
-          rows={[
-            { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}`, tone: "day" as const },
-            { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}`, tone: "night" as const },
-            ...(row.electricHeatingThresholdKwh ? [
-              { label: t.after, value: formatKwh(row.electricHeatingThresholdKwh, lang) },
-              { label: t.day, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}`, tone: "day" as const },
-              { label: t.night, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}`, tone: "night" as const },
-            ] : []),
-          ]}
-        />
-      ),
-    },
-    {
-      label: t.exportPriceInput,
-      value: (
-        <ExportPriceInfo
-          t={t}
-          grossDay={displayMoney(row.exportPriceDay)}
-          grossNight={displayMoney(row.exportPriceNight)}
-          netDay={displayMoney(netExportPrice(row))}
-          netNight={displayMoney(netExportNightPrice(row))}
-          personalIncomeTax={`${formatNumber(row.exportPersonalIncomeTax, 2, 2)}%`}
-          military={`${formatNumber(row.exportMilitary, 2, 2)}%`}
-        />
+        <div className="calculation-input-groups">
+          <CalculationInputGroup
+            title={t.energy}
+            rows={[
+              {
+                label: t.import,
+                value: formatKwh(row.importTotal, lang),
+                detail: `${t.day} ${formatKwh(row.importDay, lang)} · ${t.night} ${formatKwh(row.importNight, lang)}`,
+              },
+              {
+                label: t.export,
+                value: formatKwh(exportTotal(row), lang),
+                detail: `${t.day} ${formatKwh(row.exportDay, lang)} · ${t.night} ${formatKwh(row.exportNight, lang)}`,
+              },
+            ]}
+          />
+          <CalculationInputGroup
+            title={t.importPrices}
+            rows={[
+              { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
+              { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
+            ]}
+          />
+          {row.electricHeatingThresholdKwh ? (
+            <CalculationInputGroup
+              title={`${t.after} ${formatKwh(row.electricHeatingThresholdKwh, lang)}`}
+              rows={[
+                { label: t.day, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}` },
+                { label: t.night, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}` },
+              ]}
+            />
+          ) : null}
+          <CalculationInputGroup
+            title={t.exportPriceInput}
+            rows={[
+              { label: t.day, value: displayMoney(netExportPrice(row)) },
+              { label: t.night, value: displayMoney(netExportNightPrice(row)) },
+            ]}
+          />
+        </div>
       ),
     },
   ];
-  const rows: MathInfoRow[] = [...inputRows];
+  const rows: MathInfoRow[] = [
+    ...inputRows,
+    {
+      label: `${t.balance} · ${energyUnit(lang)}`,
+      value: (
+        <>
+          <FormulaResult>{displayEnergyMath(row.balance)}</FormulaResult>
+          {" = "}
+          {displayEnergyMath(row.importTotal)} - {displayEnergyMath(exportTotal(row))}
+        </>
+      ),
+    },
+  ];
 
   if (transitionRows) {
     const beforeExport = transitionRows.before.reduce((sum, current) => sum + exportTotal(current), 0);
@@ -9694,7 +9868,7 @@ function NetPaymentInfo({
                 label: t.beforeCommercialDate,
                 value: (
                   <>
-                    {displayMoney(0)} = {formatKwh(beforeExport, lang)} × {displayMoney(0)} ({t.exportUnpaid})
+                    {displayMoney(0)} = {displayEnergyMath(beforeExport)} × {displayMoney(0)} ({t.exportUnpaid})
                   </>
                 ),
               },
@@ -9705,12 +9879,12 @@ function NetPaymentInfo({
                     rows={[
                       {
                         label: t.day,
-                        value: `${displayMoney(afterPaidExport.day * netExportPrice(row))} = ${formatKwh(afterPaidExport.day, lang)} × ${displayMoney(netExportPrice(row))}`,
+                        value: `${displayMoney(afterPaidExport.day * netExportPrice(row))} = ${displayEnergyMath(afterPaidExport.day)} × ${displayMoney(netExportPrice(row))}`,
                         tone: "day" as const,
                       },
                       {
                         label: t.night,
-                        value: `${displayMoney(afterPaidExport.night * netExportNightPrice(row))} = ${formatKwh(afterPaidExport.night, lang)} × ${displayMoney(netExportNightPrice(row))}`,
+                        value: `${displayMoney(afterPaidExport.night * netExportNightPrice(row))} = ${displayEnergyMath(afterPaidExport.night)} × ${displayMoney(netExportNightPrice(row))}`,
                         tone: "night" as const,
                       },
                       { label: t.total, value: displayMoneyMath(afterPayment) },
@@ -9718,7 +9892,7 @@ function NetPaymentInfo({
                   />
                 ) : (
                   <>
-                    {displayMoneyMath(afterPayment)} = {formatKwh(afterPaidExportTotal, lang)} × {displayMoney(netExportPrice(row))}
+                    {displayMoneyMath(afterPayment)} = {displayEnergyMath(afterPaidExportTotal)} × {displayMoney(netExportPrice(row))}
                   </>
                 ),
               },
@@ -9767,7 +9941,7 @@ function NetPaymentInfo({
       {
         label: t.netPayment,
         value: (
-          <StackedValues rows={importCostRows(importCostBreakdown(row.importDay, row.importNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
+          <CalculationTraceRows rows={importCostRows(importCostBreakdown(row.importDay, row.importNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
         ),
       },
     );
@@ -9776,32 +9950,32 @@ function NetPaymentInfo({
     const paidSurplus = exportPayoutSplit(row);
     rows.push(
       {
-        label: t.netSurplus,
+        label: `${t.netSurplus} · ${energyUnit(lang)}`,
         value: (
           <>
-            <FormulaResult>{formatKwh(surplus, lang)}</FormulaResult> = {formatKwh(exportTotal(row), lang)} - {formatKwh(row.importTotal, lang)}
+            <FormulaResult>{displayEnergyMath(surplus)}</FormulaResult> = {displayEnergyMath(exportTotal(row))} - {displayEnergyMath(row.importTotal)}
           </>
         ),
       },
       {
         label: t.netPayment,
         value: hasSplitExportPrice(row) ? (
-          <StackedValues
+          <CalculationTraceRows
             rows={[
               {
                 label: t.day,
-                value: `${displayMoney(paidSurplus.day * netExportPrice(row))} = ${formatKwh(paidSurplus.day, lang)} × ${displayMoney(netExportPrice(row))}`,
+                value: `${displayMoney(paidSurplus.day * netExportPrice(row))} = ${displayEnergyMath(paidSurplus.day)} × ${displayMoney(netExportPrice(row))}`,
               },
               {
                 label: t.night,
-                value: `${displayMoney(paidSurplus.night * netExportNightPrice(row))} = ${formatKwh(paidSurplus.night, lang)} × ${displayMoney(netExportNightPrice(row))}`,
+                value: `${displayMoney(paidSurplus.night * netExportNightPrice(row))} = ${displayEnergyMath(paidSurplus.night)} × ${displayMoney(netExportNightPrice(row))}`,
               },
               { label: t.total, value: displayMoneyMath(row.electricityPayment) },
             ]}
           />
         ) : (
           <>
-            {displayMoneyMath(row.electricityPayment)} = {formatKwh(surplus, lang)} × {displayMoney(netExportPrice(row))}
+            {displayMoneyMath(row.electricityPayment)} = {displayEnergyMath(surplus)} × {displayMoney(netExportPrice(row))}
           </>
         ),
       },
@@ -9821,15 +9995,15 @@ function NetPaymentInfo({
     const remainingTotal = remainingDay + remainingNight;
     rows.push(
       {
-        label: t.exportedOffset,
+        label: `${t.exportedOffset} · ${energyUnit(lang)}`,
         value: (
-          <StackedValues
+          <CalculationTraceRows
             rows={[
               {
                 label: t.day,
                 value: (
                   <>
-                    <FormulaResult>{formatKwh(coveredDay, lang)}</FormulaResult> = {formatKwh(exportTotal(row), lang)} × {formatNumber(dayShare * 100, 2, 2)}% ({formatKwh(row.importDay, lang)} / {formatKwh(row.importTotal, lang)})
+                    <FormulaResult>{displayEnergyMath(coveredDay)}</FormulaResult> = {displayEnergyMath(exportTotal(row))} × {displayEnergyMath(row.importDay)} / {displayEnergyMath(row.importTotal)}
                   </>
                 ),
               },
@@ -9837,7 +10011,7 @@ function NetPaymentInfo({
                 label: t.night,
                 value: (
                   <>
-                    <FormulaResult>{formatKwh(coveredNight, lang)}</FormulaResult> = {formatKwh(exportTotal(row), lang)} × {formatNumber(nightShare * 100, 2, 2)}% ({formatKwh(row.importNight, lang)} / {formatKwh(row.importTotal, lang)})
+                    <FormulaResult>{displayEnergyMath(coveredNight)}</FormulaResult> = {displayEnergyMath(exportTotal(row))} × {displayEnergyMath(row.importNight)} / {displayEnergyMath(row.importTotal)}
                   </>
                 ),
               },
@@ -9846,15 +10020,15 @@ function NetPaymentInfo({
         ),
       },
       {
-        label: t.remainingImport,
+        label: `${t.remainingImport} · ${energyUnit(lang)}`,
         value: (
-          <StackedValues
+          <CalculationTraceRows
             rows={[
               {
                 label: t.day,
                 value: (
                   <>
-                    <FormulaResult>{formatKwh(remainingDay, lang)}</FormulaResult> = {formatKwh(row.importDay, lang)} - {formatKwh(coveredDay, lang)}
+                    <FormulaResult>{displayEnergyMath(remainingDay)}</FormulaResult> = {displayEnergyMath(row.importDay)} - {displayEnergyMath(coveredDay)}
                   </>
                 ),
               },
@@ -9862,7 +10036,7 @@ function NetPaymentInfo({
                 label: t.night,
                 value: (
                   <>
-                    <FormulaResult>{formatKwh(remainingNight, lang)}</FormulaResult> = {formatKwh(row.importNight, lang)} - {formatKwh(coveredNight, lang)}
+                    <FormulaResult>{displayEnergyMath(remainingNight)}</FormulaResult> = {displayEnergyMath(row.importNight)} - {displayEnergyMath(coveredNight)}
                   </>
                 ),
               },
@@ -9870,7 +10044,7 @@ function NetPaymentInfo({
                 label: t.total,
                 value: (
                   <>
-                    <FormulaResult>{formatKwh(remainingTotal, lang)}</FormulaResult> = {formatKwh(remainingDay, lang)} + {formatKwh(remainingNight, lang)}
+                    <FormulaResult>{displayEnergyMath(remainingTotal)}</FormulaResult> = {displayEnergyMath(remainingDay)} + {displayEnergyMath(remainingNight)}
                   </>
                 ),
               },
@@ -9881,13 +10055,13 @@ function NetPaymentInfo({
       {
         label: t.netPayment,
         value: (
-          <StackedValues rows={importCostRows(importCostBreakdown(remainingDay, remainingNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
+          <CalculationTraceRows rows={importCostRows(importCostBreakdown(remainingDay, remainingNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
         ),
       },
     );
   }
 
-  return <MathInfo rows={rows} className="net-payment-math" />;
+  return <MathInfo rows={rows} className="net-payment-math net-payment-breakdown" />;
 }
 
 function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefined, dailyRows: readonly MonthRow[]) {
@@ -10038,8 +10212,8 @@ function MathInfo({
   return (
     <dl className={["math-info", className ?? ""].filter(Boolean).join(" ")}>
       {rows.map((row) => (
-        <div key={row.label}>
-          <dt>{row.label}</dt>
+        <div key={row.key ?? row.label}>
+          {row.hideLabel ? null : <dt>{row.label}</dt>}
           <dd>{row.value}</dd>
         </div>
       ))}
@@ -10048,8 +10222,66 @@ function MathInfo({
 }
 
 interface MathInfoRow {
+  readonly key?: string;
+  readonly label: string;
+  readonly hideLabel?: boolean;
+  readonly value: React.ReactNode;
+}
+
+interface CalculationInputRow {
   readonly label: string;
   readonly value: React.ReactNode;
+  readonly detail?: string;
+}
+
+interface CalculationInputGroupProps {
+  readonly title: string;
+  readonly rows: readonly CalculationInputRow[];
+}
+
+function CalculationInputGroup({ title, rows }: CalculationInputGroupProps) {
+  return (
+    <section className="calculation-input-group">
+      <h3>{title}</h3>
+      <dl>
+        {rows.map((row, index) => (
+          <div key={`${row.label}-${index}`}>
+            <dt>{row.label}</dt>
+            <dd>
+              <span>{row.value}</span>
+              {row.detail ? <small>{row.detail}</small> : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function CalculationTraceRows({
+  rows,
+}: {
+  readonly rows: readonly StackedValueRow[];
+}) {
+  return (
+    <div className="calculation-trace-rows">
+      {rows.map((row, index) => (
+        <div key={`${row.label}-${index}`}>
+          {row.wide ? (
+            <span className="calculation-trace-divider">{row.value ?? row.label}</span>
+          ) : (
+            <>
+              <span className={row.tone ? `calculation-trace-label ${row.tone}` : "calculation-trace-label"}>
+                {row.label}
+              </span>
+              <span className="calculation-trace-formula">{row.value ?? row.label}</span>
+              {row.detail ? <span className="calculation-trace-detail">{row.detail}</span> : null}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function StackedValues({
@@ -10081,44 +10313,9 @@ function StackedValues({
 interface StackedValueRow {
   readonly label: string
   readonly value?: React.ReactNode
+  readonly detail?: React.ReactNode
   readonly tone?: "day" | "night"
   readonly wide?: boolean
-}
-
-interface InputValueRow {
-  readonly label: string
-  readonly total?: number
-  readonly day?: number
-  readonly night?: number
-  readonly value?: React.ReactNode
-}
-
-interface InputValuesProps {
-  readonly rows: readonly InputValueRow[]
-  readonly lang: Lang
-}
-
-function InputValues({ rows, lang }: InputValuesProps) {
-  return (
-    <span className="input-values">
-      {rows.map((row) => (
-        <span key={row.label}>
-          <b>{row.label}:</b>
-          <span>
-            {row.value ?? (
-              <>
-                <FormulaResult>{formatKwh(row.total ?? 0, lang)}</FormulaResult>
-                {" = "}
-                <span className="input-values-day">{formatKwh(row.day ?? 0, lang)}</span>
-                {" + "}
-                <span className="input-values-night">{formatKwh(row.night ?? 0, lang)}</span>
-              </>
-            )}
-          </span>
-        </span>
-      ))}
-    </span>
-  );
 }
 
 function FormulaResult({
