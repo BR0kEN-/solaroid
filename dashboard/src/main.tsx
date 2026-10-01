@@ -1955,13 +1955,13 @@ function useMediaQuery(query: string) {
 function App({
   initialLang = DEFAULT_LANG,
   initialData,
-  footerExtra,
   onLangChange,
+  onSignOut,
 }: {
   readonly initialLang?: Lang;
   readonly initialData?: LoadedData;
-  readonly footerExtra?: React.ReactNode;
   readonly onLangChange?: (lang: Lang) => void;
+  readonly onSignOut?: () => void;
 }) {
   const dataState = useDashboardData(initialData);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
@@ -3157,6 +3157,7 @@ function App({
           isRefreshing={dataState.isRefreshing || isPlantComparisonLoading}
           refresh={handleRefresh}
           isLoading={showPlaceholders}
+          onSignOut={onSignOut}
         />
 
         {viewMode !== "comparison" ? (
@@ -3697,7 +3698,6 @@ function App({
               `${t.updated}${lang === "en" ? " on" : ""} ${dataState.sheetUpdatedAt ? formatDateTimeLabel(dataState.sheetUpdatedAt, lang) : "-"}`
             )}
           </span>
-          {footerExtra ? <span className="dash-footer-controls">{footerExtra}</span> : null}
         </footer>
         <MobileBottomNavigation
           t={t}
@@ -3709,6 +3709,7 @@ function App({
           onCompare={() => selectViewModeOrScrollTop("comparison")}
           onSettings={() => setMobileSettingsOpen(true)}
           onRefresh={handleRefresh}
+          onSignOut={onSignOut}
         />
       </section>
     </main>
@@ -4006,12 +4007,8 @@ function PortalRoot() {
         key={`${selectedPlant.id}:${session.access_token}`}
         initialLang={lang}
         initialData={dashboardData}
-        footerExtra={(
-          <button className="portal-footer-logout" type="button" onClick={signOut} aria-label={t.signOut} title={t.signOut}>
-            <LogOut size={16} />
-          </button>
-        )}
         onLangChange={setLang}
+        onSignOut={() => void signOut()}
       />
     </div>,
   );
@@ -4067,6 +4064,7 @@ interface DashboardToolbarProps {
   readonly isRefreshing: boolean;
   readonly refresh?: () => void;
   readonly isLoading: boolean;
+  readonly onSignOut?: () => void;
 }
 
 function DashboardToolbar({
@@ -4096,6 +4094,7 @@ function DashboardToolbar({
   isRefreshing,
   refresh,
   isLoading,
+  onSignOut,
 }: DashboardToolbarProps) {
   const [isRangePickerOpen, setRangePickerOpen] = useState(false);
   const [isDailyRangePickerOpen, setDailyRangePickerOpen] = useState(false);
@@ -4375,6 +4374,17 @@ function DashboardToolbar({
             >
               <RefreshCw size={18} />
             </button>
+            {onSignOut ? (
+              <button
+                type="button"
+                className="portal-logout-button"
+                onClick={onSignOut}
+                aria-label={t.signOut}
+                title={t.signOut}
+              >
+                <LogOut size={18} />
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -4392,6 +4402,7 @@ interface MobileBottomNavigationProps {
   readonly onCompare: () => void;
   readonly onSettings: () => void;
   readonly onRefresh: () => void;
+  readonly onSignOut?: () => void;
 }
 
 function MobileBottomNavigation({
@@ -4404,6 +4415,7 @@ function MobileBottomNavigation({
   onCompare,
   onSettings,
   onRefresh,
+  onSignOut,
 }: MobileBottomNavigationProps) {
   const isOverview = viewMode !== "comparison";
 
@@ -4419,6 +4431,11 @@ function MobileBottomNavigation({
       >
         <RefreshCw size={21} />
       </button>
+      {onSignOut ? (
+        <button type="button" onClick={onSignOut} aria-label={t.signOut} title={t.signOut}>
+          <LogOut size={21} />
+        </button>
+      ) : null}
       <button
         type="button"
         className={isOverview ? "is-active" : ""}

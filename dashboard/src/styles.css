@@ -231,23 +231,6 @@ button {
   background: transparent;
 }
 
-.portal-footer-logout {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  min-height: 32px;
-  color: var(--muted);
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  font: inherit;
-}
-
-.portal-footer-logout:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text), transparent 92%);
-}
-
 .portal-toast-region {
   position: fixed;
   z-index: 60;
@@ -691,10 +674,13 @@ h2 {
 
 .dashboard-toolbar-desktop .segmented.toolbar-refresh-control {
   order: 6;
-  grid-template-columns: 38px;
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: 38px;
 }
 
-.dashboard-toolbar-desktop .toolbar-refresh-control .refresh-button {
+.dashboard-toolbar-desktop .toolbar-refresh-control .refresh-button,
+.dashboard-toolbar-desktop .toolbar-refresh-control .portal-logout-button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -702,7 +688,8 @@ h2 {
   height: auto;
 }
 
-.dashboard-toolbar-desktop .toolbar-refresh-control .refresh-button svg {
+.dashboard-toolbar-desktop .toolbar-refresh-control .refresh-button svg,
+.dashboard-toolbar-desktop .toolbar-refresh-control .portal-logout-button svg {
   display: block;
 }
 
@@ -2534,22 +2521,6 @@ h2 {
 .dash-footer > span:first-child {
   order: 2;
   text-align: right;
-}
-
-.dash-footer-controls {
-  display: inline-flex;
-  align-items: center;
-  order: 1;
-  padding: 2px;
-  background: color-mix(in srgb, var(--panel), transparent 20%);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.dash-footer-controls .language-switcher {
-  padding: 0;
-  background: transparent;
-  border: 0;
 }
 
 .language-switcher {
@@ -4768,15 +4739,15 @@ tbody tr:hover {
 
   .content {
     --content-inline-padding: 10px;
-    padding: 10px 10px calc(66px + env(safe-area-inset-bottom));
+    padding: 10px 10px 66px;
   }
 
   .dash-footer {
     margin-bottom: 6px;
   }
 
-  .app-shell.ha-mode .content {
-    padding-bottom: 66px;
+  .portal-dashboard .content {
+    padding-bottom: calc(66px + env(safe-area-inset-bottom));
   }
 
   .topbar,
@@ -4897,8 +4868,8 @@ tbody tr:hover {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px;
-    min-height: calc(52px + env(safe-area-inset-bottom));
-    padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
+    min-height: 52px;
+    padding: 4px 8px;
     background: var(--panel);
     border-top: 1px solid var(--border);
   }
@@ -4908,9 +4879,10 @@ tbody tr:hover {
     border-bottom: 1px solid var(--border);
   }
 
-  .app-shell.ha-mode .mobile-bottom-nav {
-    min-height: 52px;
-    padding-bottom: 4px;
+  .portal-dashboard .mobile-bottom-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    min-height: calc(52px + env(safe-area-inset-bottom));
+    padding-bottom: calc(4px + env(safe-area-inset-bottom));
   }
 
   .mobile-bottom-nav button {
