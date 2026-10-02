@@ -29,6 +29,9 @@
   --skeleton-highlight: #f4f4f5;
   --formula-result-bg: #e8f4ff;
   --formula-result-text: #155f93;
+  --formula-result-active-bg: #bfdbfe;
+  --formula-result-active-border: #3b82f6;
+  --formula-result-active-text: #1e40af;
   --what-if-active-bg: color-mix(in srgb, var(--cyan) 13%, var(--panel));
   --what-if-border: color-mix(in srgb, var(--cyan) 42%, var(--border));
   --roi-highlight-bg: #dcfce7;
@@ -85,6 +88,9 @@
     --skeleton-highlight: #3f3f46;
     --formula-result-bg: #163246;
     --formula-result-text: #9bd5ff;
+    --formula-result-active-bg: #1d4ed8;
+    --formula-result-active-border: #60a5fa;
+    --formula-result-active-text: #eff6ff;
     --roi-highlight-bg: #163b2f;
     --roi-highlight-text: #9de4c4;
     --input-day-text: #ffc45a;
@@ -4008,6 +4014,24 @@ h2 {
   display: none;
 }
 
+.net-payment-breakdown.without-inputs > div > dt::before,
+.roi-calculation-breakdown.without-inputs > div > dt::before {
+  counter-increment: calculation-step;
+  content: counter(calculation-step) ". ";
+}
+
+.net-payment-breakdown.without-inputs > div > dd,
+.roi-calculation-breakdown.without-inputs > div > dd {
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.net-payment-breakdown.without-inputs > div > dd::-webkit-scrollbar,
+.roi-calculation-breakdown.without-inputs > div > dd::-webkit-scrollbar {
+  display: none;
+}
+
 .math-note-stack {
   display: grid;
   gap: 8px;
@@ -4425,6 +4449,70 @@ h2 {
 .calculation-input-groups {
   display: grid;
   gap: 14px;
+}
+
+.linked-calculation {
+  display: grid;
+  gap: 18px;
+}
+
+.unified-calculation-inputs {
+  gap: 12px;
+}
+
+.unified-calculation-section {
+  display: grid;
+  gap: 7px;
+}
+
+.unified-calculation-section > h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.linked-calculation-value {
+  display: inline;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, var(--muted), transparent 72%);
+  text-underline-offset: 3px;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.linked-calculation-value.is-active {
+  background: color-mix(in srgb, var(--text) 8%, var(--panel));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border), transparent 8%);
+  text-decoration-color: transparent;
+}
+
+.linked-calculation-value.is-active:has(.formula-result) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.linked-calculation-value.is-active .formula-result {
+  color: var(--formula-result-active-text);
+  background: var(--formula-result-active-bg);
+  box-shadow: inset 0 0 0 1px var(--formula-result-active-border);
+}
+
+.linked-calculation-value:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .calculation-input-group {
