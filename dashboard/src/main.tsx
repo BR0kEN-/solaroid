@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import {
@@ -46,6 +46,12 @@ import {
 } from "./domain/formulas";
 import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, PlantSpending, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
 import { PdfPreview } from "./PdfPreview";
+import {
+  EMPTY_CALCULATION_LINK_STATE,
+  activeCalculationLink,
+  calculationLinkReducer,
+  type CalculationLinkKey,
+} from "./calculation-links";
 import "./styles.css";
 
 type RangeKey = "all" | "range";
@@ -108,7 +114,7 @@ type InfoModal =
   | "investmentDetails"
   | "investmentForecast"
   | {
-    readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "lossesSplit" | "exportPrice" | "netPayment" | "roiCalc" | "utilityMeter";
+    readonly kind: "importSplit" | "exportSplit" | "consumedSplit" | "lossesSplit" | "exportPrice" | "roiCalc" | "utilityMeter";
     readonly row: MonthRow;
   }
   | {
@@ -312,11 +318,39 @@ const i18n = {
     remainingImport: "Remaining import",
     netSurplus: "Net surplus",
     exportUnpaid: "Export is unpaid before the commercial date",
-    netPaymentLogic: "Net payment is the cash result of monthly import/export balancing. Balance is import minus export. If export is larger than import, the balance is negative and the net surplus is paid using the export price after personal income tax and military levy. Otherwise, export offsets import proportionally between day and night import, then the remaining day/night import is charged at its own rate.",
+    netPaymentIntro: "Net payment is the cash result after import and export are compared.",
+    importExceedsExport: "When import exceeds export",
+    exportExceedsImport: "When export exceeds import",
+    exportOffsetsImport: "Export offsets import first. Day and night follow the import split.",
+    netPaymentImportEnergyFormula: "= import - export",
+    netPaymentImportDayFormula: "= day remainder × day price",
+    netPaymentImportNightFormula: "= night remainder × night price",
+    netPaymentImportMoneyFormula: "= -(day charge + night charge)",
+    netPaymentExportEnergyFormula: "= export - import",
+    netSurplusKeepsSplit: "The surplus keeps its day and night split.",
+    netPaymentExportDayFormula: "= day surplus × net day export price",
+    netPaymentExportNightFormula: "= night surplus × net night export price",
+    netPaymentExportMoneyFormula: "= day payout + night payout",
+    netPaymentTierInfo: "The electric-heating limit may split remaining import between reduced and regular prices.",
+    preCommercialPaymentInfo: "Export is unpaid. It does not offset import.",
+    preCommercialDayFormula: "= day import × day price",
+    preCommercialNightFormula: "= night import × night price",
+    preCommercialPaymentFormula: "= -(day charge + night charge)",
+    transitionPaymentInfo: "In a transition month, days before and after the commercial date are calculated separately.",
+    netPaymentRoiHint: "For the full calculation of a row's net payment, open the info button in that row's ROI cell.",
+    highlightRelatedValue: "Highlight related values",
     netPaymentInfo: "UAH totals are summed directly. In USD mode, each month is converted using that month's USD/UAH rate, then those converted values are summed. It is not the UAH total divided by the latest rate.",
     usdRateInfo: "Monthly USD/UAH is the latest daily USD/UAH rate stored for that month. If a month has no daily rates, the dashboard uses the manually stored monthly USD/UAH fallback.",
     importPriceInfo: "Import prices are shown as day / night. Day is the rate from 7 AM to 11 PM; night is the rate from 11 PM to 7 AM.",
-    roiInfo: "ROI is not production multiplied by export price. It is the effective investment recovery for the period: the value of electricity consumed from the solar system plus export payout when commercial export is active, minus grid import costs. Before the commercial date, export is unpaid and does not offset import, so ROI is based only on inferred self-consumed solar energy: production minus export, valued by the weighted day/night import rate.",
+    roiIntro: "ROI is money recovered during the period.",
+    roiDayCostFormula: "= day consumption × day price",
+    roiNightCostFormula: "= night consumption × night price",
+    roiCostFormula: "= day cost + night cost",
+    roiFormula: "= cost without solar + net payment",
+    roiImportEffect: "Net payment is negative. It reduces ROI.",
+    roiExportEffect: "Net payment is positive. It increases ROI.",
+    roiPreCommercialInfo: "Before the commercial date, ROI comes from solar electricity used by the home.",
+    roiTierInfo: "The electric-heating limit splits consumption between reduced and regular prices.",
     savings: "Savings",
     consumption: "Consumption",
     plantWorks: "Plant works",
@@ -602,11 +636,39 @@ const i18n = {
     remainingImport: "Залишок імпорту",
     netSurplus: "Чистий надлишок",
     exportUnpaid: "До комерційної дати експорт не оплачується",
-    netPaymentLogic: "Баланс оплати — це грошовий результат місячного балансу імпорту й експорту. Баланс рахується як імпорт мінус експорт. Якщо експорт більший за імпорт, баланс відʼємний і чистий надлишок оплачується за ціною експорту після ПДФО і військового збору. Інакше експорт пропорційно покриває денний і нічний імпорт, а залишок денного/нічного імпорту оплачується за відповідним тарифом.",
+    netPaymentIntro: "Баланс оплати — грошовий результат після порівняння імпорту й експорту.",
+    importExceedsExport: "Коли імпорт більший за експорт",
+    exportExceedsImport: "Коли експорт більший за імпорт",
+    exportOffsetsImport: "Експорт спочатку покриває імпорт. День і ніч мають ті самі частки, що й імпорт.",
+    netPaymentImportEnergyFormula: "= імпорт - експорт",
+    netPaymentImportDayFormula: "= денний залишок × денний тариф",
+    netPaymentImportNightFormula: "= нічний залишок × нічний тариф",
+    netPaymentImportMoneyFormula: "= -(день + ніч)",
+    netPaymentExportEnergyFormula: "= експорт - імпорт",
+    netSurplusKeepsSplit: "Надлишок зберігає поділ на день і ніч.",
+    netPaymentExportDayFormula: "= денний надлишок × чиста денна ціна експорту",
+    netPaymentExportNightFormula: "= нічний надлишок × чиста нічна ціна експорту",
+    netPaymentExportMoneyFormula: "= денна виплата + нічна виплата",
+    netPaymentTierInfo: "Ліміт електроопалення може ділити залишок імпорту між пільговим і звичайним тарифами.",
+    preCommercialPaymentInfo: "Експорт не оплачується. Він не покриває імпорт.",
+    preCommercialDayFormula: "= денний імпорт × денний тариф",
+    preCommercialNightFormula: "= нічний імпорт × нічний тариф",
+    preCommercialPaymentFormula: "= -(день + ніч)",
+    transitionPaymentInfo: "У перехідному місяці дні до і після комерційної дати рахуються окремо.",
+    netPaymentRoiHint: "Щоб переглянути повний розрахунок балансу оплати за рядок, відкрийте інформацію у клітинці ПІ цього рядка.",
+    highlightRelatedValue: "Підсвітити повʼязані значення",
     netPaymentInfo: "Суми в гривнях додаються напряму. У режимі USD кожен місяць конвертується за його курсом, а потім конвертовані значення додаються. Це не сума в гривнях, поділена на останній курс.",
     usdRateInfo: "Місячний курс USD/UAH — це останній денний курс USD/UAH, збережений за цей місяць. Якщо в місяці немає денних курсів, дашборд використовує вручну збережений місячний резервний курс USD/UAH.",
     importPriceInfo: "Ціни імпорту показані як день / ніч. День — тариф з 7:00 до 23:00; ніч — тариф з 23:00 до 7:00.",
-    roiInfo: "ПІ — це не генерація, помножена на ціну експорту. Це фактичне повернення інвестицій за період: вартість електроенергії, спожитої з сонячної системи, плюс виплата за експорт після початку комерційного експорту, мінус витрати на імпорт з мережі. До комерційної дати експорт не оплачується і не перекриває імпорт, тому ПІ рахується лише з орієнтовно спожитої власної сонячної енергії: генерація мінус експорт, оцінені за зваженим денним/нічним тарифом імпорту.",
+    roiIntro: "ПІ — сума, повернена за період.",
+    roiDayCostFormula: "= денне споживання × денний тариф",
+    roiNightCostFormula: "= нічне споживання × нічний тариф",
+    roiCostFormula: "= вартість дня + вартість ночі",
+    roiFormula: "= вартість без сонця + баланс оплати",
+    roiImportEffect: "Баланс оплати відʼємний. Він зменшує ПІ.",
+    roiExportEffect: "Баланс оплати додатний. Він збільшує ПІ.",
+    roiPreCommercialInfo: "До комерційної дати ПІ дає сонячна електроенергія, використана вдома.",
+    roiTierInfo: "Ліміт електроопалення ділить споживання між пільговим і звичайним тарифами.",
     savings: "Економія",
     consumption: "Споживання",
     plantWorks: "Станція працює",
@@ -2756,12 +2818,12 @@ function App({
         ),
       };
     }
-    if (typeof infoModal === "object" && infoModal?.kind === "netPayment") {
+    if (typeof infoModal === "object" && infoModal?.kind === "roiCalc") {
       const row = infoModal.row;
       return {
-        title: `${t.netPayment} · ${row.month}`,
+        title: `${t.roi} · ${row.month}`,
         body: (
-          <NetPaymentInfo
+          <UnifiedRoiInfo
             row={row}
             commercialDate={dataState.commercialDate}
             dailyRows={dataState.dailyRows}
@@ -2770,13 +2832,6 @@ function App({
             lang={lang}
           />
         ),
-      };
-    }
-    if (typeof infoModal === "object" && infoModal?.kind === "roiCalc") {
-      const row = infoModal.row;
-      return {
-        title: `${t.roi} · ${row.month}`,
-        body: <RoiInfo row={row} t={t} currency={currency} lang={lang} />,
       };
     }
     if (typeof infoModal === "object" && infoModal?.kind === "utilityMeter") {
@@ -2798,7 +2853,7 @@ function App({
           <div className="info-stack">
             <section className="info-modal-section">
               <h3>{t.payment}</h3>
-              <p>{t.netPaymentLogic}</p>
+              <p>{t.netPaymentIntro}</p>
             </section>
             {financeRow && spendings.length ? (
               <section className="info-modal-section">
@@ -2822,10 +2877,96 @@ function App({
         body: infoModal.body,
       };
     }
-    if (infoModal === "netPayment") return { title: t.netPayment, body: t.netPaymentLogic };
+    if (infoModal === "netPayment") {
+      return {
+        title: t.netPayment,
+        body: (
+          <div className="info-stack">
+            <section className="info-modal-section">
+              <p>{t.netPaymentIntro}</p>
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.importExceedsExport}</h3>
+              <p>{t.exportOffsetsImport}</p>
+              <CalculationTraceRows
+                rows={[
+                  { label: t.remainingImport, value: t.netPaymentImportEnergyFormula },
+                  { label: t.day, value: t.netPaymentImportDayFormula, tone: "day" },
+                  { label: t.night, value: t.netPaymentImportNightFormula, tone: "night" },
+                  { label: t.netPayment, value: t.netPaymentImportMoneyFormula },
+                ]}
+              />
+              <p>{t.netPaymentTierInfo}</p>
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.exportExceedsImport}</h3>
+              <p>{t.netSurplusKeepsSplit}</p>
+              <p>{t.exportPriceInput}: {t.netExportPrice} ({t.personalIncomeTax} + {t.militaryTax}).</p>
+              <CalculationTraceRows
+                rows={[
+                  { label: t.netSurplus, value: t.netPaymentExportEnergyFormula },
+                  { label: t.day, value: t.netPaymentExportDayFormula, tone: "day" },
+                  { label: t.night, value: t.netPaymentExportNightFormula, tone: "night" },
+                  { label: t.netPayment, value: t.netPaymentExportMoneyFormula },
+                ]}
+              />
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.beforeCommercialDate}</h3>
+              <p>{t.preCommercialPaymentInfo}</p>
+              <CalculationTraceRows
+                rows={[
+                  { label: t.day, value: t.preCommercialDayFormula, tone: "day" },
+                  { label: t.night, value: t.preCommercialNightFormula, tone: "night" },
+                  { label: t.netPayment, value: t.preCommercialPaymentFormula },
+                ]}
+              />
+              <p>{t.transitionPaymentInfo}</p>
+            </section>
+            <section className="info-modal-section">
+              <p>{t.netPaymentRoiHint}</p>
+            </section>
+          </div>
+        ),
+      };
+    }
     if (infoModal === "usdRate") return { title: "USD/UAH", body: t.usdRateInfo };
     if (infoModal === "importPrice") return { title: t.importPrices, body: t.importPriceInfo };
-    if (infoModal === "roi") return { title: t.roi, body: t.roiInfo };
+    if (infoModal === "roi") {
+      return {
+        title: t.roi,
+        body: (
+          <div className="info-stack">
+            <section className="info-modal-section">
+              <p>{t.roiIntro}</p>
+              <CalculationTraceRows
+                rows={[
+                  { label: t.day, value: t.roiDayCostFormula, tone: "day" },
+                  { label: t.night, value: t.roiNightCostFormula, tone: "night" },
+                  { label: t.electricityCostWithoutSolar, value: t.roiCostFormula },
+                  { label: t.roi, value: t.roiFormula },
+                ]}
+              />
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.importExceedsExport}</h3>
+              <p>{t.roiImportEffect}</p>
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.exportExceedsImport}</h3>
+              <p>{t.roiExportEffect}</p>
+            </section>
+            <section className="info-modal-section">
+              <h3>{t.beforeCommercialDate}</h3>
+              <p>{t.roiPreCommercialInfo}</p>
+            </section>
+            <section className="info-modal-section">
+              <p>{t.roiTierInfo}</p>
+            </section>
+          </div>
+        ),
+      };
+    }
     if (infoModal === "investmentDetails") {
       const fields = dataState.metadata?.pvs ?? [];
       return {
@@ -3305,7 +3446,6 @@ function App({
               onConsumedTotalsInfo={(rows) => setInfoModal({ kind: "consumedTotals", rows })}
               onLossesSplitInfo={(row) => setInfoModal({ kind: "lossesSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
-              onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
               onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
             />
           )}
@@ -3676,7 +3816,6 @@ function App({
               onConsumedTotalsInfo={(rows) => setInfoModal({ kind: "consumedTotals", rows })}
               onLossesSplitInfo={(row) => setInfoModal({ kind: "lossesSplit", row })}
               onExportPriceInfo={(row) => setInfoModal({ kind: "exportPrice", row })}
-              onNetPaymentInfo={(row) => setInfoModal({ kind: "netPayment", row })}
               onRoiValueInfo={(row) => setInfoModal({ kind: "roiCalc", row })}
               onUtilityMeterInfo={(row) => setInfoModal({ kind: "utilityMeter", row })}
               onDocumentsInfo={openDocumentsModal}
@@ -7299,7 +7438,6 @@ function DailyDashboard({
   onConsumedTotalsInfo,
   onLossesSplitInfo,
   onExportPriceInfo,
-  onNetPaymentInfo,
   onRoiValueInfo,
 }: {
   readonly rows: readonly MonthRow[];
@@ -7325,7 +7463,6 @@ function DailyDashboard({
   readonly onConsumedTotalsInfo: (rows: readonly MonthRow[]) => void;
   readonly onLossesSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
-  readonly onNetPaymentInfo: (row: MonthRow) => void;
   readonly onRoiValueInfo: (row: MonthRow) => void;
 }) {
   const selectedRows = rows;
@@ -7544,7 +7681,6 @@ function DailyDashboard({
           onConsumedTotalsInfo={onConsumedTotalsInfo}
           onLossesSplitInfo={onLossesSplitInfo}
           onExportPriceInfo={onExportPriceInfo}
-          onNetPaymentInfo={onNetPaymentInfo}
           onRoiValueInfo={onRoiValueInfo}
         />
       </section>
@@ -7919,7 +8055,6 @@ function DataTable({
   onConsumedTotalsInfo,
   onLossesSplitInfo,
   onExportPriceInfo,
-  onNetPaymentInfo,
   onRoiValueInfo,
   onUtilityMeterInfo,
   onDocumentsInfo,
@@ -7941,7 +8076,6 @@ function DataTable({
   readonly onConsumedTotalsInfo: (rows: readonly MonthRow[]) => void;
   readonly onLossesSplitInfo: (row: MonthRow) => void;
   readonly onExportPriceInfo: (row: MonthRow) => void;
-  readonly onNetPaymentInfo: (row: MonthRow) => void;
   readonly onRoiValueInfo: (row: MonthRow) => void;
   readonly onUtilityMeterInfo?: (row: MonthRow) => void;
   readonly onDocumentsInfo?: (row: MonthRow) => void;
@@ -8090,11 +8224,7 @@ function DataTable({
                 ) : importPriceValue}
               </td>
               <td className={row.electricityPayment >= 0 ? "positive" : "negative"}>
-                <TableValueInfo
-                  value={formatTableMoney(moneyFromUah(row.electricityPayment, currency, row.usdRate), currency, lang)}
-                  label={t.netPayment}
-                  onInfo={() => onNetPaymentInfo(row)}
-                />
+                {formatTableMoney(moneyFromUah(row.electricityPayment, currency, row.usdRate), currency, lang)}
               </td>
               <td className="positive">
                 <TableValueInfo
@@ -9500,6 +9630,204 @@ function formatUtilityRecordDate(value: string, lang: Lang) {
   });
 }
 
+interface CalculationLinkContextValue {
+  readonly activeKey: CalculationLinkKey | null;
+  readonly lockedKey: CalculationLinkKey | null;
+  readonly highlightLabel: string;
+  readonly hover: (key: CalculationLinkKey | null) => void;
+  readonly focus: (key: CalculationLinkKey | null) => void;
+  readonly toggle: (key: CalculationLinkKey) => void;
+}
+
+const CalculationLinkContext = React.createContext<CalculationLinkContextValue | null>(null);
+
+function LinkedCalculationScope({
+  highlightLabel,
+  children,
+}: {
+  readonly highlightLabel: string;
+  readonly children: React.ReactNode;
+}) {
+  const [linkState, dispatchLink] = useReducer(calculationLinkReducer, EMPTY_CALCULATION_LINK_STATE);
+  const activeKey = activeCalculationLink(linkState);
+
+  const clearActiveLink = (event: React.MouseEvent<HTMLDivElement>) => {
+    if ((event.target as Element).closest(".linked-calculation-value")) return;
+    dispatchLink({ type: "clear" });
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  };
+
+  return (
+    <CalculationLinkContext.Provider value={{
+      activeKey,
+      lockedKey: linkState.lockedKey,
+      highlightLabel,
+      hover: (key) => dispatchLink({ type: "hover", key }),
+      focus: (key) => dispatchLink({ type: "focus", key }),
+      toggle: (key) => dispatchLink({ type: "toggle", key }),
+    }}>
+      <div className="linked-calculation" onClick={clearActiveLink}>
+        {children}
+      </div>
+    </CalculationLinkContext.Provider>
+  );
+}
+
+function LinkedCalculationValue({
+  linkKey,
+  label,
+  children,
+}: {
+  readonly linkKey: CalculationLinkKey;
+  readonly label: string;
+  readonly children: React.ReactNode;
+}) {
+  const context = React.useContext(CalculationLinkContext);
+  if (!context) return <>{children}</>;
+
+  const isActive = context.activeKey === linkKey;
+  const isLocked = context.lockedKey === linkKey;
+
+  return (
+    <button
+      type="button"
+      className={`linked-calculation-value${isActive ? " is-active" : ""}`}
+      aria-label={`${label}. ${context.highlightLabel}`}
+      aria-pressed={isLocked}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") context.hover(linkKey);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "mouse") context.hover(null);
+      }}
+      onFocus={() => context.focus(linkKey)}
+      onBlur={() => context.focus(null)}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (isLocked) {
+          context.toggle(linkKey);
+          event.currentTarget.blur();
+          return;
+        }
+        context.toggle(linkKey);
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function UnifiedCalculationInputs({
+  row,
+  t,
+  currency,
+  lang,
+}: {
+  readonly row: MonthRow;
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}) {
+  const displayMoney = (value: number) => formatDisplayMoney(moneyFromUah(value, currency, row.usdRate), currency, lang);
+  const tariff = tariffFromRow(row);
+  const linkedEnergy = (key: CalculationLinkKey, label: string, value: number) => (
+    <LinkedCalculationValue linkKey={key} label={label}>{formatKwh(value, lang)}</LinkedCalculationValue>
+  );
+  const linkedPrice = (key: CalculationLinkKey, label: string, value: number) => (
+    <LinkedCalculationValue linkKey={key} label={label}>{displayMoney(value)} / {energyUnit(lang)}</LinkedCalculationValue>
+  );
+
+  return (
+    <div className="calculation-input-groups unified-calculation-inputs">
+      <CalculationInputGroup
+        title={t.energy}
+        rows={[
+          {
+            label: t.consumed,
+            value: linkedEnergy("consumedTotal", t.consumed, row.consumedTotal),
+            detail: <>{t.day} {linkedEnergy("consumedDay", `${t.consumed} · ${t.day}`, row.consumedDay)} · {t.night} {linkedEnergy("consumedNight", `${t.consumed} · ${t.night}`, row.consumedNight)}</>,
+          },
+          {
+            label: t.import,
+            value: linkedEnergy("importTotal", t.import, row.importTotal),
+            detail: <>{t.day} {linkedEnergy("importDay", `${t.import} · ${t.day}`, row.importDay)} · {t.night} {linkedEnergy("importNight", `${t.import} · ${t.night}`, row.importNight)}</>,
+          },
+          {
+            label: t.export,
+            value: linkedEnergy("exportTotal", t.export, exportTotal(row)),
+            detail: <>{t.day} {linkedEnergy("exportDay", `${t.export} · ${t.day}`, row.exportDay)} · {t.night} {linkedEnergy("exportNight", `${t.export} · ${t.night}`, row.exportNight)}</>,
+          },
+        ]}
+      />
+      <CalculationInputGroup
+        title={t.importPrices}
+        rows={[
+          { label: t.day, value: linkedPrice("importPriceDay", `${t.importPrices} · ${t.day}`, row.importPriceDay) },
+          { label: t.night, value: linkedPrice("importPriceNight", `${t.importPrices} · ${t.night}`, row.importPriceNight) },
+        ]}
+      />
+      {row.electricHeatingThresholdKwh ? (
+        <CalculationInputGroup
+          title={<>{t.after} <LinkedCalculationValue linkKey="electricHeatingThreshold" label={t.electricHeatingThreshold}>{formatKwh(row.electricHeatingThresholdKwh, lang)}</LinkedCalculationValue></>}
+          rows={[
+            { label: t.day, value: linkedPrice("regularImportPriceDay", `${t.regularTier} · ${t.day}`, regularImportDayPrice(tariff)) },
+            { label: t.night, value: linkedPrice("regularImportPriceNight", `${t.regularTier} · ${t.night}`, regularImportNightPrice(tariff)) },
+          ]}
+        />
+      ) : null}
+      <CalculationInputGroup
+        title={t.exportPriceInput}
+        rows={[
+          { label: t.day, value: linkedPrice("netExportPriceDay", `${t.exportPriceInput} · ${t.day}`, netExportPrice(row)) },
+          { label: t.night, value: linkedPrice("netExportPriceNight", `${t.exportPriceInput} · ${t.night}`, netExportNightPrice(row)) },
+        ]}
+      />
+    </div>
+  );
+}
+
+function UnifiedRoiInfo({
+  row,
+  commercialDate,
+  dailyRows,
+  t,
+  currency,
+  lang,
+}: {
+  readonly row: MonthRow;
+  readonly commercialDate?: Date;
+  readonly dailyRows: readonly MonthRow[];
+  readonly t: Record<string, string>;
+  readonly currency: Currency;
+  readonly lang: Lang;
+}) {
+  return (
+    <LinkedCalculationScope highlightLabel={t.highlightRelatedValue}>
+      <UnifiedCalculationInputs row={row} t={t} currency={currency} lang={lang} />
+      <section className="unified-calculation-section">
+        <h3>{t.netPayment}</h3>
+        <NetPaymentInfo
+          row={row}
+          commercialDate={commercialDate}
+          dailyRows={dailyRows}
+          t={t}
+          currency={currency}
+          lang={lang}
+        />
+      </section>
+      <section className="unified-calculation-section">
+        <h3>{t.roi}</h3>
+        <RoiInfo row={row} t={t} currency={currency} lang={lang} />
+      </section>
+    </LinkedCalculationScope>
+  );
+}
+
+interface RoiCostPart {
+  readonly amount: number;
+  readonly key: CalculationLinkKey;
+}
+
 function RoiInfo({
   row,
   t,
@@ -9518,33 +9846,42 @@ function RoiInfo({
   const tariff = tariffFromRow(row);
   const breakdown = importCostBreakdown(row.consumedDay, row.consumedNight, tariff);
   const costRows: StackedValueRow[] = [];
-  const costParts: number[] = [];
+  const costParts: RoiCostPart[] = [];
   const consumedTotal = row.consumedDay + row.consumedNight;
+  const linked = (key: CalculationLinkKey, label: string, value: React.ReactNode) => (
+    <LinkedCalculationValue linkKey={key} label={label}>{value}</LinkedCalculationValue>
+  );
   const tierShareFormula = (
     result: number,
+    resultKey: CalculationLinkKey,
     tierTotal: React.ReactNode,
     zoneTotal: number,
+    zoneKey: CalculationLinkKey,
+    zoneLabel: string,
   ) => (
     <>
-      {formatKwh(result, lang)} = {tierTotal} × {formatNumber(zoneTotal, 2, 2)} / {formatNumber(consumedTotal, 2, 2)}
+      {linked(resultKey, zoneLabel, formatKwh(result, lang))} = {tierTotal} × {linked(zoneKey, zoneLabel, formatNumber(zoneTotal, 2, 2))} / {linked("consumedTotal", t.consumed, formatNumber(consumedTotal, 2, 2))}
     </>
   );
   const pushCostRow = (
     label: string,
     kwh: number,
     price: number,
+    energyKey: CalculationLinkKey,
+    priceKey: CalculationLinkKey,
+    costKey: CalculationLinkKey,
     tone?: "day" | "night",
     detail?: React.ReactNode,
   ) => {
     if (kwh <= 0) return;
     const cost = kwh * price;
-    costParts.push(cost);
+    costParts.push({ amount: cost, key: costKey });
     costRows.push({
       label,
       tone,
       value: (
         <>
-          {displayMoney(cost)} = {displayMoney(price)} × {formatKwh(kwh, lang)}
+          {linked(costKey, `${t.electricityCostWithoutSolar} · ${label}`, displayMoney(cost))} = {linked(priceKey, `${t.importPrices} · ${label}`, displayMoney(price))} × {linked(energyKey, `${t.consumed} · ${label}`, formatKwh(kwh, lang))}
         </>
       ),
       detail,
@@ -9553,120 +9890,112 @@ function RoiInfo({
 
   if (row.electricHeatingThresholdKwh) {
     const threshold = row.electricHeatingThresholdKwh;
-    const regularTotal = Math.max(0, consumedTotal - threshold);
-    costRows.push({ label: `${t.electricHeatingTier} · ${formatKwh(threshold, lang)}`, wide: true });
+    const thresholdValue = linked("electricHeatingThreshold", t.electricHeatingThreshold, formatNumber(threshold, 2, 2));
+    costRows.push({
+      label: t.electricHeatingTier,
+      value: <>{t.electricHeatingTier} · {linked("electricHeatingThreshold", t.electricHeatingThreshold, formatKwh(threshold, lang))}</>,
+      wide: true,
+    });
     pushCostRow(
       t.day,
       breakdown.discountedDay,
       row.importPriceDay,
+      "consumedTierDay",
+      "importPriceDay",
+      "consumedTierDayCost",
       "day",
-      tierShareFormula(breakdown.discountedDay, formatNumber(threshold, 2, 2), row.consumedDay),
+      tierShareFormula(breakdown.discountedDay, "consumedTierDay", thresholdValue, row.consumedDay, "consumedDay", `${t.consumed} · ${t.day}`),
     );
     pushCostRow(
       t.night,
       breakdown.discountedNight,
       row.importPriceNight,
+      "consumedTierNight",
+      "importPriceNight",
+      "consumedTierNightCost",
       "night",
-      tierShareFormula(breakdown.discountedNight, formatNumber(threshold, 2, 2), row.consumedNight),
+      tierShareFormula(breakdown.discountedNight, "consumedTierNight", thresholdValue, row.consumedNight, "consumedNight", `${t.consumed} · ${t.night}`),
     );
     if (breakdown.regularDay > 0 || breakdown.regularNight > 0) {
-      costRows.push({ label: `${t.regularTier} · ${t.after} ${formatKwh(threshold, lang)}`, wide: true });
+      costRows.push({
+        label: `${t.regularTier} · ${t.after}`,
+        value: <>{t.regularTier} · {t.after} {linked("electricHeatingThreshold", t.electricHeatingThreshold, formatKwh(threshold, lang))}</>,
+        wide: true,
+      });
     }
     const regularTierTotal = (
       <>
-        ({formatNumber(consumedTotal, 2, 2)} - {formatNumber(threshold, 2, 2)})
+        ({linked("consumedTotal", t.consumed, formatNumber(consumedTotal, 2, 2))} - {thresholdValue})
       </>
     );
     pushCostRow(
       t.day,
       breakdown.regularDay,
       regularImportDayPrice(tariff),
+      "consumedRegularDay",
+      "regularImportPriceDay",
+      "consumedRegularDayCost",
       "day",
-      tierShareFormula(breakdown.regularDay, regularTierTotal, row.consumedDay),
+      tierShareFormula(breakdown.regularDay, "consumedRegularDay", regularTierTotal, row.consumedDay, "consumedDay", `${t.consumed} · ${t.day}`),
     );
     pushCostRow(
       t.night,
       breakdown.regularNight,
       regularImportNightPrice(tariff),
+      "consumedRegularNight",
+      "regularImportPriceNight",
+      "consumedRegularNightCost",
       "night",
-      tierShareFormula(breakdown.regularNight, regularTierTotal, row.consumedNight),
+      tierShareFormula(breakdown.regularNight, "consumedRegularNight", regularTierTotal, row.consumedNight, "consumedNight", `${t.consumed} · ${t.night}`),
     );
   } else {
-    pushCostRow(t.day, breakdown.regularDay, row.importPriceDay, "day");
-    pushCostRow(t.night, breakdown.regularNight, row.importPriceNight, "night");
+    pushCostRow(t.day, breakdown.regularDay, row.importPriceDay, "consumedDay", "importPriceDay", "consumedTierDayCost", "day");
+    pushCostRow(t.night, breakdown.regularNight, row.importPriceNight, "consumedNight", "importPriceNight", "consumedTierNightCost", "night");
   }
 
   costRows.push({
     label: t.total,
     value: costParts.length > 1 ? (
       <>
-        {displayMoney(row.consumedPayment)} = {costParts.map((part, index) => (
-          <React.Fragment key={index}>
+        {linked("costWithoutSolar", t.electricityCostWithoutSolar, <FormulaResult>{displayMoney(row.consumedPayment)}</FormulaResult>)} = {costParts.map((part, index) => (
+          <React.Fragment key={part.key}>
             {index > 0 ? " + " : ""}
-            {displayMoney(part)}
+            {linked(part.key, t.electricityCostWithoutSolar, displayMoney(part.amount))}
           </React.Fragment>
         ))}
       </>
-    ) : (
-      displayMoney(row.consumedPayment)
-    ),
+    ) : linked("costWithoutSolar", t.electricityCostWithoutSolar, <FormulaResult>{displayMoney(row.consumedPayment)}</FormulaResult>),
   });
 
   return (
     <MathInfo
       rows={[
-        {
-          key: "inputs",
-          label: t.formulaInputs,
-          hideLabel: true,
-          value: (
-            <div className="calculation-input-groups">
-              <CalculationInputGroup
-                title={t.energy}
-                rows={[
-                  {
-                    label: t.consumed,
-                    value: formatKwh(row.consumedTotal, lang),
-                    detail: `${t.day} ${formatKwh(row.consumedDay, lang)} · ${t.night} ${formatKwh(row.consumedNight, lang)}`,
-                  },
-                ]}
-              />
-              <CalculationInputGroup
-                title={t.importPrices}
-                rows={[
-                  { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
-                  { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
-                ]}
-              />
-              {row.electricHeatingThresholdKwh ? (
-                <CalculationInputGroup
-                  title={`${t.after} ${formatKwh(row.electricHeatingThresholdKwh, lang)}`}
-                  rows={[
-                    { label: t.day, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}` },
-                    { label: t.night, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}` },
-                  ]}
-                />
-              ) : null}
-              <CalculationInputGroup
-                title={t.netPayment}
-                rows={[{ label: t.total, value: displayMoney(row.electricityPayment) }]}
-              />
-            </div>
-          ),
-        },
         { label: t.electricityCostWithoutSolar, value: <CalculationTraceRows rows={costRows} /> },
         {
           label: t.roi,
           value: (
             <>
-              <FormulaResult>{formatDisplayMoney(roi, currency, lang)}</FormulaResult> = {formatDisplayMoney(costWithoutSolar, currency, lang)} + {formatDisplayMoney(netPayment, currency, lang)}
+              <FormulaResult>{formatDisplayMoney(roi, currency, lang)}</FormulaResult> = {linked("costWithoutSolar", t.electricityCostWithoutSolar, formatDisplayMoney(costWithoutSolar, currency, lang))} + {linked("netPayment", t.netPayment, formatDisplayMoney(netPayment, currency, lang))}
             </>
           ),
         },
       ]}
-      className="net-payment-math roi-calculation-breakdown"
+      className="net-payment-math roi-calculation-breakdown without-inputs"
     />
   );
+}
+
+interface ImportCostRowsOptions {
+  readonly totalLabel?: string;
+  readonly totalMultiplier?: number;
+  readonly totalLinkKey?: CalculationLinkKey;
+  readonly dayEnergyKey?: CalculationLinkKey;
+  readonly nightEnergyKey?: CalculationLinkKey;
+}
+
+interface ImportCostPart {
+  readonly amount: number;
+  readonly key: CalculationLinkKey;
 }
 
 function NetPaymentInfo({
@@ -9685,67 +10014,90 @@ function NetPaymentInfo({
   readonly lang: Lang;
 }) {
   const displayMoney = (value: number) => formatDisplayMoney(moneyFromUah(value, currency, row.usdRate), currency, lang);
-  const displayMoneyMath = (value: number): React.ReactNode => {
+  const linked = (key: CalculationLinkKey, label: string, value: React.ReactNode) => (
+    <LinkedCalculationValue linkKey={key} label={label}>{value}</LinkedCalculationValue>
+  );
+  const displayMoneyMath = (value: number, linkKey?: CalculationLinkKey, label = t.netPayment): React.ReactNode => {
     const converted = displayMoney(value);
-    if (currency === "UAH") return <FormulaResult>{converted}</FormulaResult>;
+    const result = <FormulaResult>{converted}</FormulaResult>;
+    const linkedResult = linkKey ? linked(linkKey, label, result) : result;
+    if (currency === "UAH") return linkedResult;
     return (
       <>
-        {formatMoney(value, "UAH", lang)} / {formatNumber(row.usdRate, 2, 2)} = <FormulaResult>{converted}</FormulaResult>
+        {formatMoney(value, "UAH", lang)} / {formatNumber(row.usdRate, 2, 2)} = {linkedResult}
       </>
     );
   };
   const displayEnergyMath = (value: number) => formatNumber(value, 2, 2);
+  const linkedEnergyMath = (key: CalculationLinkKey, label: string, value: number) => linked(key, label, displayEnergyMath(value));
+  const linkedPrice = (key: CalculationLinkKey, label: string, value: number) => linked(key, label, displayMoney(value));
   const tariff = tariffFromRow(row);
   const importCostRows = (
     breakdown: ImportCostBreakdown,
-    { totalLabel = t.total, totalMultiplier = 1 }: { readonly totalLabel?: string; readonly totalMultiplier?: number } = {},
+    {
+      totalLabel = t.total,
+      totalMultiplier = 1,
+      totalLinkKey,
+      dayEnergyKey,
+      nightEnergyKey,
+    }: ImportCostRowsOptions = {},
   ) => {
     const rows: StackedValueRow[] = [];
-    const costParts: number[] = [];
+    const costParts: ImportCostPart[] = [];
     const displayCostPart = (value: number) => formatDisplayMoney(moneyFromUah(value, currency, row.usdRate), currency, lang, value === 0);
-    const pushCostRow = (label: string, kwh: number, price: number, tone?: "day" | "night", showZero = false) => {
+    const pushCostRow = (
+      label: string,
+      kwh: number,
+      price: number,
+      costKey: CalculationLinkKey,
+      priceKey: CalculationLinkKey,
+      energyKey?: CalculationLinkKey,
+      tone?: "day" | "night",
+      showZero = false,
+    ) => {
       if (kwh <= 0 && !showZero) return;
       const cost = kwh * price;
-      costParts.push(cost);
+      costParts.push({ amount: cost, key: costKey });
       rows.push({
         label,
         tone,
         value: (
           <>
-            {displayMoneyMath(cost)} = {displayMoney(price)} × {displayEnergyMath(kwh)}
+            {displayMoneyMath(cost, costKey, label)} = {linkedPrice(priceKey, `${t.importPrices} · ${label}`, price)} × {energyKey ? linkedEnergyMath(energyKey, label, kwh) : displayEnergyMath(kwh)}
           </>
         ),
       });
     };
 
     if (row.electricHeatingThresholdKwh) {
-      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day");
-      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night");
-      if (breakdown.regularDay > 0 || breakdown.regularNight > 0) {
+      const hasRegularTier = breakdown.regularDay > 0 || breakdown.regularNight > 0;
+      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "paymentTierDayCost", "importPriceDay", hasRegularTier ? undefined : dayEnergyKey, "day");
+      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "paymentTierNightCost", "importPriceNight", hasRegularTier ? undefined : nightEnergyKey, "night");
+      if (hasRegularTier) {
         rows.push({ label: `${t.after} ${formatKwh(row.electricHeatingThresholdKwh, lang)}`, wide: true });
       }
-      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day");
-      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night");
+      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "paymentRegularDayCost", "regularImportPriceDay", undefined, "day");
+      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "paymentRegularNightCost", "regularImportPriceNight", undefined, "night");
     } else {
-      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "day");
-      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "night");
-      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "day");
-      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "night");
+      pushCostRow(t.day, breakdown.discountedDay, row.importPriceDay, "paymentTierDayCost", "importPriceDay", dayEnergyKey, "day");
+      pushCostRow(t.night, breakdown.discountedNight, row.importPriceNight, "paymentTierNightCost", "importPriceNight", nightEnergyKey, "night");
+      pushCostRow(t.day, breakdown.regularDay, regularImportDayPrice(tariff), "paymentRegularDayCost", "importPriceDay", dayEnergyKey, "day");
+      pushCostRow(t.night, breakdown.regularNight, regularImportNightPrice(tariff), "paymentRegularNightCost", "importPriceNight", nightEnergyKey, "night");
     }
 
     rows.push({
       label: totalLabel,
       value: costParts.length > 1 ? (
         <>
-          {displayMoneyMath(breakdown.total * totalMultiplier)} = {costParts.map((part, index) => (
-            <React.Fragment key={index}>
+          {displayMoneyMath(breakdown.total * totalMultiplier, totalLinkKey, totalLabel)} = {costParts.map((part, index) => (
+            <React.Fragment key={part.key}>
               {index > 0 ? " + " : ""}
-              {displayCostPart(part)}
+              {linked(part.key, totalLabel, displayCostPart(part.amount))}
             </React.Fragment>
           ))}
         </>
       ) : (
-        displayMoneyMath(breakdown.total * totalMultiplier)
+        displayMoneyMath(breakdown.total * totalMultiplier, totalLinkKey, totalLabel)
       ),
     });
 
@@ -9754,10 +10106,10 @@ function NetPaymentInfo({
         label: totalLabel,
         value: (
           <>
-            {displayMoneyMath(breakdown.total * totalMultiplier)} = -({costParts.length > 1 ? costParts.map((part, index) => (
-              <React.Fragment key={index}>
+            {displayMoneyMath(breakdown.total * totalMultiplier, totalLinkKey, totalLabel)} = -({costParts.length > 1 ? costParts.map((part, index) => (
+              <React.Fragment key={part.key}>
                 {index > 0 ? " + " : ""}
-                {displayCostPart(part)}
+                {linked(part.key, totalLabel, displayCostPart(part.amount))}
               </React.Fragment>
             )) : displayMoney(breakdown.total)})
           </>
@@ -9768,68 +10120,7 @@ function NetPaymentInfo({
   };
   const importTotalValue = Math.max(row.importTotal, 0);
   const transitionRows = commercialTransitionRows(row, commercialDate, dailyRows);
-  const inputRows: MathInfoRow[] = [
-    {
-      key: "inputs",
-      label: t.formulaInputs,
-      hideLabel: true,
-      value: (
-        <div className="calculation-input-groups">
-          <CalculationInputGroup
-            title={t.energy}
-            rows={[
-              {
-                label: t.import,
-                value: formatKwh(row.importTotal, lang),
-                detail: `${t.day} ${formatKwh(row.importDay, lang)} · ${t.night} ${formatKwh(row.importNight, lang)}`,
-              },
-              {
-                label: t.export,
-                value: formatKwh(exportTotal(row), lang),
-                detail: `${t.day} ${formatKwh(row.exportDay, lang)} · ${t.night} ${formatKwh(row.exportNight, lang)}`,
-              },
-            ]}
-          />
-          <CalculationInputGroup
-            title={t.importPrices}
-            rows={[
-              { label: t.day, value: `${displayMoney(row.importPriceDay)} / ${energyUnit(lang)}` },
-              { label: t.night, value: `${displayMoney(row.importPriceNight)} / ${energyUnit(lang)}` },
-            ]}
-          />
-          {row.electricHeatingThresholdKwh ? (
-            <CalculationInputGroup
-              title={`${t.after} ${formatKwh(row.electricHeatingThresholdKwh, lang)}`}
-              rows={[
-                { label: t.day, value: `${displayMoney(regularImportDayPrice(tariff))} / ${energyUnit(lang)}` },
-                { label: t.night, value: `${displayMoney(regularImportNightPrice(tariff))} / ${energyUnit(lang)}` },
-              ]}
-            />
-          ) : null}
-          <CalculationInputGroup
-            title={t.exportPriceInput}
-            rows={[
-              { label: t.day, value: displayMoney(netExportPrice(row)) },
-              { label: t.night, value: displayMoney(netExportNightPrice(row)) },
-            ]}
-          />
-        </div>
-      ),
-    },
-  ];
-  const rows: MathInfoRow[] = [
-    ...inputRows,
-    {
-      label: `${t.balance} · ${energyUnit(lang)}`,
-      value: (
-        <>
-          <FormulaResult>{displayEnergyMath(row.balance)}</FormulaResult>
-          {" = "}
-          {displayEnergyMath(row.importTotal)} - {displayEnergyMath(exportTotal(row))}
-        </>
-      ),
-    },
-  ];
+  const rows: MathInfoRow[] = []
 
   if (transitionRows) {
     const beforeExport = transitionRows.before.reduce((sum, current) => sum + exportTotal(current), 0);
@@ -9879,20 +10170,20 @@ function NetPaymentInfo({
                     rows={[
                       {
                         label: t.day,
-                        value: `${displayMoney(afterPaidExport.day * netExportPrice(row))} = ${displayEnergyMath(afterPaidExport.day)} × ${displayMoney(netExportPrice(row))}`,
+                        value: <>{displayMoney(afterPaidExport.day * netExportPrice(row))} = {displayEnergyMath(afterPaidExport.day)} × {linkedPrice("netExportPriceDay", `${t.exportPriceInput} · ${t.day}`, netExportPrice(row))}</>,
                         tone: "day" as const,
                       },
                       {
                         label: t.night,
-                        value: `${displayMoney(afterPaidExport.night * netExportNightPrice(row))} = ${displayEnergyMath(afterPaidExport.night)} × ${displayMoney(netExportNightPrice(row))}`,
+                        value: <>{displayMoney(afterPaidExport.night * netExportNightPrice(row))} = {displayEnergyMath(afterPaidExport.night)} × {linkedPrice("netExportPriceNight", `${t.exportPriceInput} · ${t.night}`, netExportNightPrice(row))}</>,
                         tone: "night" as const,
                       },
-                      { label: t.total, value: displayMoneyMath(afterPayment) },
+                      { label: t.total, value: displayMoneyMath(afterPayment, "afterPayment", t.fromCommercialDate) },
                     ]}
                   />
                 ) : (
                   <>
-                    {displayMoneyMath(afterPayment)} = {displayEnergyMath(afterPaidExportTotal)} × {displayMoney(netExportPrice(row))}
+                      {displayMoneyMath(afterPayment, "afterPayment", t.fromCommercialDate)} = {displayEnergyMath(afterPaidExportTotal)} × {linkedPrice("netExportPriceDay", t.exportPriceInput, netExportPrice(row))}
                   </>
                 ),
               },
@@ -9909,7 +10200,7 @@ function NetPaymentInfo({
                 label: t.beforeCommercialDate,
                 value: (
                   <>
-                    {displayMoneyMath(beforePayment)} = -({beforeImportCostParts.map((part, index) => (
+                    {displayMoneyMath(beforePayment, "beforePayment", t.beforeCommercialDate)} = -({beforeImportCostParts.map((part, index) => (
                       <React.Fragment key={index}>
                         {index > 0 ? " + " : ""}
                         {displayCostPart(part)}
@@ -9918,12 +10209,12 @@ function NetPaymentInfo({
                   </>
                 ),
               },
-              { label: t.fromCommercialDate, value: displayMoneyMath(afterPayment) },
+              { label: t.fromCommercialDate, value: displayMoneyMath(afterPayment, "afterPayment", t.fromCommercialDate) },
               {
                 label: t.total,
                 value: (
                   <>
-                    {displayMoneyMath(row.electricityPayment)} = {displayMoney(beforePayment)} + {displayMoney(afterPayment)}
+                    {displayMoneyMath(row.electricityPayment, "netPayment", t.netPayment)} = {linked("beforePayment", t.beforeCommercialDate, displayMoney(beforePayment))} + {linked("afterPayment", t.fromCommercialDate, displayMoney(afterPayment))}
                   </>
                 ),
               },
@@ -9941,7 +10232,13 @@ function NetPaymentInfo({
       {
         label: t.netPayment,
         value: (
-          <CalculationTraceRows rows={importCostRows(importCostBreakdown(row.importDay, row.importNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
+          <CalculationTraceRows rows={importCostRows(importCostBreakdown(row.importDay, row.importNight, tariff), {
+            totalLabel: t.netPayment,
+            totalMultiplier: -1,
+            totalLinkKey: "netPayment",
+            dayEnergyKey: "importDay",
+            nightEnergyKey: "importNight",
+          })} />
         ),
       },
     );
@@ -9953,7 +10250,7 @@ function NetPaymentInfo({
         label: `${t.netSurplus} · ${energyUnit(lang)}`,
         value: (
           <>
-            <FormulaResult>{displayEnergyMath(surplus)}</FormulaResult> = {displayEnergyMath(exportTotal(row))} - {displayEnergyMath(row.importTotal)}
+            {linked("netSurplus", t.netSurplus, <FormulaResult>{displayEnergyMath(surplus)}</FormulaResult>)} = {linkedEnergyMath("exportTotal", t.export, exportTotal(row))} - {linkedEnergyMath("importTotal", t.import, row.importTotal)}
           </>
         ),
       },
@@ -9964,18 +10261,18 @@ function NetPaymentInfo({
             rows={[
               {
                 label: t.day,
-                value: `${displayMoney(paidSurplus.day * netExportPrice(row))} = ${displayEnergyMath(paidSurplus.day)} × ${displayMoney(netExportPrice(row))}`,
+                value: <>{displayMoney(paidSurplus.day * netExportPrice(row))} = {displayEnergyMath(paidSurplus.day)} × {linkedPrice("netExportPriceDay", `${t.exportPriceInput} · ${t.day}`, netExportPrice(row))}</>,
               },
               {
                 label: t.night,
-                value: `${displayMoney(paidSurplus.night * netExportNightPrice(row))} = ${displayEnergyMath(paidSurplus.night)} × ${displayMoney(netExportNightPrice(row))}`,
+                value: <>{displayMoney(paidSurplus.night * netExportNightPrice(row))} = {displayEnergyMath(paidSurplus.night)} × {linkedPrice("netExportPriceNight", `${t.exportPriceInput} · ${t.night}`, netExportNightPrice(row))}</>,
               },
-              { label: t.total, value: displayMoneyMath(row.electricityPayment) },
+              { label: t.total, value: displayMoneyMath(row.electricityPayment, "netPayment", t.netPayment) },
             ]}
           />
         ) : (
           <>
-            {displayMoneyMath(row.electricityPayment)} = {displayEnergyMath(surplus)} × {displayMoney(netExportPrice(row))}
+              {displayMoneyMath(row.electricityPayment, "netPayment", t.netPayment)} = {linkedEnergyMath("netSurplus", t.netSurplus, surplus)} × {linkedPrice("netExportPriceDay", t.exportPriceInput, netExportPrice(row))}
           </>
         ),
       },
@@ -9983,7 +10280,7 @@ function NetPaymentInfo({
   } else if (importTotalValue <= 0) {
     rows.push({
       label: t.netPayment,
-      value: displayMoneyMath(row.electricityPayment),
+      value: displayMoneyMath(row.electricityPayment, "netPayment", t.netPayment),
     });
   } else {
     const dayShare = row.importDay / importTotalValue;
@@ -10003,7 +10300,7 @@ function NetPaymentInfo({
                 label: t.day,
                 value: (
                   <>
-                    <FormulaResult>{displayEnergyMath(coveredDay)}</FormulaResult> = {displayEnergyMath(exportTotal(row))} × {displayEnergyMath(row.importDay)} / {displayEnergyMath(row.importTotal)}
+                    {linked("coveredImportDay", `${t.exportedOffset} · ${t.day}`, <FormulaResult>{displayEnergyMath(coveredDay)}</FormulaResult>)} = {linkedEnergyMath("exportTotal", t.export, exportTotal(row))} × {linkedEnergyMath("importDay", `${t.import} · ${t.day}`, row.importDay)} / {linkedEnergyMath("importTotal", t.import, row.importTotal)}
                   </>
                 ),
               },
@@ -10011,7 +10308,7 @@ function NetPaymentInfo({
                 label: t.night,
                 value: (
                   <>
-                    <FormulaResult>{displayEnergyMath(coveredNight)}</FormulaResult> = {displayEnergyMath(exportTotal(row))} × {displayEnergyMath(row.importNight)} / {displayEnergyMath(row.importTotal)}
+                    {linked("coveredImportNight", `${t.exportedOffset} · ${t.night}`, <FormulaResult>{displayEnergyMath(coveredNight)}</FormulaResult>)} = {linkedEnergyMath("exportTotal", t.export, exportTotal(row))} × {linkedEnergyMath("importNight", `${t.import} · ${t.night}`, row.importNight)} / {linkedEnergyMath("importTotal", t.import, row.importTotal)}
                   </>
                 ),
               },
@@ -10028,7 +10325,7 @@ function NetPaymentInfo({
                 label: t.day,
                 value: (
                   <>
-                    <FormulaResult>{displayEnergyMath(remainingDay)}</FormulaResult> = {displayEnergyMath(row.importDay)} - {displayEnergyMath(coveredDay)}
+                    {linked("remainingImportDay", `${t.remainingImport} · ${t.day}`, <FormulaResult>{displayEnergyMath(remainingDay)}</FormulaResult>)} = {linkedEnergyMath("importDay", `${t.import} · ${t.day}`, row.importDay)} - {linkedEnergyMath("coveredImportDay", `${t.exportedOffset} · ${t.day}`, coveredDay)}
                   </>
                 ),
               },
@@ -10036,7 +10333,7 @@ function NetPaymentInfo({
                 label: t.night,
                 value: (
                   <>
-                    <FormulaResult>{displayEnergyMath(remainingNight)}</FormulaResult> = {displayEnergyMath(row.importNight)} - {displayEnergyMath(coveredNight)}
+                    {linked("remainingImportNight", `${t.remainingImport} · ${t.night}`, <FormulaResult>{displayEnergyMath(remainingNight)}</FormulaResult>)} = {linkedEnergyMath("importNight", `${t.import} · ${t.night}`, row.importNight)} - {linkedEnergyMath("coveredImportNight", `${t.exportedOffset} · ${t.night}`, coveredNight)}
                   </>
                 ),
               },
@@ -10044,7 +10341,7 @@ function NetPaymentInfo({
                 label: t.total,
                 value: (
                   <>
-                    <FormulaResult>{displayEnergyMath(remainingTotal)}</FormulaResult> = {displayEnergyMath(remainingDay)} + {displayEnergyMath(remainingNight)}
+                    <FormulaResult>{displayEnergyMath(remainingTotal)}</FormulaResult> = {linkedEnergyMath("remainingImportDay", `${t.remainingImport} · ${t.day}`, remainingDay)} + {linkedEnergyMath("remainingImportNight", `${t.remainingImport} · ${t.night}`, remainingNight)}
                   </>
                 ),
               },
@@ -10055,13 +10352,19 @@ function NetPaymentInfo({
       {
         label: t.netPayment,
         value: (
-          <CalculationTraceRows rows={importCostRows(importCostBreakdown(remainingDay, remainingNight, tariff), { totalLabel: t.netPayment, totalMultiplier: -1 })} />
+          <CalculationTraceRows rows={importCostRows(importCostBreakdown(remainingDay, remainingNight, tariff), {
+            totalLabel: t.netPayment,
+            totalMultiplier: -1,
+            totalLinkKey: "netPayment",
+            dayEnergyKey: "remainingImportDay",
+            nightEnergyKey: "remainingImportNight",
+          })} />
         ),
       },
     );
   }
 
-  return <MathInfo rows={rows} className="net-payment-math net-payment-breakdown" />;
+  return <MathInfo rows={rows} className="net-payment-math net-payment-breakdown without-inputs" />;
 }
 
 function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefined, dailyRows: readonly MonthRow[]) {
@@ -10231,11 +10534,11 @@ interface MathInfoRow {
 interface CalculationInputRow {
   readonly label: string;
   readonly value: React.ReactNode;
-  readonly detail?: string;
+  readonly detail?: React.ReactNode;
 }
 
 interface CalculationInputGroupProps {
-  readonly title: string;
+  readonly title: React.ReactNode;
   readonly rows: readonly CalculationInputRow[];
 }
 
