@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
-import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, PlantSpending, PlantSpendingType, ProductionProjection, Tariff, UtilityMeterRecordDates } from '../domain/types'
+import { balance, consumedPrice, consumedTotal, importTotal, payment, plantCapacityKwp, savings } from '../domain/formulas'
+import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, PlantSpending, PlantSpendingType, ProductionProjection, ProjectionIssue, Tariff, UtilityMeterRecordDates } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -9,6 +9,8 @@ interface PlantRecord {
   readonly launch_date: string
   readonly commercial_date: string
   readonly electric_heating_import_threshold_kwh?: number | null
+  readonly capacity_kwp?: number
+  readonly modules?: number
   readonly updated_at?: string
 }
 
@@ -79,8 +81,24 @@ interface ApiResponse {
   readonly tariffs?: readonly TariffRecord[]
   readonly reads?: Readonly<Record<string, readonly string[]>> | readonly string[]
   readonly records?: readonly DayRecord[] | readonly MonthRecord[]
-  readonly projection?: ProductionProjection | null
+  readonly projection?: ProductionProjectionRecord | null
+  readonly projectionIssue?: ProjectionIssue
   readonly spendings?: readonly PlantSpendingRecord[]
+}
+
+interface ProductionProjectionRecord {
+  readonly monthlyKwh: readonly number[]
+  readonly dailyKwh: readonly number[]
+  readonly periods?: readonly ProductionProjectionPeriodRecord[]
+}
+
+interface ProductionProjectionPeriodRecord {
+  readonly effectiveDate: string
+  readonly spendingId?: number
+  readonly modules: number
+  readonly capacityKwp: number
+  readonly monthlyKwh: readonly number[]
+  readonly dailyKwh: readonly number[]
 }
 
 interface DashboardAccess {
@@ -116,9 +134,9 @@ export async function getMonthDocumentUrl(path: string): Promise<string> {
 export async function loadDashboardData(): Promise<LoadedData> {
   assertConfig()
 
-  const { plant, months, days, tariffs, reads, projection, spendings } = await fetchDashboardData()
+  const { plant, months, days, tariffs, reads, projection, projectionIssue, spendings } = await fetchDashboardData()
   const readablePlantScopes = normalizeReadablePlantScopes(reads)
-  const loaded = toLoadedPlant({ plant, months, days, tariffs, projection })
+  const loaded = toLoadedPlant({ plant, months, days, tariffs, projection, projectionIssue })
 
   return {
     ...loaded,
@@ -132,15 +150,15 @@ export async function loadDashboardData(): Promise<LoadedData> {
 export async function loadPlantData(plantId: string): Promise<PlantComparison> {
   assertConfig()
 
-  const { plant, months, days, tariffs, projection } = await fetchDashboardData(plantId)
+  const { plant, months, days, tariffs, projection, projectionIssue } = await fetchDashboardData(plantId)
 
-  return toLoadedPlant({ plant, months, days, tariffs, projection })
+  return toLoadedPlant({ plant, months, days, tariffs, projection, projectionIssue })
 }
 
 export async function loadPlantGranularity(plantId: string, granularity: string): Promise<PlantComparison> {
   assertConfig()
 
-  const { plant, records, tariffs, projection } = await fetchDashboardData(plantId, granularity)
+  const { plant, records, tariffs, projection, projectionIssue } = await fetchDashboardData(plantId, granularity)
   const isDayGranularity = /^\d{4}-\d{2}-\d{2}$/.test(granularity)
   const days = isDayGranularity
     ? records as readonly DayRecord[]
@@ -154,6 +172,7 @@ export async function loadPlantGranularity(plantId: string, granularity: string)
     days,
     tariffs,
     projection,
+    projectionIssue,
   })
 }
 
@@ -163,12 +182,14 @@ export function toLoadedPlant({
   days,
   tariffs,
   projection,
+  projectionIssue,
 }: {
   readonly plant: PlantRecord
   readonly months: readonly MonthRecord[]
   readonly days: readonly DayRecord[]
   readonly tariffs: readonly TariffRecord[]
-  readonly projection?: ProductionProjection | null
+  readonly projection?: ProductionProjectionRecord | null
+  readonly projectionIssue?: ProjectionIssue
 }): PlantComparison {
   const monthlyRates = latestUsdRateByMonth(days)
   const fallbackUsdRate = latestPositiveRate(days)
@@ -194,10 +215,13 @@ export function toLoadedPlant({
     dailyRows,
     scopes: [],
     investmentUsd: plant.investment_usd,
+    capacityKwp: plant.capacity_kwp ?? plantCapacityKwp(plant.metadata),
+    modules: plant.modules ?? (plant.metadata?.pvs?.reduce((sum, field) => sum + (field.modules ?? 0), 0) || undefined),
     launchDate: parseDate(plant.launch_date),
     commercialDate,
     metadata: plant.metadata ?? null,
-    projection: projection ?? null,
+    projection: toProductionProjection(projection),
+    projectionIssue,
     sheetUpdatedAt: latestUpdatedAt([plant.updated_at, ...months.map((row) => row.updated_at), ...days.map((row) => row.updated_at), ...tariffs.map((row) => row.updated_at)]),
   }
 }
@@ -245,7 +269,25 @@ async function fetchDashboardData(
     tariffs: data.tariffs ?? [],
     reads: data.reads ?? {},
     projection: data.projection ?? null,
+    projectionIssue: data.projectionIssue,
     spendings: Array.isArray(data.spendings) ? data.spendings : [],
+  }
+}
+
+function toProductionProjection(projection?: ProductionProjectionRecord | null): ProductionProjection | null {
+  if (!projection) return null
+
+  return {
+    monthlyKwh: projection.monthlyKwh,
+    dailyKwh: projection.dailyKwh,
+    ...(projection.periods
+      ? {
+        periods: projection.periods.map((period) => ({
+          ...period,
+          effectiveDate: parseDate(period.effectiveDate),
+        })),
+      }
+      : {}),
   }
 }
 

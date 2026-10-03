@@ -118,6 +118,8 @@ describe('Supabase data mapping', () => {
     const metadata = {
       pvs: [
         {
+          id: 'south',
+          modules: 32,
           azimuth: 155,
           power: 11160,
           slope: 35,
@@ -132,6 +134,13 @@ describe('Supabase data mapping', () => {
     const projection = {
       monthlyKwh: Array.from({ length: 12 }, (_, index) => index + 1),
       dailyKwh: Array.from({ length: 12 }, (_, index) => (index + 1) / 10),
+      periods: [{
+        effectiveDate: '2025-06-28',
+        modules: 9,
+        capacityKwp: 3.69,
+        monthlyKwh: Array.from({ length: 12 }, () => 900),
+        dailyKwh: Array.from({ length: 12 }, () => 30),
+      }],
     }
     const loaded = toLoadedPlant({
       plant: {
@@ -142,10 +151,20 @@ describe('Supabase data mapping', () => {
       days: [],
       tariffs: [],
       projection,
+      projectionIssue: 'invalid-history',
     })
 
     expect(loaded.metadata).toEqual(metadata)
-    expect(loaded.projection).toEqual(projection)
+    expect(loaded.capacityKwp).toBe(11.16)
+    expect(loaded.modules).toBe(32)
+    expect(loaded.projection).toEqual({
+      ...projection,
+      periods: [{
+        ...projection.periods[0],
+        effectiveDate: new Date('2025-06-28T00:00:00'),
+      }],
+    })
+    expect(loaded.projectionIssue).toBe('invalid-history')
   })
 
   it('uses manual monthly fallback when a month has no daily rates', () => {

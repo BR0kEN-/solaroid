@@ -1,5 +1,5 @@
-import { moneyFromUah, sumRowsRoiMoney, type Currency } from './money'
-import { importCostBreakdown, importEnergyCost, regularImportDayPrice, regularImportNightPrice, totalInvestmentMoney, totalInvestmentUsd } from './formulas'
+import { moneyFromUah, rowRoiMoney, sumRowsRoiMoney, type Currency } from './money'
+import { importCostBreakdown, importEnergyCost, normalizedProductionPerformance, regularImportDayPrice, regularImportNightPrice, totalInvestmentMoney, totalInvestmentUsd } from './formulas'
 import type { MonthRow, PlantSpending, ProductionProjection, Tariff } from './types'
 
 export interface PaybackResult {
@@ -26,7 +26,7 @@ export interface CommercialEndRecoveryResult {
 export interface CommercialRecoveryDetails {
   readonly annualProduction: {
     readonly kwh: number
-    readonly source: 'pvgis' | 'all-time-data' | 'actual-fallback'
+    readonly source: 'pvgis' | 'pvgis-adjusted' | 'all-time-data' | 'actual-fallback'
     readonly closedYearCount: number
   }
   readonly annualConsumption: {
@@ -48,6 +48,11 @@ export interface CommercialRecoveryDetails {
 interface CommercialMonthOverride {
   readonly tariff: Tariff
   readonly usdRate: number
+}
+
+export interface CurrentMonthRecoveryForecast {
+  readonly date: Date
+  readonly recovery: number
 }
 
 const DEFAULT_ANNUAL_SELF_CONSUMPTION_KWH = 17_000
@@ -104,6 +109,7 @@ export function calculateCommercialEndRecovery({
   endDate,
   projection,
   tariffOverrides,
+  currentMonthForecast,
   today = new Date(),
 }: {
   readonly rows: readonly MonthRow[]
@@ -114,6 +120,7 @@ export function calculateCommercialEndRecovery({
   readonly endDate: Date
   readonly projection?: ProductionProjection | null
   readonly tariffOverrides?: ReadonlyMap<string, CommercialMonthOverride>
+  readonly currentMonthForecast?: CurrentMonthRecoveryForecast
   readonly today?: Date
 }): CommercialEndRecoveryResult {
   if (!commercialDate || !launchDate || endDate <= launchDate) {
@@ -131,6 +138,7 @@ export function calculateCommercialEndRecovery({
     currency,
     projection,
     tariffOverrides,
+    currentMonthForecast,
     today,
   })
 }
@@ -144,6 +152,7 @@ function projectedRecovery({
   currency,
   projection,
   tariffOverrides,
+  currentMonthForecast,
   today,
 }: {
   readonly rows: readonly MonthRow[]
@@ -154,18 +163,33 @@ function projectedRecovery({
   readonly currency: Currency
   readonly projection?: ProductionProjection | null
   readonly tariffOverrides?: ReadonlyMap<string, CommercialMonthOverride>
+  readonly currentMonthForecast?: CurrentMonthRecoveryForecast
   readonly today: Date
 }) {
   const forecastEnd = addMonths(commercialEndDate, ROI_FORECAST_MAX_YEARS * 12)
-  const productionBasis = annualProductionBasis(rows, launchDate, projection, today)
-  const consumptionBasis = annualConsumptionBasis(rows, launchDate, today)
+  const currentMonth = monthStart(today)
+  const activeCurrentMonthForecast = currentMonthForecast && monthKey(currentMonthForecast.date) === monthKey(currentMonth)
+    ? currentMonthForecast
+    : undefined
+  const completedRows = activeCurrentMonthForecast
+    ? rows.filter((row) => row.date < currentMonth)
+    : rows
+  const basisDate = activeCurrentMonthForecast ? currentMonth : today
+  const productionBasis = annualProductionBasis(completedRows, launchDate, projection, basisDate)
+  const consumptionBasis = annualConsumptionBasis(completedRows, launchDate, basisDate)
   const details = commercialRecoveryDetails(rows, productionBasis, consumptionBasis, commercialDate, commercialEndDate, currency)
+  const rowsByMonth = new Map(rows.map((row) => [monthKey(row.date), row]))
   let recovered = 0
   let recoveredAtCommercialEnd = 0
   let roiDate: Date | null = null
 
   for (const month of monthsBetween(launchDate, forecastEnd)) {
-    const value = projectedMonthRecovery(rows, month, launchDate, commercialDate, commercialEndDate, forecastEnd, currency, productionBasis.kwh, consumptionBasis.totalKwh, tariffOverrides)
+    const row = rowsByMonth.get(monthKey(month))
+    const value = activeCurrentMonthForecast && monthKey(month) === monthKey(currentMonth)
+      ? activeCurrentMonthForecast.recovery
+      : activeCurrentMonthForecast && month < currentMonth && row
+        ? rowRoiMoney(row, currency)
+        : projectedMonthRecovery(rows, month, launchDate, commercialDate, commercialEndDate, forecastEnd, currency, productionBasis.kwh, consumptionBasis.totalKwh, tariffOverrides)
 
     if (month < commercialEndDate) {
       recoveredAtCommercialEnd += value
@@ -249,13 +273,20 @@ function annualProductionBasis(
   projection: ProductionProjection | null | undefined,
   today: Date,
 ): CommercialRecoveryDetails['annualProduction'] {
+  const pvgisAnnual = projection?.monthlyKwh.reduce((sum, value) => sum + value, 0) ?? 0
+  if (projection && pvgisAnnual > 0) {
+    const factor = normalizedProductionPerformance(rows, projection, launchDate, today)
+    return {
+      kwh: pvgisAnnual * (factor ?? 1),
+      source: factor !== undefined ? 'pvgis-adjusted' : 'pvgis',
+      closedYearCount: 0,
+    }
+  }
+
   const allTimeProduction = annualizedAllTimeRows(rows, launchDate, today, (row) => row.production)
   if (allTimeProduction !== undefined) {
     return { kwh: allTimeProduction, source: 'all-time-data', closedYearCount: 0 }
   }
-
-  const pvgisAnnual = projection?.monthlyKwh.reduce((sum, value) => sum + value, 0) ?? 0
-  if (pvgisAnnual > 0) return { kwh: pvgisAnnual, source: 'pvgis', closedYearCount: 0 }
 
   return {
     kwh: rows.reduce((sum, row) => sum + row.production, 0),

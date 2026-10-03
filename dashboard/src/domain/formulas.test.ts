@@ -6,6 +6,10 @@ import {
   commercialBalance,
   consumedPrice,
   consumedTotal,
+  dateWeightedProjectionCapacity,
+  expectedProductionForDay,
+  expectedProductionForMonth,
+  expectedProductionForRow,
   exportPayout,
   exportTaxRate,
   greenTariffReceiptReconciliation,
@@ -15,8 +19,11 @@ import {
   investmentUsdRateForDate,
   netExportPrice,
   netExportNightPrice,
+  normalizedProductionPerformance,
   payment,
   plantCapacityKwp,
+  productionProjectionPeriodAt,
+  productionProjectionTransitionForSpending,
   projectConsumptionWithoutPlant,
   productionYieldKwhPerKwp,
   reconciliationValue,
@@ -30,7 +37,7 @@ import {
   totalInvestmentUsd,
   weightedImportPrice,
 } from './formulas'
-import type { EnergySnapshot, GreenTariffReport, MonthRow, MonthTariffScenario, PlantSpending, Tariff } from './types'
+import type { EnergySnapshot, GreenTariffReport, MonthRow, MonthTariffScenario, PlantSpending, ProductionProjection, Tariff } from './types'
 
 const tariff: Tariff = {
   importDay: 4.32,
@@ -161,6 +168,124 @@ describe('plant production capacity', () => {
     expect(capacityAdjustedProductionSurplus(100, 80, 10, 0)).toBeUndefined()
   })
 })
+
+describe('capacity-aware production projection', () => {
+  const projection: ProductionProjection = {
+    monthlyKwh: Array.from({ length: 12 }, () => 3_200),
+    dailyKwh: Array.from({ length: 12 }, () => 100),
+    periods: [
+      {
+        effectiveDate: new Date('2025-06-28T00:00:00'),
+        modules: 9,
+        capacityKwp: 3.69,
+        monthlyKwh: Array.from({ length: 12 }, () => 900),
+        dailyKwh: Array.from({ length: 12 }, () => 30),
+      },
+      {
+        effectiveDate: new Date('2025-08-11T00:00:00'),
+        spendingId: 1,
+        modules: 19,
+        capacityKwp: 7.79,
+        monthlyKwh: Array.from({ length: 12 }, () => 1_900),
+        dailyKwh: Array.from({ length: 12 }, () => 60),
+      },
+      {
+        effectiveDate: new Date('2026-02-15T00:00:00'),
+        spendingId: 2,
+        modules: 32,
+        capacityKwp: 13.12,
+        monthlyKwh: Array.from({ length: 12 }, () => 3_200),
+        dailyKwh: Array.from({ length: 12 }, () => 100),
+      },
+    ],
+  }
+
+  it('activates a new stage on the exact commissioning date', () => {
+    expect(productionProjectionPeriodAt(new Date('2025-08-10T00:00:00'), projection)?.modules).toBe(9)
+    expect(productionProjectionPeriodAt(new Date('2025-08-11T00:00:00'), projection)?.modules).toBe(19)
+    expect(expectedProductionForDay(new Date('2025-08-10T00:00:00'), projection)).toBe(30)
+    expect(expectedProductionForDay(new Date('2025-08-11T00:00:00'), projection)).toBe(60)
+  })
+
+  it('clips launch month and prorates transition months by calendar day', () => {
+    expect(expectedProductionForMonth(new Date('2025-06-01T00:00:00'), projection, new Date('2025-06-28T00:00:00')))
+      .toBeCloseTo(900 * 3 / 30)
+    expect(expectedProductionForMonth(new Date('2025-08-01T00:00:00'), projection))
+      .toBeCloseTo((900 * 10 + 1_900 * 21) / 31)
+    expect(expectedProductionForMonth(new Date('2026-02-01T00:00:00'), projection))
+      .toBeCloseTo((1_900 * 14 + 3_200 * 14) / 28)
+  })
+
+  it('uses monthly and daily row granularity without changing legacy projections', () => {
+    const monthlyRow = projectionMonth('2025-08-01', 0)
+    const dailyRow = { ...monthlyRow, month: '2025-08-11', date: new Date('2025-08-11T00:00:00') }
+    const legacy: ProductionProjection = {
+      monthlyKwh: Array.from({ length: 12 }, () => 1_200),
+      dailyKwh: Array.from({ length: 12 }, () => 40),
+    }
+
+    expect(expectedProductionForRow(monthlyRow, projection)).toBeCloseTo((900 * 10 + 1_900 * 21) / 31)
+    expect(expectedProductionForRow(dailyRow, projection)).toBe(60)
+    expect(expectedProductionForMonth(monthlyRow.date, legacy)).toBe(1_200)
+    expect(expectedProductionForDay(dailyRow.date, legacy)).toBe(40)
+  })
+
+  it('calculates a weighted all-history performance factor from completed months', () => {
+    const rows = [
+      projectionMonth('2025-07-01', 450),
+      projectionMonth('2025-08-01', ((900 * 10 + 1_900 * 21) / 31) * 0.5),
+      projectionMonth('2026-02-01', 9_999),
+    ]
+
+    expect(normalizedProductionPerformance(rows, projection, new Date('2025-06-28T00:00:00'), new Date('2026-02-10T00:00:00')))
+      .toBeCloseTo(0.5)
+  })
+
+  it('returns date-weighted capacity across an upgrade month', () => {
+    expect(dateWeightedProjectionCapacity([projectionMonth('2025-08-01', 0)], projection))
+      .toBeCloseTo((3.69 * 10 + 7.79 * 21) / 31)
+  })
+
+  it('links only matching improvement spendings to capacity transitions', () => {
+    expect(productionProjectionTransitionForSpending(projection, 1)).toEqual({
+      fromModules: 9,
+      toModules: 19,
+      fromCapacityKwp: 3.69,
+      toCapacityKwp: 7.79,
+    })
+    expect(productionProjectionTransitionForSpending(projection, 999)).toBeUndefined()
+  })
+})
+
+function projectionMonth(date: string, production: number): MonthRow {
+  return {
+    month: new Intl.DateTimeFormat('en-GB', { month: '2-digit', year: 'numeric' }).format(new Date(`${date}T00:00:00`)),
+    date: new Date(`${date}T00:00:00`),
+    production,
+    exportDay: 0,
+    exportNight: 0,
+    importDay: 0,
+    importNight: 0,
+    consumedDay: 0,
+    consumedNight: 0,
+    consumedTotal: 0,
+    importTotal: 0,
+    balance: 0,
+    exportPrice: 0,
+    exportPriceDay: 0,
+    exportPriceNight: 0,
+    exportPersonalIncomeTax: 0,
+    exportMilitary: 0,
+    importPriceDay: 0,
+    importPriceNight: 0,
+    consumedPayment: 0,
+    electricityPayment: 0,
+    electricitySavings: 0,
+    usdRate: 1,
+    roiUsd: 0,
+    isCommercial: false,
+  }
+}
 
 describe('prices and taxes', () => {
   it('calculates export taxes and net export price', () => {

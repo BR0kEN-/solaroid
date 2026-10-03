@@ -7,6 +7,8 @@ import type {
   MonthRow,
   PlantMetadata,
   PlantSpending,
+  ProductionProjection,
+  ProductionProjectionPeriod,
   Tariff,
 } from './types'
 import type { Currency } from './money'
@@ -117,6 +119,191 @@ export function exportTotal(row: EnergySnapshot) {
 export function plantCapacityKwp(metadata?: PlantMetadata | null) {
   const watts = metadata?.pvs?.reduce((sum, field) => sum + field.power, 0) ?? 0
   return watts > 0 ? watts / 1000 : undefined
+}
+
+export function productionProjectionPeriodAt(
+  date: Date,
+  projection?: ProductionProjection | null,
+): ProductionProjectionPeriod | undefined {
+  const periods = projection?.periods
+  if (!periods?.length) return undefined
+
+  let active: ProductionProjectionPeriod | undefined
+  for (const period of periods) {
+    if (startOfLocalDay(period.effectiveDate) > startOfLocalDay(date)) break
+    active = period
+  }
+
+  return active
+}
+
+export function expectedProductionForDay(
+  date: Date,
+  projection?: ProductionProjection | null,
+  launchDate?: Date,
+) {
+  if (!projection || (launchDate && startOfLocalDay(date) < startOfLocalDay(launchDate))) return undefined
+  const period = productionProjectionPeriodAt(date, projection)
+  const value = (period ?? projection).dailyKwh[date.getMonth()]
+  return finiteProjectionValue(value)
+}
+
+export function expectedProductionForMonth(
+  date: Date,
+  projection?: ProductionProjection | null,
+  launchDate?: Date,
+) {
+  if (!projection) return undefined
+  const start = new Date(date.getFullYear(), date.getMonth(), 1)
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0)
+  const activeStart = launchDate && startOfLocalDay(launchDate) > start
+    ? startOfLocalDay(launchDate)
+    : start
+  if (activeStart > end) return undefined
+
+  const periods = projection.periods
+  const monthlyValue = finiteProjectionValue(projection.monthlyKwh[date.getMonth()])
+  if (!periods?.length) {
+    if (monthlyValue === undefined) return undefined
+    return monthlyValue * (inclusiveDaysBetween(activeStart, end) / end.getDate())
+  }
+
+  let total = 0
+  let hasValue = false
+  for (let day = activeStart.getDate(); day <= end.getDate(); day += 1) {
+    const current = new Date(date.getFullYear(), date.getMonth(), day)
+    const period = productionProjectionPeriodAt(current, projection)
+    const value = finiteProjectionValue(period?.monthlyKwh[date.getMonth()])
+    if (value === undefined) continue
+    total += value / end.getDate()
+    hasValue = true
+  }
+
+  return hasValue ? total : undefined
+}
+
+export function expectedProductionForRow(
+  row: Pick<MonthRow, 'date' | 'month'>,
+  projection?: ProductionProjection | null,
+  launchDate?: Date,
+) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(row.month)
+    ? expectedProductionForDay(row.date, projection, launchDate)
+    : expectedProductionForMonth(row.date, projection, launchDate)
+}
+
+export function normalizedProductionPerformance(
+  rows: readonly Pick<MonthRow, 'date' | 'month' | 'production'>[],
+  projection?: ProductionProjection | null,
+  launchDate?: Date,
+  today = new Date(),
+) {
+  const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+  let actual = 0
+  let expected = 0
+
+  for (const row of rows) {
+    if (row.date >= currentMonth) continue
+    const rowExpected = expectedProductionForMonth(row.date, projection, launchDate)
+    if (rowExpected === undefined || rowExpected <= 0 || !Number.isFinite(row.production)) continue
+    actual += row.production
+    expected += rowExpected
+  }
+
+  if (expected <= 0) return undefined
+  return actual / expected
+}
+
+export function projectionCapacityForDate(
+  date: Date,
+  projection?: ProductionProjection | null,
+  metadata?: PlantMetadata | null,
+) {
+  if (projection?.periods?.length) return productionProjectionPeriodAt(date, projection)?.capacityKwp
+  return plantCapacityKwp(metadata)
+}
+
+export function projectionModulesForDate(
+  date: Date,
+  projection?: ProductionProjection | null,
+  metadata?: PlantMetadata | null,
+) {
+  if (projection?.periods?.length) return productionProjectionPeriodAt(date, projection)?.modules
+  const modules = metadata?.pvs?.reduce((sum, field) => sum + (field.modules ?? 0), 0) ?? 0
+  return modules > 0 ? modules : undefined
+}
+
+export interface ProductionProjectionTransition {
+  readonly fromModules: number
+  readonly toModules: number
+  readonly fromCapacityKwp: number
+  readonly toCapacityKwp: number
+}
+
+export function productionProjectionTransitionForSpending(
+  projection: ProductionProjection | null | undefined,
+  spendingId: number,
+): ProductionProjectionTransition | undefined {
+  const index = projection?.periods?.findIndex((period) => period.spendingId === spendingId) ?? -1
+  if (index <= 0) return undefined
+  const previous = projection?.periods?.[index - 1]
+  const current = projection?.periods?.[index]
+  if (!previous || !current) return undefined
+
+  return {
+    fromModules: previous.modules,
+    toModules: current.modules,
+    fromCapacityKwp: previous.capacityKwp,
+    toCapacityKwp: current.capacityKwp,
+  }
+}
+
+export function dateWeightedProjectionCapacity(
+  rows: readonly Pick<MonthRow, 'date' | 'month'>[],
+  projection?: ProductionProjection | null,
+  metadata?: PlantMetadata | null,
+  launchDate?: Date,
+) {
+  let weightedCapacity = 0
+  let activeDays = 0
+
+  for (const row of rows) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(row.month)) {
+      if (launchDate && startOfLocalDay(row.date) < startOfLocalDay(launchDate)) continue
+      const capacity = projectionCapacityForDate(row.date, projection, metadata)
+      if (capacity === undefined) continue
+      weightedCapacity += capacity
+      activeDays += 1
+      continue
+    }
+
+    const end = new Date(row.date.getFullYear(), row.date.getMonth() + 1, 0)
+    const start = launchDate && startOfLocalDay(launchDate) > row.date
+      ? startOfLocalDay(launchDate)
+      : new Date(row.date.getFullYear(), row.date.getMonth(), 1)
+    if (start > end) continue
+    for (let day = start.getDate(); day <= end.getDate(); day += 1) {
+      const current = new Date(row.date.getFullYear(), row.date.getMonth(), day)
+      const capacity = projectionCapacityForDate(current, projection, metadata)
+      if (capacity === undefined) continue
+      weightedCapacity += capacity
+      activeDays += 1
+    }
+  }
+
+  return activeDays ? weightedCapacity / activeDays : undefined
+}
+
+function finiteProjectionValue(value: number | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function inclusiveDaysBetween(start: Date, end: Date) {
+  return Math.round((startOfLocalDay(end).getTime() - startOfLocalDay(start).getTime()) / 86_400_000) + 1
 }
 
 export function productionYieldKwhPerKwp(production: number, capacityKwp?: number) {
