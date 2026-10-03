@@ -1,4 +1,4 @@
-import { Input } from './schema.ts'
+import { Input, PvChangeOperations } from './schema.ts'
 
 Deno.test('ingest input accepts optional utility meter values', () => {
   const parsed = Input.parse({
@@ -72,4 +72,20 @@ Deno.test('ingest input accepts payload without utility meter values', () => {
   if (parsed.thisMonth.utility !== undefined) {
     throw new Error('utility should be optional')
   }
+})
+
+Deno.test('PV change schema accepts capacity reductions and full-field removals', () => {
+  const field = {
+    id: 'south', modules: 11, power: 4_510, azimuth: 180, slope: 30,
+    elevation: 120, lat: 48.3, lng: 35, loss: 14, mounting: 'building',
+  }
+  const operations = PvChangeOperations.parse([
+    { kind: 'decrease_field', field_id: 'south', modules_removed: 11, power_removed_w: 4_510 },
+    { kind: 'remove_field', field },
+  ])
+
+  if (operations.length !== 2) throw new Error('damage operations not parsed')
+  if (PvChangeOperations.safeParse([
+    { kind: 'decrease_field', field_id: 'south', modules_removed: 0, power_removed_w: 4_510 },
+  ]).success) throw new Error('zero module reduction should fail')
 })

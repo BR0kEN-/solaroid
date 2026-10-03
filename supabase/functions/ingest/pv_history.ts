@@ -21,17 +21,14 @@ export function reconstructPvConfigurationStages(
       ...change,
       operations: parseOperations(change.operations),
     }))
-    .sort((first, second) => first.date.localeCompare(second.date) || first.spending_id - second.spending_id)
+    .sort((first, second) => first.date.localeCompare(second.date) || first.id - second.id)
 
   for (const change of orderedChanges) {
-    if (change.spending.id !== change.spending_id) {
-      throw new InvalidPvHistoryError(`Spending ${change.spending_id} linkage is inconsistent`)
-    }
-    if (change.spending.type !== 'improvement') {
-      throw new InvalidPvHistoryError(`Spending ${change.spending_id} is not an improvement`)
-    }
     if (change.date < launchDate) {
-      throw new InvalidPvHistoryError(`PV change for spending ${change.spending_id} predates plant launch`)
+      throw new InvalidPvHistoryError(`PV change ${change.id} predates plant launch`)
+    }
+    if (change.type === 'improvement' && change.operations.some(isCapacityReduction)) {
+      throw new InvalidPvHistoryError(`Improvement PV change ${change.id} cannot reduce capacity`)
     }
   }
 
@@ -39,19 +36,20 @@ export function reconstructPvConfigurationStages(
   for (const change of [...orderedChanges].reverse()) {
     for (const operation of [...change.operations].reverse()) {
       fields = undoOperation(fields, operation)
-      assertHistoricalConfiguration(fields)
+      assertHistoricalConfiguration(fields, true)
     }
   }
+  assertHistoricalConfiguration(fields)
 
   const stages: PvConfigurationStage[] = [{ effectiveDate: launchDate, fields: cloneFields(fields) }]
   for (const change of orderedChanges) {
     for (const operation of change.operations) {
       fields = applyOperation(fields, operation)
-      assertHistoricalConfiguration(fields)
+      assertHistoricalConfiguration(fields, true)
     }
     stages.push({
       effectiveDate: change.date,
-      spendingId: change.spending_id,
+      ...(change.spending_id === null ? {} : { spendingId: change.spending_id }),
       fields: cloneFields(fields),
     })
   }
@@ -64,8 +62,8 @@ export function reconstructPvConfigurationStages(
 }
 
 function parseCurrentFields(metadata: Solaroid.Supabase.Plant.Metadata) {
-  const parsed = HistoricalPanel.array().safeParse(metadata.pvs ?? [])
-  if (!parsed.success || !parsed.data.length) {
+  const parsed = HistoricalPanel.array().safeParse(metadata.pvs)
+  if (!parsed.success) {
     throw new InvalidPvHistoryError('Current PV fields require id and modules')
   }
   assertUniqueIds(parsed.data)
@@ -93,8 +91,26 @@ function undoOperation(
     return fields.filter((field) => field.id !== operation.field.id)
   }
 
+  if (operation.kind === 'remove_field') {
+    if (fields.some((field) => field.id === operation.field.id)) {
+      throw new InvalidPvHistoryError(`Removed PV field ${operation.field.id} still exists after its event`)
+    }
+    return [...fields, { ...operation.field }]
+  }
+
   const field = fields.find((candidate) => candidate.id === operation.field_id)
   if (!field) throw new InvalidPvHistoryError(`PV field ${operation.field_id} does not exist`)
+
+  if (operation.kind === 'decrease_field') {
+    return fields.map((candidate) => candidate.id === operation.field_id
+      ? {
+        ...candidate,
+        modules: candidate.modules + operation.modules_removed,
+        power: candidate.power + operation.power_removed_w,
+      }
+      : candidate)
+  }
+
   const modules = field.modules - operation.modules_added
   const power = field.power - operation.power_added_w
   if (modules <= 0 || power <= 0) {
@@ -115,8 +131,27 @@ function applyOperation(
     return [...fields, { ...operation.field }]
   }
 
+  if (operation.kind === 'remove_field') {
+    const field = fields.find((candidate) => candidate.id === operation.field.id)
+    if (!field) throw new InvalidPvHistoryError(`PV field ${operation.field.id} does not exist`)
+    if (normalizedFields([field]) !== normalizedFields([operation.field])) {
+      throw new InvalidPvHistoryError(`Removed PV field ${operation.field.id} does not match its recorded configuration`)
+    }
+    return fields.filter((candidate) => candidate.id !== operation.field.id)
+  }
+
   const field = fields.find((candidate) => candidate.id === operation.field_id)
   if (!field) throw new InvalidPvHistoryError(`PV field ${operation.field_id} does not exist`)
+
+  if (operation.kind === 'decrease_field') {
+    const modules = field.modules - operation.modules_removed
+    const power = field.power - operation.power_removed_w
+    if (modules <= 0 || power <= 0) {
+      throw new InvalidPvHistoryError(`PV field ${operation.field_id} must use remove_field when fully removed`)
+    }
+    return fields.map((candidate) => candidate.id === operation.field_id ? { ...candidate, modules, power } : candidate)
+  }
+
   return fields.map((candidate) => candidate.id === operation.field_id
     ? {
       ...candidate,
@@ -138,8 +173,11 @@ function assertUniqueIds(fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalF
   }
 }
 
-function assertHistoricalConfiguration(fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[]) {
-  if (!fields.length) throw new InvalidPvHistoryError('Historical PV configuration cannot be empty')
+function assertHistoricalConfiguration(
+  fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[],
+  allowEmpty = false,
+) {
+  if (!allowEmpty && !fields.length) throw new InvalidPvHistoryError('Initial PV configuration cannot be empty')
   assertUniqueIds(fields)
   for (const field of fields) {
     if (field.modules <= 0 || field.power <= 0) {
@@ -150,4 +188,8 @@ function assertHistoricalConfiguration(fields: readonly Solaroid.Supabase.Plant.
 
 function normalizedFields(fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[]) {
   return JSON.stringify([...fields].sort((first, second) => first.id.localeCompare(second.id)))
+}
+
+function isCapacityReduction(operation: Solaroid.Supabase.Plant.Pv.ChangeOperation) {
+  return operation.kind === 'decrease_field' || operation.kind === 'remove_field'
 }

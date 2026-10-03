@@ -233,29 +233,54 @@ export function projectionModulesForDate(
   return modules > 0 ? modules : undefined
 }
 
+export interface ProjectionCapacityRange {
+  readonly startKwp: number
+  readonly endKwp: number
+}
+
+export function projectionCapacityRangeForRow(
+  row: Pick<MonthRow, 'date' | 'month'>,
+  projection?: ProductionProjection | null,
+  metadata?: PlantMetadata | null,
+  launchDate?: Date,
+  fallbackCapacityKwp?: number,
+): ProjectionCapacityRange | undefined {
+  const daily = /^\d{4}-\d{2}-\d{2}$/.test(row.month)
+  const end = daily ? row.date : new Date(row.date.getFullYear(), row.date.getMonth() + 1, 0)
+  const start = launchDate && launchDate > row.date && launchDate <= end ? launchDate : row.date
+  const startKwp = projectionCapacityForDate(start, projection, metadata) ?? fallbackCapacityKwp
+  const endKwp = projectionCapacityForDate(end, projection, metadata) ?? fallbackCapacityKwp
+  if (startKwp === undefined || endKwp === undefined) return undefined
+
+  return { startKwp, endKwp }
+}
+
 export interface ProductionProjectionTransition {
+  readonly effectiveDate: Date
   readonly fromModules: number
   readonly toModules: number
   readonly fromCapacityKwp: number
   readonly toCapacityKwp: number
 }
 
-export function productionProjectionTransitionForSpending(
+export function productionProjectionTransitionsForSpending(
   projection: ProductionProjection | null | undefined,
   spendingId: number,
-): ProductionProjectionTransition | undefined {
-  const index = projection?.periods?.findIndex((period) => period.spendingId === spendingId) ?? -1
-  if (index <= 0) return undefined
-  const previous = projection?.periods?.[index - 1]
-  const current = projection?.periods?.[index]
-  if (!previous || !current) return undefined
+): readonly ProductionProjectionTransition[] {
+  const periods = projection?.periods ?? []
 
-  return {
-    fromModules: previous.modules,
-    toModules: current.modules,
-    fromCapacityKwp: previous.capacityKwp,
-    toCapacityKwp: current.capacityKwp,
-  }
+  return periods.flatMap((current, index) => {
+    const previous = periods[index - 1]
+    if (current.spendingId !== spendingId || !previous) return []
+
+    return [{
+      effectiveDate: current.effectiveDate,
+      fromModules: previous.modules,
+      toModules: current.modules,
+      fromCapacityKwp: previous.capacityKwp,
+      toCapacityKwp: current.capacityKwp,
+    }]
+  })
 }
 
 export function dateWeightedProjectionCapacity(

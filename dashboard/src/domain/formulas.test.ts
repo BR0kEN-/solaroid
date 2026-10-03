@@ -22,8 +22,9 @@ import {
   normalizedProductionPerformance,
   payment,
   plantCapacityKwp,
+  projectionCapacityRangeForRow,
   productionProjectionPeriodAt,
-  productionProjectionTransitionForSpending,
+  productionProjectionTransitionsForSpending,
   projectConsumptionWithoutPlant,
   productionYieldKwhPerKwp,
   reconciliationValue,
@@ -246,14 +247,105 @@ describe('capacity-aware production projection', () => {
       .toBeCloseTo((3.69 * 10 + 7.79 * 21) / 31)
   })
 
-  it('links only matching improvement spendings to capacity transitions', () => {
-    expect(productionProjectionTransitionForSpending(projection, 1)).toEqual({
+  it('uses zero expectation and selection-aware capacity across an outage', () => {
+    const outageProjection: ProductionProjection = {
+      monthlyKwh: Array.from({ length: 12 }, () => 3_200),
+      dailyKwh: Array.from({ length: 12 }, () => 100),
+      periods: [
+        {
+          effectiveDate: new Date('2025-06-28T00:00:00'),
+          modules: 32,
+          capacityKwp: 13.12,
+          monthlyKwh: Array.from({ length: 12 }, () => 3_200),
+          dailyKwh: Array.from({ length: 12 }, () => 100),
+        },
+        {
+          effectiveDate: new Date('2026-10-10T00:00:00'),
+          modules: 21,
+          capacityKwp: 8.61,
+          monthlyKwh: Array.from({ length: 12 }, () => 2_100),
+          dailyKwh: Array.from({ length: 12 }, () => 70),
+        },
+        {
+          effectiveDate: new Date('2026-11-01T00:00:00'),
+          modules: 0,
+          capacityKwp: 0,
+          monthlyKwh: Array.from({ length: 12 }, () => 0),
+          dailyKwh: Array.from({ length: 12 }, () => 0),
+        },
+      ],
+    }
+
+    expect(projectionCapacityRangeForRow(projectionMonth('2026-09-01', 0), outageProjection)).toEqual({
+      startKwp: 13.12,
+      endKwp: 13.12,
+    })
+    expect(projectionCapacityRangeForRow(projectionMonth('2026-10-01', 0), outageProjection)).toEqual({
+      startKwp: 13.12,
+      endKwp: 8.61,
+    })
+    expect(projectionCapacityRangeForRow({
+      month: '2026-10-15',
+      date: new Date('2026-10-15T00:00:00'),
+    }, outageProjection)).toEqual({
+      startKwp: 8.61,
+      endKwp: 8.61,
+    })
+    expect(projectionCapacityRangeForRow(projectionMonth('2026-11-01', 0), outageProjection)).toEqual({
+      startKwp: 0,
+      endKwp: 0,
+    })
+    expect(expectedProductionForMonth(new Date('2026-11-01T00:00:00'), outageProjection)).toBe(0)
+  })
+
+  it('links every matching event to its spending', () => {
+    const damageProjection: ProductionProjection = {
+      ...projection,
+      periods: [
+        ...projection.periods!,
+        {
+          effectiveDate: new Date('2026-03-01T00:00:00'),
+          spendingId: 7,
+          modules: 21,
+          capacityKwp: 8.61,
+          monthlyKwh: Array.from({ length: 12 }, () => 2_100),
+          dailyKwh: Array.from({ length: 12 }, () => 70),
+        },
+        {
+          effectiveDate: new Date('2026-04-01T00:00:00'),
+          spendingId: 7,
+          modules: 33,
+          capacityKwp: 13.53,
+          monthlyKwh: Array.from({ length: 12 }, () => 3_300),
+          dailyKwh: Array.from({ length: 12 }, () => 110),
+        },
+      ],
+    }
+
+    expect(productionProjectionTransitionsForSpending(projection, 1)).toEqual([{
+      effectiveDate: new Date('2025-08-11T00:00:00'),
       fromModules: 9,
       toModules: 19,
       fromCapacityKwp: 3.69,
       toCapacityKwp: 7.79,
-    })
-    expect(productionProjectionTransitionForSpending(projection, 999)).toBeUndefined()
+    }])
+    expect(productionProjectionTransitionsForSpending(damageProjection, 7)).toEqual([
+      {
+        effectiveDate: new Date('2026-03-01T00:00:00'),
+        fromModules: 32,
+        toModules: 21,
+        fromCapacityKwp: 13.12,
+        toCapacityKwp: 8.61,
+      },
+      {
+        effectiveDate: new Date('2026-04-01T00:00:00'),
+        fromModules: 21,
+        toModules: 33,
+        fromCapacityKwp: 8.61,
+        toCapacityKwp: 13.53,
+      },
+    ])
+    expect(productionProjectionTransitionsForSpending(projection, 999)).toEqual([])
   })
 })
 

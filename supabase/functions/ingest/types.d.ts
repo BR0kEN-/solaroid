@@ -74,17 +74,31 @@ declare global {
           readonly field: HistoricalField
         }
 
-        type ChangeOperation = IncreaseFieldOperation | AddFieldOperation
+        interface DecreaseFieldOperation {
+          readonly kind: 'decrease_field'
+          readonly field_id: string
+          readonly modules_removed: number
+          readonly power_removed_w: number
+        }
+
+        interface RemoveFieldOperation {
+          readonly kind: 'remove_field'
+          readonly field: HistoricalField
+        }
+
+        type ChangeOperation =
+          | IncreaseFieldOperation
+          | AddFieldOperation
+          | DecreaseFieldOperation
+          | RemoveFieldOperation
 
         interface ChangeRecord {
-          readonly spending_id: number
+          readonly id: number
+          readonly plant_id: Id
           readonly date: Date.Ymd
+          readonly type: Spending.Type
+          readonly spending_id: number | null
           readonly operations: readonly ChangeOperation[]
-          readonly spending: {
-            readonly id: number
-            readonly date: Date.Ymd
-            readonly type: Spending.Type
-          }
         }
       }
 
