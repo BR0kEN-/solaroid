@@ -68,7 +68,7 @@ Canonical tables:
 - `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
 - `plant_spendings`: dated additional plant costs. Supported types are `damage_replacement` and `improvement`; amounts are stored in USD.
-- `plant_pv_changes`: dated capacity-field operations linked one-to-one to an `improvement` spending. Spending and commissioning dates are independent.
+- `plant_pv_changes`: plant-owned dated capacity events. An event may optionally link to a matching `improvement` or `damage_replacement` spending; physical-change and expense dates remain independent.
 - `dam_prices`: hourly day-ahead market prices cached by market date, stored as UAH/kWh in `hour1` through `hour24`.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
@@ -449,9 +449,9 @@ values ('your-plant-id', '2026-09-05', 'improvement', 750);
 
 The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated additional spending with its type, the conversion rate used in UAH mode, and the total. The cumulative ROI line in the Finance chart keeps prior months on their original investment basis and applies spending from its month onward. The Finance chart's Expenses popup groups spending by type for the selected month.
 
-`improvement` can represent any already-incurred plant upgrade. By itself it remains cost-only. Link it through `plant_pv_changes` only when it commissioned added PV capacity. Damage replacement never changes capacity. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, removals, reductions, module replacements, and geometry edits are not supported.
+`improvement` can represent any already-incurred plant upgrade. By itself it remains cost-only. Link it through `plant_pv_changes` when it commissioned added PV capacity. A `damage_replacement` spending may link to both the demount and later restoration events. One spending can therefore have several capacity events, while an event can remain unlinked until the expense exists. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, and geometry edits are not supported.
 
-### Capacity-aware PV improvements
+### Capacity-aware PV history
 
 Current `plants.metadata.pvs` remains the latest installed configuration. Every current field used by a plant with PV history needs a stable lowercase `id` and positive `modules`; `power` remains that field's total watts:
 
@@ -474,7 +474,7 @@ Current `plants.metadata.pvs` remains the latest installed configuration. Every 
 }
 ```
 
-`plant_pv_changes.operations` is a non-empty JSON array. An existing field can gain modules and watts only:
+`plant_pv_changes.operations` is a non-empty JSON array. Improvement events support adding capacity to an existing field:
 
 ```json
 [
@@ -509,28 +509,76 @@ A newly commissioned field stores its complete PVGIS configuration:
 ]
 ```
 
+Damage events can partially reduce an existing field:
+
+```json
+[
+  {
+    "kind": "decrease_field",
+    "field_id": "south",
+    "modules_removed": 11,
+    "power_removed_w": 4510
+  }
+]
+```
+
+Use `remove_field` instead when the complete field is demounted. Its full snapshot makes reverse reconstruction deterministic:
+
+```json
+[
+  {
+    "kind": "remove_field",
+    "field": {
+      "id": "south",
+      "modules": 11,
+      "power": 4510,
+      "azimuth": 180,
+      "slope": 30,
+      "elevation": 120,
+      "lat": 0,
+      "lng": 0,
+      "loss": 14,
+      "mounting": "building"
+    }
+  }
+]
+```
+
+Partial restoration uses `increase_field`; full-field restoration uses `add_field`. Improvement events allow only `increase_field` and `add_field`. Damage-replacement events allow all four operations, so restored capacity may finish above or below its previous value. `decrease_field` must leave a positive field; use `remove_field` for a complete removal. A zero-capacity plant stage is valid, but the reconstructed launch configuration must contain at least one field.
+
 Manual workflow after applying the migration:
 
 1. Add stable `id` and current `modules` values to every current PV field in `plants.metadata`.
-2. Insert or locate the corresponding `improvement` spending. Its date records the expense.
-3. Link operations to that spending ID and set the independent commissioning date:
+2. Insert the physical event using its actual commissioning/demount date. Link a matching spending when one already exists, or leave `spending_id` null:
 
 ```sql
-insert into public.plant_pv_changes (spending_id, date, operations)
+insert into public.plant_pv_changes (plant_id, date, type, spending_id, operations)
 values (
-  123,
+  'your-plant-id',
   '2026-03-15',
+  'improvement',
+  123,
   '[{"kind":"increase_field","field_id":"south","modules_added":10,"power_added_w":4100}]'::jsonb
 );
 ```
 
-For a 9 → 19 → 32-module history, record both capacity additions as separate improvement spendings and change rows. Solaroid sorts by PV-change date then spending ID, reverses the operations from the latest metadata to infer the launch configuration, then replays them forward. Each new configuration is active on its own date, inclusive. Same-day records therefore follow spending-ID order.
+3. When a later expense should own an unlinked event, attach it after inserting the spending:
+
+```sql
+update public.plant_pv_changes
+set spending_id = 456
+where id in (12, 13);
+```
+
+For damage, update `plants.metadata.pvs` to the physically installed state and insert the matching event together. Record only completed changes. While replacement modules are purchased but not installed, keep only the reduction event; forecasts continue at reduced capacity. At installation, update current metadata again and insert the restoration event. Both events may link to the same `damage_replacement` spending.
+
+For a 9 → 19 → 32-module history, record both capacity additions as improvement events. Solaroid sorts by event date then event ID, reverses operations from latest metadata to infer the launch configuration, then replays them forward. Each configuration is active on its event date, inclusive. Same-day records follow event-ID order.
 
 Daily expectation uses the active configuration on that date. A month covered by one configuration uses its full PVGIS month. Launch and transition months are prorated by active calendar days. Historical expected lines and performance use those stage-correct values. Current-month and long-term forecasts use the weighted all-history performance factor; future months use the latest configuration. Actual telemetry, payment, savings, taxes, and historical monthly ROI are never recalculated.
 
-The investment breakdown shows the reconstructed launch modules/kWp and capacity transitions for linked improvements. Unlinked improvements remain cost-only. The Production chart shows the selected period's capacity in its title rather than as an inspector row. Plant comparison receives sanitized projection periods, sums stage-correct expectation, and uses date-weighted capacity across upgrades.
+The investment breakdown shows reconstructed launch modules/kWp. Each spending lists all linked capacity events beneath its single expense row, including reduction/restoration date and transition. Unlinked events still affect projections but do not appear in the expense breakdown. The Production chart shows the selected period's capacity in its title rather than as an inspector row. Transition months show both capacities; a full outage shows `0.00 kWp`. Plant comparison receives sanitized projection periods, sums stage-correct expectation, and uses date-weighted capacity across changes.
 
-The PVGIS cache key includes current metadata, launch date, ordered changes, and query settings. Any of those changes regenerates all stages while preserving top-level current-configuration arrays for older clients. Invalid or incomplete history never falls back to the latest configuration for old dates: actual dashboard data remains visible, while expected values and affected forecasts are disabled with a localized warning.
+The PVGIS cache key includes current metadata, launch date, event ID/date/type/operations, and query settings. Spending amount/date/linkage do not affect it. Identical configurations share one PVGIS request; zero-capacity stages use local zero arrays without a request. A relevant change regenerates all stages while preserving top-level current-configuration arrays for older clients. Invalid or incomplete history never falls back to the latest configuration for old dates: actual dashboard data remains visible, while expected values and affected forecasts are disabled with a localized warning.
 
 ## UI Conventions
 

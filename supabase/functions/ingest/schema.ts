@@ -90,6 +90,16 @@ export const PvChangeOperations = z.array(
       kind: z.literal('add_field'),
       field: HistoricalPanel,
     }),
+    z.object({
+      kind: z.literal('decrease_field'),
+      field_id: PvFieldId,
+      modules_removed: z.number().int().positive(),
+      power_removed_w: z.number().finite().positive(),
+    }),
+    z.object({
+      kind: z.literal('remove_field'),
+      field: HistoricalPanel,
+    }),
   ]),
 ).min(1)
 

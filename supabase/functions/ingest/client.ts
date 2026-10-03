@@ -376,13 +376,14 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
   ): Promise<readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[]> {
     const { data, error } = await this.client
       .from('plant_pv_changes')
-      .select('spending_id,date,operations,spending:plant_spendings!inner(id,plant_id,date,type)')
-      .eq('spending.plant_id', plantId)
+      .select('id,plant_id,date,type,spending_id,operations')
+      .eq('plant_id', plantId)
+      .order('date', { ascending: true })
+      .order('id', { ascending: true })
 
     if (error) throw new Error('plant PV changes lookup failed', { cause: error })
 
-    return [...(data ?? []) as unknown as readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[]]
-      .sort((first, second) => first.date.localeCompare(second.date) || first.spending_id - second.spending_id)
+    return (data ?? []) as unknown as readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[]
   }
 
   async #getPvgisProjection(
@@ -433,10 +434,26 @@ export async function projectionForStages(
   stages: ReturnType<typeof reconstructPvConfigurationStages>,
   getProjection: (metadata: Solaroid.Supabase.Plant.Metadata) => Promise<Solaroid.Supabase.Pvgis.Projection | null> = (value) => Pvgis.getProjection(value),
 ): Promise<Solaroid.Supabase.Pvgis.Projection | null> {
-  const stageProjections = await Promise.all(stages.map((stage) => getProjection({
-    ...metadata,
-    pvs: stage.fields,
-  })))
+  const projectionByConfiguration = new Map<string, Promise<Solaroid.Supabase.Pvgis.Projection | null>>()
+  const stageProjections = await Promise.all(stages.map((stage) => {
+    if (!stage.fields.length) {
+      return Promise.resolve({
+        monthlyKwh: Array.from({ length: 12 }, () => 0),
+        dailyKwh: Array.from({ length: 12 }, () => 0),
+      })
+    }
+
+    const key = JSON.stringify([...stage.fields].sort((first, second) => first.id.localeCompare(second.id)))
+    const cached = projectionByConfiguration.get(key)
+    if (cached) return cached
+
+    const request = getProjection({
+      ...metadata,
+      pvs: stage.fields,
+    })
+    projectionByConfiguration.set(key, request)
+    return request
+  }))
   if (stageProjections.some((projection) => !projection)) return null
   const completeStageProjections = stageProjections as readonly Solaroid.Supabase.Pvgis.Projection[]
   const current = completeStageProjections.at(-1)
@@ -447,7 +464,7 @@ export async function projectionForStages(
     dailyKwh: current.dailyKwh,
     periods: stages.map((stage, index) => ({
       effectiveDate: stage.effectiveDate,
-      ...(stage.spendingId ? { spendingId: stage.spendingId } : {}),
+      ...(stage.spendingId === undefined ? {} : { spendingId: stage.spendingId }),
       modules: stage.fields.reduce((sum, field) => sum + field.modules, 0),
       capacityKwp: stage.fields.reduce((sum, field) => sum + field.power, 0) / 1000,
       monthlyKwh: completeStageProjections[index].monthlyKwh,
@@ -484,8 +501,8 @@ export function plantForAccess(
   return {
     ...plant,
     metadata: publicMetadata,
-    ...(capacityKwp > 0 ? { capacity_kwp: capacityKwp } : {}),
-    ...(modules > 0 ? { modules } : {}),
+    ...(latestPeriod || capacityKwp > 0 ? { capacity_kwp: capacityKwp } : {}),
+    ...(latestPeriod || modules > 0 ? { modules } : {}),
   }
 }
 
@@ -494,7 +511,8 @@ export function pvgisProjectionCacheInput(
   changes: readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[],
 ) {
   const orderedChanges = [...changes]
-    .sort((first, second) => first.date.localeCompare(second.date) || first.spending_id - second.spending_id)
+    .sort((first, second) => first.date.localeCompare(second.date) || first.id - second.id)
+    .map(({ id, date, type, operations }) => ({ id, date, type, operations }))
 
   return JSON.stringify({
     m: plant.metadata,

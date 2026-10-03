@@ -38,8 +38,9 @@ import {
   investmentUsdRateForDate,
   normalizedProductionPerformance,
   projectionCapacityForDate,
+  projectionCapacityRangeForRow,
   projectionModulesForDate,
-  productionProjectionTransitionForSpending,
+  productionProjectionTransitionsForSpending,
   projectConsumptionWithoutPlant,
   repriceMonthRow,
   regularImportDayPrice,
@@ -405,6 +406,10 @@ const i18n = {
     initialInvestment: "Initial investment",
     damageReplacement: "Damage replacement",
     improvement: "Improvement",
+    capacityReduction: "Capacity reduction",
+    capacityRestoration: "Capacity restoration",
+    capacityImprovement: "Capacity improvement",
+    capacityChange: "Capacity change",
     expenses: "Expenses",
     payback: "Payback",
     investmentRecovery: "Investment recovery",
@@ -728,6 +733,10 @@ const i18n = {
     initialInvestment: "Початкова інвестиція",
     damageReplacement: "Заміна пошкодженого обладнання",
     improvement: "Покращення",
+    capacityReduction: "Зменшення потужності",
+    capacityRestoration: "Відновлення потужності",
+    capacityImprovement: "Збільшення потужності",
+    capacityChange: "Зміна потужності",
     expenses: "Витрати",
     payback: "Окупність",
     investmentRecovery: "Повернення інвестицій",
@@ -6740,16 +6749,12 @@ function projectionCapacitySummary(
   fallbackCapacityKwp: number | undefined,
   lang: Lang,
 ) {
-  const daily = /^\d{4}-\d{2}-\d{2}$/.test(row.month);
-  const end = daily ? row.date : new Date(row.date.getFullYear(), row.date.getMonth() + 1, 0);
-  const start = launchDate && launchDate > row.date && launchDate <= end ? launchDate : row.date;
-  const startCapacity = projectionCapacityForDate(start, projection, metadata) ?? fallbackCapacityKwp;
-  const endCapacity = projectionCapacityForDate(end, projection, metadata) ?? fallbackCapacityKwp;
-  if (startCapacity === undefined) return undefined;
+  const range = projectionCapacityRangeForRow(row, projection, metadata, launchDate, fallbackCapacityKwp);
+  if (!range) return undefined;
 
-  return startCapacity !== endCapacity && endCapacity !== undefined
-    ? `${formatKwp(startCapacity, lang)} → ${formatKwp(endCapacity, lang)}`
-    : formatKwp(startCapacity, lang);
+  return range.startKwp !== range.endKwp
+    ? `${formatKwp(range.startKwp, lang)} → ${formatKwp(range.endKwp, lang)}`
+    : formatKwp(range.startKwp, lang);
 }
 
 interface FinanceRoiPoint {
@@ -10485,6 +10490,23 @@ function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefine
   };
 }
 
+interface InvestmentBreakdownEvent {
+  readonly label: string;
+  readonly date: string;
+  readonly capacity: string;
+}
+
+interface InvestmentBreakdownRow {
+  readonly id: string;
+  readonly label: string;
+  readonly date: string;
+  readonly amountUsd: number;
+  readonly usdRate: number;
+  readonly tone: string;
+  readonly capacity?: string;
+  readonly events?: readonly InvestmentBreakdownEvent[];
+}
+
 function InvestmentBreakdown({
   t,
   lang,
@@ -10516,7 +10538,7 @@ function InvestmentBreakdown({
   const initialPeriod = projection?.periods?.[0];
   const initialModules = initialPeriod?.modules ?? projectionModulesForDate(launchDate ?? new Date(0), projection, metadata);
   const initialCapacity = initialPeriod?.capacityKwp ?? projectionCapacityForDate(launchDate ?? new Date(0), projection, metadata);
-  const investmentRows = [
+  const investmentRows: readonly InvestmentBreakdownRow[] = [
     {
       id: "initial",
       label: t.initialInvestment,
@@ -10529,10 +10551,23 @@ function InvestmentBreakdown({
         : undefined,
     },
     ...sortedSpendings.map((spending) => {
-      const transition = productionProjectionTransitionForSpending(projection, spending.id);
-      const capacity = transition
-        ? `${formatNumber(transition.fromModules, 0, 0)} → ${formatNumber(transition.toModules, 0, 0)} ${t.modules.toLocaleLowerCase()} · ${formatKwp(transition.fromCapacityKwp, lang)} → ${formatKwp(transition.toCapacityKwp, lang)}`
-        : undefined;
+      const events = productionProjectionTransitionsForSpending(projection, spending.id).map((transition) => {
+        const capacityReduced = transition.toCapacityKwp < transition.fromCapacityKwp;
+        const capacityIncreased = transition.toCapacityKwp > transition.fromCapacityKwp;
+        const label = capacityReduced
+          ? t.capacityReduction
+          : capacityIncreased && spending.type === "damage_replacement"
+            ? t.capacityRestoration
+            : capacityIncreased
+              ? t.capacityImprovement
+              : t.capacityChange;
+
+        return {
+          label,
+          date: formatLaunchDate(transition.effectiveDate, lang),
+          capacity: `${formatNumber(transition.fromModules, 0, 0)} → ${formatNumber(transition.toModules, 0, 0)} ${t.modules.toLocaleLowerCase()} · ${formatKwp(transition.fromCapacityKwp, lang)} → ${formatKwp(transition.toCapacityKwp, lang)}`,
+        };
+      });
 
       return {
         id: `spending-${spending.id}`,
@@ -10541,7 +10576,7 @@ function InvestmentBreakdown({
         amountUsd: spending.amountUsd,
         usdRate: spendingUsdRateById.get(spending.id) ?? 1,
         tone: spending.type === "damage_replacement" ? "rose" : "indigo",
-        capacity,
+        events,
       };
     }),
   ];
@@ -10583,6 +10618,17 @@ function InvestmentBreakdown({
                   <td>{formatDisplayMoney(row.usdRate, "UAH", lang)}</td>
                   <td>{formatDisplayMoney(moneyFromUsd(row.amountUsd, "UAH", row.usdRate), "UAH", lang)}</td>
                 </tr>
+                {row.events?.map((event, index) => (
+                  <tr className="investment-breakdown-event" key={`${row.id}-event-${index}`}>
+                    <td colSpan={3}>
+                      <span className="investment-breakdown-event-content">
+                        <span>{event.label}</span>
+                        <span>{event.date}</span>
+                        <span>{event.capacity}</span>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </React.Fragment>
             ))}
             <tr className="investment-breakdown-subheading investment-breakdown-total-heading">
