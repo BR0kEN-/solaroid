@@ -2224,7 +2224,18 @@ h2 {
 .investment-breakdown-subheading-date {
   font-weight: 500;
   text-align: right;
-  white-space: nowrap;
+  text-wrap: balance;
+}
+
+@media (max-width: 820px) {
+  .investment-breakdown-subheading-content {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .investment-breakdown-subheading-date {
+    text-align: left;
+  }
 }
 
 .investment-breakdown-table tbody .investment-breakdown-subheading.green th {

@@ -45,6 +45,8 @@ declare global {
 
       namespace Pv {
         interface Field {
+          readonly id?: string
+          readonly modules?: number
           readonly azimuth: number
           readonly power: number
           readonly slope: number
@@ -53,6 +55,35 @@ declare global {
           readonly lng: number
           readonly loss: number
           readonly mounting: string
+        }
+
+        interface HistoricalField extends Field {
+          readonly id: string
+          readonly modules: number
+        }
+
+        interface IncreaseFieldOperation {
+          readonly kind: 'increase_field'
+          readonly field_id: string
+          readonly modules_added: number
+          readonly power_added_w: number
+        }
+
+        interface AddFieldOperation {
+          readonly kind: 'add_field'
+          readonly field: HistoricalField
+        }
+
+        type ChangeOperation = IncreaseFieldOperation | AddFieldOperation
+
+        interface ChangeRecord {
+          readonly spending_id: number
+          readonly operations: readonly ChangeOperation[]
+          readonly spending: {
+            readonly id: number
+            readonly date: Date.Ymd
+            readonly type: Spending.Type
+          }
         }
       }
 
@@ -69,6 +100,8 @@ declare global {
         readonly launch_date: Date.Ymd
         readonly commercial_date: Date.Ymd
         readonly electric_heating_import_threshold_kwh?: number
+        readonly capacity_kwp?: number
+        readonly modules?: number
         readonly created_at: Date.Iso8601
         readonly updated_at: Date.Iso8601
       }
@@ -90,6 +123,16 @@ declare global {
       }
 
       interface Projection {
+        readonly monthlyKwh: readonly number[]
+        readonly dailyKwh: readonly number[]
+        readonly periods?: readonly ProjectionPeriod[]
+      }
+
+      interface ProjectionPeriod {
+        readonly effectiveDate: Date.Ymd
+        readonly spendingId?: number
+        readonly modules: number
+        readonly capacityKwp: number
         readonly monthlyKwh: readonly number[]
         readonly dailyKwh: readonly number[]
       }

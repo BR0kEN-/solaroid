@@ -27,16 +27,20 @@ import { calculateForecast } from "./domain/forecast";
 import { plantSpendingTypeLabel, plantSpendingTypeTotals } from "./domain/spendings";
 import type { GreenTariffReconciliationValue, GreenTariffReport, MonthReceipt, MonthTariffScenario } from "./domain/types";
 import {
-  capacityAdjustedProductionSurplus,
   capacityDeltaPct,
+  dateWeightedProjectionCapacity,
+  expectedProductionForMonth,
+  expectedProductionForRow,
   exportPayout as splitExportPayout,
   exportTotal,
   greenTariffReceiptReconciliation,
   importCostBreakdown,
   investmentUsdRateForDate,
-  plantCapacityKwp,
+  normalizedProductionPerformance,
+  projectionCapacityForDate,
+  projectionModulesForDate,
+  productionProjectionTransitionForSpending,
   projectConsumptionWithoutPlant,
-  productionYieldKwhPerKwp,
   repriceMonthRow,
   regularImportDayPrice,
   regularImportNightPrice,
@@ -378,6 +382,11 @@ const i18n = {
     remainingPaybackTime: "Time left",
     productionSource: "Source",
     pvgisSource: "PVGIS, no closed years yet",
+    pvgisAdjustedSource: "PVGIS × normalized all-history performance",
+    invalidPvHistory: "PV configuration history is invalid. Actual data remains available; expectations and forecasts are disabled.",
+    modules: "Modules",
+    capacity: "Capacity",
+    capacityTransition: "Capacity transition",
     allTimeDataSource: "all time data",
     closedYearSource: "1 closed year",
     closedYearAverageSource: "closed year average",
@@ -696,6 +705,11 @@ const i18n = {
     remainingPaybackTime: "Залишилось",
     productionSource: "Джерело",
     pvgisSource: "PVGIS, ще немає закритих років",
+    pvgisAdjustedSource: "PVGIS × нормалізована ефективність за всю історію",
+    invalidPvHistory: "Історія конфігурації ФЕС некоректна. Фактичні дані доступні; очікування та прогнози вимкнено.",
+    modules: "Модулі",
+    capacity: "Потужність",
+    capacityTransition: "Зміна потужності",
     allTimeDataSource: "всі дані",
     closedYearSource: "1 закритий рік",
     closedYearAverageSource: "середнє закритих років",
@@ -1250,6 +1264,8 @@ function ProductionCapacityInfo({
   secondProduction,
   firstCapacity,
   secondCapacity,
+  firstExpected,
+  secondExpected,
   firstMetadata,
   secondMetadata,
   firstScopes,
@@ -1262,39 +1278,31 @@ function ProductionCapacityInfo({
   readonly secondProduction: number;
   readonly firstCapacity?: number;
   readonly secondCapacity?: number;
+  readonly firstExpected?: number;
+  readonly secondExpected?: number;
   readonly firstMetadata?: PlantMetadata | null;
   readonly secondMetadata?: PlantMetadata | null;
   readonly firstScopes?: readonly string[];
   readonly secondScopes?: readonly string[];
   readonly lang: Lang;
 }) {
-  if (!firstCapacity || !secondCapacity) {
-    return (
-      <div className="info-stack">
-        <p>{lang === "uk" ? "Деталі за потужністю недоступні: для однієї зі станцій не задана сумарна потужність панелей." : "Capacity details are unavailable because one plant has no total panel capacity."}</p>
-      </div>
-    );
-  }
-
-  const capacityPct = capacityDeltaPct(firstCapacity, secondCapacity);
-  const firstYield = productionYieldKwhPerKwp(firstProduction, firstCapacity);
-  const secondYield = productionYieldKwhPerKwp(secondProduction, secondCapacity);
-  const surplus = capacityAdjustedProductionSurplus(firstProduction, secondProduction, firstCapacity, secondCapacity);
-  const expected = secondProduction * (firstCapacity / secondCapacity);
+  const capacityPct = firstCapacity && secondCapacity ? capacityDeltaPct(firstCapacity, secondCapacity) : undefined;
+  const firstPerformance = firstExpected && firstExpected > 0 ? firstProduction / firstExpected * 100 : undefined;
+  const secondPerformance = secondExpected && secondExpected > 0 ? secondProduction / secondExpected * 100 : undefined;
+  const firstVariance = firstExpected === undefined ? undefined : firstProduction - firstExpected;
+  const secondVariance = secondExpected === undefined ? undefined : secondProduction - secondExpected;
   const productionDelta = firstProduction - secondProduction;
-  const yieldDelta = (firstYield ?? 0) - (secondYield ?? 0);
+  const performanceDelta = firstPerformance !== undefined && secondPerformance !== undefined
+    ? firstPerformance - secondPerformance
+    : undefined;
   const productionLabel = lang === "uk" ? "Генерація" : "Production";
-  const capacityLabel = lang === "uk" ? "Потужність · кВт·п" : "Capacity · kWp";
-  const yieldLabel = lang === "uk" ? "кВт·г / кВт·п" : "kWh / kWp";
-  const yieldNote = lang === "uk"
-    ? "кВт·г / кВт·п показує, скільки енергії дала кожна одиниця встановленої потужності."
-    : "kWh / kWp shows how much energy each installed unit of capacity produced.";
-  const expectedNote = lang === "uk"
-    ? "Скільки мала б дати перша станція, якби працювала з ефективністю другої."
-    : "What the first plant would produce if it worked with the second plant's efficiency.";
-  const surplusNote = lang === "uk"
-    ? "Реальна перевага понад саму різницю в потужності."
-    : "The real advantage beyond capacity alone.";
+  const capacityLabel = lang === "uk" ? "Середня потужність · кВт·п" : "Average capacity · kWp";
+  const expectedLabel = lang === "uk" ? "Очікування PVGIS" : "PVGIS expected";
+  const performanceLabel = lang === "uk" ? "Факт / PVGIS" : "Actual / PVGIS";
+  const varianceLabel = lang === "uk" ? "Відхилення" : "Variance";
+  const capacityNote = lang === "uk"
+    ? "Для періоду зі зміною конфігурації потужність зважена за активними календарними днями."
+    : "For a period spanning an upgrade, capacity is weighted by active calendar days.";
   const firstFields = firstMetadata?.pvs ?? [];
   const secondFields = secondMetadata?.pvs ?? [];
   const setupPairs = pairPvFieldsByAzimuth(firstFields, secondFields);
@@ -1328,17 +1336,27 @@ function ProductionCapacityInfo({
           </tr>
           <tr>
             <th>{capacityLabel}</th>
-            <td><span className="production-capacity-value">{formatNumber(firstCapacity, 2, 2)}</span></td>
-            <td><span className="production-capacity-value">{formatNumber(secondCapacity, 2, 2)}</span></td>
+            <td><span className="production-capacity-value">{firstCapacity === undefined ? "—" : formatNumber(firstCapacity, 2, 2)}</span></td>
+            <td><span className="production-capacity-value">{secondCapacity === undefined ? "—" : formatNumber(secondCapacity, 2, 2)}</span></td>
           </tr>
           <tr>
-            <th>{yieldLabel}</th>
-            <td><span className="production-capacity-value">{formatNumber(firstYield ?? 0, 2, 0)}</span></td>
-            <td><span className="production-capacity-value">{formatNumber(secondYield ?? 0, 2, 0)}</span></td>
+            <th>{expectedLabel}</th>
+            <td><span className="production-capacity-value">{firstExpected === undefined ? "—" : formatKwh(firstExpected, lang)}</span></td>
+            <td><span className="production-capacity-value">{secondExpected === undefined ? "—" : formatKwh(secondExpected, lang)}</span></td>
+          </tr>
+          <tr>
+            <th>{performanceLabel}</th>
+            <td><span className="production-capacity-value">{firstPerformance === undefined ? "—" : `${formatNumber(firstPerformance, 2, 2)}%`}</span></td>
+            <td><span className="production-capacity-value">{secondPerformance === undefined ? "—" : `${formatNumber(secondPerformance, 2, 2)}%`}</span></td>
+          </tr>
+          <tr>
+            <th>{varianceLabel}</th>
+            <td><span className="production-capacity-value">{firstVariance === undefined ? "—" : formatSignedKwh(firstVariance, lang)}</span></td>
+            <td><span className="production-capacity-value">{secondVariance === undefined ? "—" : formatSignedKwh(secondVariance, lang)}</span></td>
           </tr>
         </tbody>
       </table>
-      <p className="production-capacity-note production-capacity-note-below">{yieldNote}</p>
+      <p className="production-capacity-note production-capacity-note-below">{capacityNote}</p>
       <div className="production-capacity-cards">
         <section className="production-capacity-card">
           <strong>{lang === "uk" ? "Різниця" : "Difference"}</strong>
@@ -1353,31 +1371,12 @@ function ProductionCapacityInfo({
           </div>
           <div className="production-capacity-card-row">
             <span>{capacityLabel}</span>
-            <b className={deltaTone(capacityPct ?? 0)}>{formatSignedPercent(capacityPct ?? 0)}</b>
+            <b className={capacityPct === undefined ? "" : deltaTone(capacityPct)}>{capacityPct === undefined ? "—" : formatSignedPercent(capacityPct)}</b>
           </div>
           <div className="production-capacity-card-row">
-            <span>{yieldLabel}</span>
-            <b className={comparisonDeltaTone(yieldDelta, true)}>{formatSignedPercentFromDelta(yieldDelta, secondYield ?? 0)}</b>
-          </div>
-        </section>
-        <section className="production-capacity-card">
-          <strong>{lang === "uk" ? "Очікувано від розміру" : "Expected by size"}</strong>
-          <span className="production-capacity-note">{expectedNote}</span>
-          <div className="production-capacity-card-row">
-            <span>{productionLabel}</span>
-            <b>{formatKwh(expected, lang)}</b>
-          </div>
-        </section>
-        <section className="production-capacity-card">
-          <strong>{lang === "uk" ? "Понад очікування" : "Above expected"}</strong>
-          <span className="production-capacity-note">{surplusNote}</span>
-          <div className="production-capacity-card-row">
-            <span>{productionLabel}</span>
-            <b className={comparisonDeltaTone(surplus ?? 0, true)}>
-              <span className="production-capacity-value">
-                <span>{formatSignedKwh(surplus ?? 0, lang)}</span>
-                <span className="production-capacity-subdelta">, {formatSignedPercentFromDelta(surplus ?? 0, expected)}</span>
-              </span>
+            <span>{performanceLabel}</span>
+            <b className={performanceDelta === undefined ? "" : comparisonDeltaTone(performanceDelta, true)}>
+              {performanceDelta === undefined ? "—" : `${formatSignedNumber(performanceDelta)} p.p.`}
             </b>
           </div>
         </section>
@@ -1561,15 +1560,9 @@ function useDesktopChartEndScroll(
   return [scrollRef, viewportWidth] as const;
 }
 
-function projectedProduction(row: MonthRow, projection?: ProductionProjection | null) {
-  if (!projection) return undefined;
-
-  const monthIndex = row.date.getMonth();
-  const value = row.month.includes("-")
-    ? projection.dailyKwh[monthIndex]
-    : projection.monthlyKwh[monthIndex];
-
-  return value && Number.isFinite(value) ? value : undefined;
+function projectedProduction(row: MonthRow, projection?: ProductionProjection | null, launchDate?: Date) {
+  const value = expectedProductionForRow(row, projection, launchDate);
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
 }
 
 function formatMounting(value: string, lang: Lang) {
@@ -1780,37 +1773,19 @@ function forecastProductionValue(
   asOf: Date,
   projection: ProductionProjection | null | undefined,
   rows: readonly MonthRow[],
+  launchDate?: Date,
 ) {
   const daylightProjection = forecastMonthValue(value, date, asOf);
-  const expected = projection?.monthlyKwh[date.getMonth()];
+  const expected = expectedProductionForMonth(date, projection, launchDate);
   if (!expected || expected <= 0) return daylightProjection;
 
-  const performanceFactor = pvgisPerformanceFactor(rows, date, projection);
-  if (!performanceFactor) return daylightProjection;
+  const performanceFactor = normalizedProductionPerformance(rows, projection, launchDate, asOf);
+  if (performanceFactor === undefined) return daylightProjection;
 
   const pvgisProjection = expected * performanceFactor;
   const elapsedShare = Math.min(1, Math.max(0, elapsedMonthDaylightMinutes(date, asOf) / monthDaylightMinutes(date)));
   const currentPaceWeight = Math.min(0.85, Math.max(0.2, elapsedShare));
   return daylightProjection * currentPaceWeight + pvgisProjection * (1 - currentPaceWeight);
-}
-
-function pvgisPerformanceFactor(
-  rows: readonly MonthRow[],
-  currentDate: Date,
-  projection: ProductionProjection,
-) {
-  const factors = rows
-    .filter((row) => row.date < currentDate && !sameMonth(row.date, currentDate))
-    .slice(-3)
-    .map((row) => {
-      const expected = projection.monthlyKwh[row.date.getMonth()];
-      return expected && expected > 0 ? row.production / expected : undefined;
-    })
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
-
-  if (!factors.length) return undefined;
-
-  return factors.reduce((sum, value) => sum + value, 0) / factors.length;
 }
 
 function formatActiveDuration(duration: { months: number; days: number }, lang: Lang) {
@@ -1927,11 +1902,14 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
     scopes: initialData?.scopes ?? [],
     plantId: initialData?.plantId ?? "",
     investmentUsd: initialData?.investmentUsd ?? 0,
+    capacityKwp: initialData?.capacityKwp,
+    modules: initialData?.modules,
     spendings: initialData?.spendings ?? [],
     launchDate: initialData?.launchDate,
     commercialDate: initialData?.commercialDate,
     metadata: initialData?.metadata,
     projection: initialData?.projection,
+    projectionIssue: initialData?.projectionIssue,
     sheetUpdatedAt: initialData?.sheetUpdatedAt,
     isLoading: !initialData,
     isRefreshing: false,
@@ -1975,10 +1953,13 @@ interface PlantComparisonSource {
   readonly dailyRows: readonly MonthRow[];
   readonly scopes: readonly string[];
   readonly investmentUsd: number;
+  readonly capacityKwp?: number;
+  readonly modules?: number;
   readonly launchDate?: Date;
   readonly commercialDate?: Date;
   readonly metadata?: PlantMetadata | null;
   readonly projection?: ProductionProjection | null;
+  readonly projectionIssue?: DataState["projectionIssue"];
   readonly sheetUpdatedAt?: Date;
 }
 
@@ -1989,10 +1970,13 @@ function toPlantComparison(source: PlantComparisonSource): PlantComparison {
     dailyRows: source.dailyRows,
     scopes: source.scopes,
     investmentUsd: source.investmentUsd,
+    capacityKwp: source.capacityKwp,
+    modules: source.modules,
     launchDate: source.launchDate,
     commercialDate: source.commercialDate,
     metadata: source.metadata,
     projection: source.projection,
+    projectionIssue: source.projectionIssue,
     sheetUpdatedAt: source.sheetUpdatedAt,
   };
 }
@@ -2346,10 +2330,10 @@ function App({
   const productionProjection = dataState.projection ?? null;
   const projectedProductionTotal = useMemo(() => {
     const values = rows
-      .map((row) => projectedProduction(row, productionProjection))
+      .map((row) => projectedProduction(row, productionProjection, dataState.launchDate))
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
     return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;
-  }, [productionProjection, rows]);
+  }, [dataState.launchDate, productionProjection, rows]);
   const dailyDateBounds = useMemo(
     () => [dataState.dailyRows[0] ? dateKey(dataState.dailyRows[0].date) : "", dataState.dailyRows.at(-1) ? dateKey(dataState.dailyRows.at(-1)!.date) : ""] as const,
     [dataState.dailyRows],
@@ -2600,21 +2584,8 @@ function App({
     });
   }, [dataState.investmentUsd, dataState.spendings, monthlyCurrency, rows, spendingUsdRateById, totals.launchDate, totals.launchUsdRate]);
 
-  const commercialEndRecovery = useMemo(() => {
-    if (!payback) return null;
-    return calculateCommercialEndRecovery({
-      rows: dataState.rows,
-      payback,
-      currency: monthlyCurrency,
-      commercialDate: dataState.commercialDate,
-      launchDate: totals.launchDate,
-      endDate: COMMERCIAL_PERIOD_END_DATE,
-      projection: dataState.projection,
-      tariffOverrides,
-    });
-  }, [dataState.commercialDate, dataState.projection, dataState.rows, monthlyCurrency, payback, tariffOverrides, totals.launchDate]);
-
   const forecast = useMemo(() => {
+    if (dataState.projectionIssue === "invalid-history") return null;
     const today = new Date();
     const forecastAsOf = dataState.sheetUpdatedAt ?? today;
     return calculateForecast({
@@ -2622,9 +2593,29 @@ function App({
       currency: monthlyCurrency,
       today,
       projectMonthValue: (value, date) => forecastMonthValue(value, date, forecastAsOf),
-      projectProductionValue: (value, date) => forecastProductionValue(value, date, forecastAsOf, dataState.projection, monthlySourceRows),
+      projectProductionValue: (value, date) => forecastProductionValue(value, date, forecastAsOf, dataState.projection, monthlySourceRows, dataState.launchDate),
     });
-  }, [dataState.projection, dataState.sheetUpdatedAt, monthlyCurrency, monthlySourceRows]);
+  }, [dataState.launchDate, dataState.projection, dataState.projectionIssue, dataState.sheetUpdatedAt, monthlyCurrency, monthlySourceRows]);
+
+  const commercialEndRecovery = useMemo(() => {
+    if (!payback || dataState.projectionIssue === "invalid-history") return null;
+    const today = new Date();
+    const currentMonthForecast = forecast && sameMonth(forecast.row.date, today)
+      ? { date: forecast.row.date, recovery: forecast.roi }
+      : undefined;
+    return calculateCommercialEndRecovery({
+      rows: monthlySourceRows,
+      payback,
+      currency: monthlyCurrency,
+      commercialDate: dataState.commercialDate,
+      launchDate: totals.launchDate,
+      endDate: COMMERCIAL_PERIOD_END_DATE,
+      projection: dataState.projection,
+      tariffOverrides,
+      currentMonthForecast,
+      today,
+    });
+  }, [dataState.commercialDate, dataState.projection, dataState.projectionIssue, forecast, monthlyCurrency, monthlySourceRows, payback, tariffOverrides, totals.launchDate]);
 
   const showPlaceholders = dataState.isLoading;
   useEffect(() => {
@@ -3025,6 +3016,8 @@ function App({
                 launchUsdRate={totals.launchUsdRate}
                 spendings={dataState.spendings}
                 spendingUsdRateById={spendingUsdRateById}
+                metadata={dataState.metadata}
+                projection={dataState.projection}
               />
             </section>
             {fields.length > 0 ? (
@@ -3052,6 +3045,8 @@ function App({
       const details = commercialEndRecovery?.details;
       const sourceLabel = details?.annualProduction.source === "pvgis"
         ? t.pvgisSource
+        : details?.annualProduction.source === "pvgis-adjusted"
+          ? t.pvgisAdjustedSource
         : details?.annualProduction.source === "all-time-data"
           ? t.allTimeDataSource
           : t.actualFallbackSource;
@@ -3059,6 +3054,7 @@ function App({
         title: t.forecast,
         body: (
           <div className="info-stack">
+            {dataState.projectionIssue === "invalid-history" ? <div className="notice projection-warning">{t.invalidPvHistory}</div> : null}
             {forecast ? (
               <section className="info-modal-section">
                 <h3>{t.currentMonth}</h3>
@@ -3418,6 +3414,10 @@ function App({
             lang,
             dailyInvestmentByDay,
             dailyRangeRoiPercent,
+            dataState.launchDate,
+            dataState.metadata,
+            dataState.projection,
+            dataState.projectionIssue,
           ]}>
           {showPlaceholders ? (
             <DailyPageSkeleton />
@@ -3436,6 +3436,10 @@ function App({
               lang={lang}
               investmentByDay={dailyInvestmentByDay}
               selectedRangeRoiPercent={dailyRangeRoiPercent}
+              launchDate={dataState.launchDate}
+              metadata={dataState.metadata}
+              projection={dataState.projection}
+              projectionIssue={dataState.projectionIssue}
               onUsdRateInfo={() => setInfoModal("usdRate")}
               onImportPriceInfo={() => setInfoModal("importPrice")}
               onNetPaymentHeaderInfo={() => setInfoModal("netPayment")}
@@ -3612,7 +3616,14 @@ function App({
             {showPlaceholders ? (
               <ChartSkeleton variant="paired-line" inspectorItemCount={3} inspectorColumnCount={2} />
             ) : (
-              <ProductionExportChart rows={rows} projection={productionProjection} fixedBarDensity />
+              <ProductionExportChart
+                rows={rows}
+                projection={productionProjection}
+                launchDate={dataState.launchDate}
+                metadata={dataState.metadata}
+                projectionIssue={dataState.projectionIssue}
+                fixedBarDensity
+              />
             )}
           </ChartPanel>
           <ChartPanel
@@ -5575,6 +5586,11 @@ function PlantPeriodComparisonCharts({
   const periodPlants = plants.map((plant) => ({
     plantId: plant.plantId,
     metadata: plant.metadata,
+    projection: plant.projection,
+    projectionIssue: plant.projectionIssue,
+    launchDate: plant.launchDate,
+    capacityKwp: plant.capacityKwp,
+    modules: plant.modules,
     scopes: plant.scopes,
     rows:
       mode === "monthly"
@@ -5647,6 +5663,10 @@ function PlantPeriodComparisonCharts({
   ];
 
   return (
+    <>
+    {periodPlants.some((plant) => plant.projectionIssue === "invalid-history")
+      ? <div className="notice projection-warning">{t.invalidPvHistory}</div>
+      : null}
     <section className="chart-grid plant-comparison-chart-grid">
       {items.map((item) => (
         <article className="plant-comparison-chart chart-panel" key={item.title}>
@@ -5672,6 +5692,7 @@ function PlantPeriodComparisonCharts({
         </article>
       ))}
     </section>
+    </>
   );
 }
 
@@ -5691,7 +5712,17 @@ function PlantPeriodLineChart({
   lang,
   onDeltaInfo,
 }: {
-  readonly plants: readonly { readonly plantId: string; readonly rows: readonly MonthRow[]; readonly scopes: readonly string[]; readonly metadata?: PlantMetadata | null }[];
+  readonly plants: readonly {
+    readonly plantId: string;
+    readonly rows: readonly MonthRow[];
+    readonly scopes: readonly string[];
+    readonly launchDate?: Date;
+    readonly capacityKwp?: number;
+    readonly modules?: number;
+    readonly metadata?: PlantMetadata | null;
+    readonly projection?: ProductionProjection | null;
+    readonly projectionIssue?: DataState["projectionIssue"];
+  }[];
   readonly mode: PlantComparisonMode;
   readonly value: (row: MonthRow) => number;
   readonly format: (value: number) => string;
@@ -5750,10 +5781,6 @@ function PlantPeriodLineChart({
     ),
     [plants],
   );
-  const capacityByPlant = useMemo(
-    () => new Map(plants.map((plant) => [plant.plantId, plantCapacityKwp(plant.metadata)])),
-    [plants],
-  );
   const deltaByPeriod = useMemo(
     () =>
       new Map(
@@ -5778,6 +5805,12 @@ function PlantPeriodLineChart({
           const firstRow = firstPlant ? rowByPlantAndDay.get(firstPlant.plantId)?.get(periodKey) : undefined;
           const secondRow = secondPlant ? rowByPlantAndDay.get(secondPlant.plantId)?.get(periodKey) : undefined;
           const displayDelta = typeof delta === "number" && Number.isFinite(delta) ? comparisonDisplayDelta(delta, invertDeltaSign) : undefined;
+          const firstExpected = firstPlant && firstRow
+            ? expectedProductionForRow(firstRow, firstPlant.projection, firstPlant.launchDate)
+            : undefined;
+          const secondExpected = secondPlant && secondRow
+            ? expectedProductionForRow(secondRow, secondPlant.projection, secondPlant.launchDate)
+            : undefined;
           const deltaInfo = capacityContext && typeof delta === "number" && Number.isFinite(delta) && firstPlant && secondPlant && firstRow && secondRow
             ? (
               <ProductionCapacityInfo
@@ -5785,8 +5818,10 @@ function PlantPeriodLineChart({
                 secondLabel={secondPlant.plantId}
                 firstProduction={value(firstRow)}
                 secondProduction={value(secondRow)}
-                firstCapacity={capacityByPlant.get(firstPlant.plantId)}
-                secondCapacity={capacityByPlant.get(secondPlant.plantId)}
+                firstCapacity={dateWeightedProjectionCapacity([firstRow], firstPlant.projection, firstPlant.metadata, firstPlant.launchDate) ?? firstPlant.capacityKwp}
+                secondCapacity={dateWeightedProjectionCapacity([secondRow], secondPlant.projection, secondPlant.metadata, secondPlant.launchDate) ?? secondPlant.capacityKwp}
+                firstExpected={firstExpected}
+                secondExpected={secondExpected}
                 firstMetadata={firstPlant.metadata}
                 secondMetadata={secondPlant.metadata}
                 firstScopes={firstPlant.scopes}
@@ -5817,7 +5852,7 @@ function PlantPeriodLineChart({
           ];
         }),
       ),
-    [capacityByPlant, capacityContext, deltaByPeriod, format, higherIsBetter, invertDeltaSign, lang, metricTitle, mode, periodKeys, plants, rowByPlantAndDay, value],
+    [capacityContext, deltaByPeriod, format, higherIsBetter, invertDeltaSign, lang, metricTitle, mode, periodKeys, plants, rowByPlantAndDay, value],
   );
   const { selection, selectedKey: selectedPeriod, target } = useChartInspector(inspectors, latestPeriod);
 
@@ -6500,10 +6535,16 @@ function FixedChartAxis({ ticks, topForValue, currency, formatValue }: FixedChar
 function ProductionExportChart({
   rows,
   projection,
+  launchDate,
+  metadata,
+  projectionIssue,
   fixedBarDensity = false,
 }: {
   readonly rows: readonly MonthRow[];
   readonly projection?: ProductionProjection | null;
+  readonly launchDate?: Date;
+  readonly metadata?: PlantMetadata | null;
+  readonly projectionIssue?: DataState["projectionIssue"];
   readonly fixedBarDensity?: boolean;
 }) {
   const lang = useLanguage();
@@ -6511,8 +6552,8 @@ function ProductionExportChart({
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
   const expectedByMonth = useMemo(
-    () => new Map(displayRows.map((row) => [row.month, projectedProduction(row, projection)])),
-    [displayRows, projection],
+    () => new Map(displayRows.map((row) => [row.month, projectedProduction(row, projection, launchDate)])),
+    [displayRows, launchDate, projection],
   );
   const inspectors = useMemo(
     () =>
@@ -6530,6 +6571,7 @@ function ProductionExportChart({
           const exportPerformance = row.production
             ? `${formatNumber((exported / row.production) * 100, 2, 2)}%`
             : "";
+          const stage = projectionStageSummary(row, projection, metadata, launchDate, lang);
           return [
             row.month,
             {
@@ -6551,12 +6593,20 @@ function ProductionExportChart({
                   cells: [exportValue, exportPerformance],
                   color: colors.green,
                 },
+                ...(stage ? [
+                  {
+                    label: stage.isTransition ? t.capacityTransition : t.capacity,
+                    value: `${stage.modules} ${t.modules.toLocaleLowerCase()} · ${stage.capacity}`,
+                    cells: [`${stage.modules} ${t.modules.toLocaleLowerCase()} · ${stage.capacity}`, ""],
+                    color: colors.ink,
+                  },
+                ] : []),
               ],
             },
           ];
         }),
       ),
-    [displayRows, expectedByMonth, lang, t.actual, t.export, t.expected, t.performance, t.value],
+    [displayRows, expectedByMonth, lang, launchDate, metadata, projection, t.actual, t.capacity, t.capacityTransition, t.export, t.expected, t.modules, t.performance, t.value],
   );
   const latestRow = rows.at(-1);
   const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
@@ -6585,6 +6635,7 @@ function ProductionExportChart({
 
   return (
     <>
+      {projectionIssue === "invalid-history" ? <div className="notice projection-warning">{t.invalidPvHistory}</div> : null}
       <div className="fixed-axis-chart-wrap">
         <FixedChartAxis
           ticks={ticks}
@@ -6667,6 +6718,33 @@ function ProductionExportChart({
       <ChartInspector selection={selection} hint={t.tapBar} />
     </>
   );
+}
+
+function projectionStageSummary(
+  row: MonthRow,
+  projection: ProductionProjection | null | undefined,
+  metadata: PlantMetadata | null | undefined,
+  launchDate: Date | undefined,
+  lang: Lang,
+) {
+  const daily = /^\d{4}-\d{2}-\d{2}$/.test(row.month);
+  const end = daily ? row.date : new Date(row.date.getFullYear(), row.date.getMonth() + 1, 0);
+  const start = launchDate && launchDate > row.date && launchDate <= end ? launchDate : row.date;
+  const startModules = projectionModulesForDate(start, projection, metadata);
+  const endModules = projectionModulesForDate(end, projection, metadata);
+  const startCapacity = projectionCapacityForDate(start, projection, metadata);
+  const endCapacity = projectionCapacityForDate(end, projection, metadata);
+  if (startModules === undefined || startCapacity === undefined) return undefined;
+
+  const isTransition = startModules !== endModules || startCapacity !== endCapacity;
+  const modules = isTransition && endModules !== undefined
+    ? `${formatNumber(startModules, 0, 0)} → ${formatNumber(endModules, 0, 0)}`
+    : formatNumber(startModules, 0, 0);
+  const capacity = isTransition && endCapacity !== undefined
+    ? `${formatKwp(startCapacity, lang)} → ${formatKwp(endCapacity, lang)}`
+    : formatKwp(startCapacity, lang);
+
+  return { modules, capacity, isTransition };
 }
 
 interface FinanceRoiPoint {
@@ -7428,6 +7506,10 @@ function DailyDashboard({
   lang,
   investmentByDay,
   selectedRangeRoiPercent,
+  launchDate,
+  metadata,
+  projection,
+  projectionIssue,
   onUsdRateInfo,
   onImportPriceInfo,
   onNetPaymentHeaderInfo,
@@ -7453,6 +7535,10 @@ function DailyDashboard({
   readonly lang: Lang;
   readonly investmentByDay: ReadonlyMap<string, number>;
   readonly selectedRangeRoiPercent: number;
+  readonly launchDate?: Date;
+  readonly metadata?: PlantMetadata | null;
+  readonly projection?: ProductionProjection | null;
+  readonly projectionIssue?: DataState["projectionIssue"];
   readonly onUsdRateInfo: () => void;
   readonly onImportPriceInfo: () => void;
   readonly onNetPaymentHeaderInfo: () => void;
@@ -7551,7 +7637,14 @@ function DailyDashboard({
             ],
           }}
         >
-          <ProductionExportChart rows={chartRows} fixedBarDensity />
+          <ProductionExportChart
+            rows={chartRows}
+            projection={projection}
+            launchDate={launchDate}
+            metadata={metadata}
+            projectionIssue={projectionIssue}
+            fixedBarDensity
+          />
         </ChartPanel>
         <ChartPanel
           className="dashboard-chart-finance"
@@ -10389,6 +10482,8 @@ function InvestmentBreakdown({
   launchUsdRate,
   spendings,
   spendingUsdRateById,
+  metadata,
+  projection,
 }: {
   readonly t: Record<string, string>;
   readonly lang: Lang;
@@ -10397,6 +10492,8 @@ function InvestmentBreakdown({
   readonly launchUsdRate: number;
   readonly spendings: readonly PlantSpending[];
   readonly spendingUsdRateById: ReadonlyMap<number, number>;
+  readonly metadata?: PlantMetadata | null;
+  readonly projection?: ProductionProjection | null;
 }) {
   const sortedSpendings = [...spendings].sort((first, second) => (
     first.date.getTime() - second.date.getTime() || first.id - second.id
@@ -10405,6 +10502,9 @@ function InvestmentBreakdown({
     damageReplacement: t.damageReplacement,
     improvement: t.improvement,
   };
+  const initialPeriod = projection?.periods?.[0];
+  const initialModules = initialPeriod?.modules ?? projectionModulesForDate(launchDate ?? new Date(0), projection, metadata);
+  const initialCapacity = initialPeriod?.capacityKwp ?? projectionCapacityForDate(launchDate ?? new Date(0), projection, metadata);
   const investmentRows = [
     {
       id: "initial",
@@ -10413,15 +10513,26 @@ function InvestmentBreakdown({
       amountUsd: initialInvestmentUsd,
       usdRate: launchUsdRate,
       tone: "green",
+      capacity: initialModules !== undefined && initialCapacity !== undefined
+        ? `${formatNumber(initialModules, 0, 0)} ${t.modules.toLocaleLowerCase()} · ${formatKwp(initialCapacity, lang)}`
+        : undefined,
     },
-    ...sortedSpendings.map((spending) => ({
-      id: `spending-${spending.id}`,
-      label: plantSpendingTypeLabel(spending.type, spendingLabels),
-      date: formatLaunchDate(spending.date, lang),
-      amountUsd: spending.amountUsd,
-      usdRate: spendingUsdRateById.get(spending.id) ?? 1,
-      tone: spending.type === "damage_replacement" ? "rose" : "indigo",
-    })),
+    ...sortedSpendings.map((spending) => {
+      const transition = productionProjectionTransitionForSpending(projection, spending.id);
+      const capacity = transition
+        ? `${formatNumber(transition.fromModules, 0, 0)} → ${formatNumber(transition.toModules, 0, 0)} ${t.modules.toLocaleLowerCase()} · ${formatKwp(transition.fromCapacityKwp, lang)} → ${formatKwp(transition.toCapacityKwp, lang)}`
+        : undefined;
+
+      return {
+        id: `spending-${spending.id}`,
+        label: plantSpendingTypeLabel(spending.type, spendingLabels),
+        date: formatLaunchDate(spending.date, lang),
+        amountUsd: spending.amountUsd,
+        usdRate: spendingUsdRateById.get(spending.id) ?? 1,
+        tone: spending.type === "damage_replacement" ? "rose" : "indigo",
+        capacity,
+      };
+    }),
   ];
   const totalUsd = investmentRows.reduce((sum, row) => sum + row.amountUsd, 0);
   const totalUah = investmentRows.reduce((sum, row) => sum + moneyFromUsd(row.amountUsd, "UAH", row.usdRate), 0);
@@ -10450,7 +10561,9 @@ function InvestmentBreakdown({
                   <th colSpan={3} scope="rowgroup">
                     <span className="investment-breakdown-subheading-content">
                       <span>{row.label}</span>
-                      <span className="investment-breakdown-subheading-date">{row.date}</span>
+                      <span className="investment-breakdown-subheading-date">
+                        {row.date}{row.capacity ? ` · ${row.capacity}` : ""}
+                      </span>
                     </span>
                   </th>
                 </tr>

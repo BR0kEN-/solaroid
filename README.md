@@ -37,6 +37,7 @@ Main Edge Function files:
 - `supabase/functions/ingest/read.ts`: read routing and access checks.
 - `supabase/functions/ingest/write.ts`: ingestion/write behavior.
 - `supabase/functions/ingest/client.ts`: Supabase reads/upserts plus private monthly document storage/listing.
+- `supabase/functions/ingest/pv_history.ts`: validates and reconstructs dated PV configurations.
 - `supabase/functions/ingest/dam.ts`: DAM freshness check, source validation, and hourly price mapping.
 - `supabase/functions/ingest/email.ts`: raw email validation, MIME parsing, and analyzed attachment selection.
 - `supabase/functions/ingest/email_analysis.ts`: OpenAI PDF classification and structured report extraction.
@@ -67,6 +68,7 @@ Canonical tables:
 - `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
 - `plant_spendings`: dated additional plant costs. Supported types are `damage_replacement` and `improvement`; amounts are stored in USD.
+- `plant_pv_changes`: capacity-field operations linked one-to-one to an `improvement` spending. The spending date is the commissioning date.
 - `dam_prices`: hourly day-ahead market prices cached by market date, stored as UAH/kWh in `hour1` through `hour24`.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
@@ -79,6 +81,7 @@ Important auth model:
 - Dashboard users can list and open green-tariff documents only for the token's primary `plant_id`, but cannot upload or replace them.
 - Extra comparison/read access never grants document listing or signed-URL access.
 - Plant spending records are returned only for the token's primary plant and are omitted from comparison-plant responses.
+- Own-plant projection periods retain spending IDs for investment-breakdown linking. Comparison responses omit spending IDs, PV operations, coordinates, and PV field configuration; only derived capacity and projection periods remain.
 - Raw access tokens are still used for Home Assistant ingestion.
 - Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
 - Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
@@ -279,7 +282,7 @@ Current read behavior:
 - No `granularity`: returns full plant data plus `reads` as `{ [plantId]: scopes[] }`.
 - Raw ingest tokens have full access to their own plant even though own plant is not listed in `reads`.
 - Supabase Auth tokens use `reads[plantId]` for every assigned plant, including the current plant.
-- If `reads[plantId]` does not include `loc`, `plant.metadata.pvs[*].lat` and `lng` are set to `0` right before the response. PVGIS projection still uses the real stored coordinates before redaction.
+- Own-plant reads without `loc` redact PV coordinates. Comparison reads omit the complete PV field configuration regardless of scope and expose only derived capacity plus sanitized projection periods. PVGIS always runs against the private stored configuration before response filtering.
 - `granularity=YYYY-MM-DD`: returns daily row for that date.
 - `granularity=YYYY-MM`: intended for range-oriented reads. Check `client.ts` before relying on this, because this behavior has changed during comparison work.
 - `granularity=YYYY`: returns yearly range data.
@@ -320,9 +323,8 @@ Dashboard access behavior:
 - HA URLs with `#token=...` are treated as raw ingest-token access. The selected own plant has full location access.
 - Portal/Auth URLs use Supabase Auth access tokens. The dashboard uses `reads[plantId]` scopes from the Edge Function, including for the selected/current plant.
 - If a plant lacks `loc`, location links are hidden. Redacted `0,0` coordinates are not shown as map links.
-- In the production comparison popup, the location row is shown when at least one compared plant has `loc`. A plant without `loc` shows `—` in its location cell. Distance between plants is shown only when both plants have `loc`.
 - In the monthly PVGIS popup, panel location is shown only when the current plant has `loc`.
-- Production comparison also uses capacity-aware context: total capacity comes from `metadata.pvs[*].power`, yield is `kWh/kWp`, and the popup explains expected production by size plus surplus above/below that expected value.
+- Production comparison uses each plant's stage-correct PVGIS expectation. Its popup shows actual production, PVGIS expectation, `actual / expected` performance, variance, and date-weighted capacity for periods spanning an upgrade.
 - Comparison deltas are first plant minus second plant. For production, export, ROI, and net payment, higher is better. For import, consumed energy, and inverter losses, lower is better but the displayed sign stays mathematical. For balance, lower/negative is better and the displayed sign is inverted so a better balance reads as positive.
 
 Dashboard config:
@@ -424,6 +426,8 @@ Important naming:
 
 The monthly investment-recovery strip shows one compact desktop row: the label with estimated payoff date, progress, then recovered/total investment. The strip date and the popup's Time left use the same month-by-month recovery projection, including production basis, consumption, commercial-period rules, tariffs, and total investment. The popup preserves the detailed calculation. The date and duration are estimates, not guarantees.
 
+The commercial-period recovery forecast uses actual ROI for completed months, the dashboard's full-month ROI forecast for the current month, and the latest PV configuration's annual PVGIS projection for later months. PVGIS is multiplied by one normalized all-history factor: completed actual production divided by the matching stage-correct PVGIS expectation. A partial current-month snapshot is never treated as a complete month.
+
 Currency rules:
 
 - UAH values are native and summed directly.
@@ -445,7 +449,87 @@ values ('your-plant-id', '2026-09-05', 'improvement', 750);
 
 The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated additional spending with its type, the conversion rate used in UAH mode, and the total. The cumulative ROI line in the Finance chart keeps prior months on their original investment basis and applies spending from its month onward. The Finance chart's Expenses popup groups spending by type for the selected month.
 
-`improvement` can represent any already-incurred plant upgrade. It does not automatically change capacity, production history, or forecasts. Update current plant PV metadata separately when an upgrade changes the installation; telemetry and the regenerated PVGIS projection then reflect that configuration. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, historical PV configurations, production-uplift multipliers, and dashboard editing are not supported.
+`improvement` can represent any already-incurred plant upgrade. By itself it remains cost-only. Link it through `plant_pv_changes` only when it commissioned added PV capacity. Damage replacement never changes capacity. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, removals, reductions, module replacements, and geometry edits are not supported.
+
+### Capacity-aware PV improvements
+
+Current `plants.metadata.pvs` remains the latest installed configuration. Every current field used by a plant with PV history needs a stable lowercase `id` and positive `modules`; `power` remains that field's total watts:
+
+```json
+{
+  "pvs": [
+    {
+      "id": "south",
+      "modules": 32,
+      "power": 13120,
+      "azimuth": 180,
+      "slope": 30,
+      "elevation": 120,
+      "lat": 0,
+      "lng": 0,
+      "loss": 14,
+      "mounting": "building"
+    }
+  ]
+}
+```
+
+`plant_pv_changes.operations` is a non-empty JSON array. An existing field can gain modules and watts only:
+
+```json
+[
+  {
+    "kind": "increase_field",
+    "field_id": "south",
+    "modules_added": 10,
+    "power_added_w": 4100
+  }
+]
+```
+
+A newly commissioned field stores its complete PVGIS configuration:
+
+```json
+[
+  {
+    "kind": "add_field",
+    "field": {
+      "id": "west",
+      "modules": 13,
+      "power": 5330,
+      "azimuth": 270,
+      "slope": 30,
+      "elevation": 120,
+      "lat": 0,
+      "lng": 0,
+      "loss": 14,
+      "mounting": "building"
+    }
+  }
+]
+```
+
+Manual workflow after applying the migration:
+
+1. Add stable `id` and current `modules` values to every current PV field in `plants.metadata`.
+2. Insert or locate the corresponding `improvement` spending. Its `date` must be the real commissioning date.
+3. Link operations to that spending ID:
+
+```sql
+insert into public.plant_pv_changes (spending_id, operations)
+values (
+  123,
+  '[{"kind":"increase_field","field_id":"south","modules_added":10,"power_added_w":4100}]'::jsonb
+);
+```
+
+For a 9 → 19 → 32-module history, record both capacity additions as separate improvement spendings and change rows. Solaroid sorts by spending date then ID, reverses the operations from the latest metadata to infer the launch configuration, then replays them forward. Each new configuration is active on its spending date, inclusive. Same-day records therefore follow spending-ID order.
+
+Daily expectation uses the active configuration on that date. A month covered by one configuration uses its full PVGIS month. Launch and transition months are prorated by active calendar days. Historical expected lines and performance use those stage-correct values. Current-month and long-term forecasts use the weighted all-history performance factor; future months use the latest configuration. Actual telemetry, payment, savings, taxes, and historical monthly ROI are never recalculated.
+
+The investment breakdown shows the reconstructed launch modules/kWp and capacity transitions for linked improvements. Unlinked improvements remain cost-only. Plant comparison receives sanitized projection periods, sums stage-correct expectation, and uses date-weighted capacity across upgrades.
+
+The PVGIS cache key includes current metadata, launch date, ordered changes, and query settings. Any of those changes regenerates all stages while preserving top-level current-configuration arrays for older clients. Invalid or incomplete history never falls back to the latest configuration for old dates: actual dashboard data remains visible, while expected values and affected forecasts are disabled with a localized warning.
 
 ## UI Conventions
 

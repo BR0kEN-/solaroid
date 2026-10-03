@@ -46,7 +46,7 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
   const granularity = params.get('granularity')
 
   if (granularity) {
-    return applyAccess(token, await client.getPlantDataForGranularity(plantId, granularity))
+    return applyAccess(token, await client.getPlantDataForGranularity(plantId, granularity, plantId === token.plant_id))
   }
 
   return {

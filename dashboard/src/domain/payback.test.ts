@@ -148,17 +148,17 @@ describe('payback', () => {
 
   it('projects commercial end recovery from a completed commercial year template', () => {
     const rows = [
-      month(100, '2025-06-01'),
-      month(1_000, '2025-09-01'),
-      month(1_000, '2025-10-01'),
-      month(1_000, '2025-11-01'),
-      month(1_000, '2025-12-01'),
-      month(1_000, '2026-01-01'),
-      month(1_000, '2026-02-01'),
-      month(1_000, '2026-03-01'),
-      month(1_000, '2026-04-01'),
-      month(1_000, '2026-05-01'),
-      month(1_000, '2026-06-01'),
+      { ...month(100, '2025-06-01'), production: 100 },
+      { ...month(1_000, '2025-09-01'), production: 1_000 },
+      { ...month(1_000, '2025-10-01'), production: 1_000 },
+      { ...month(1_000, '2025-11-01'), production: 1_000 },
+      { ...month(1_000, '2025-12-01'), production: 1_000 },
+      { ...month(1_000, '2026-01-01'), production: 1_000 },
+      { ...month(1_000, '2026-02-01'), production: 1_000 },
+      { ...month(1_000, '2026-03-01'), production: 1_000 },
+      { ...month(1_000, '2026-04-01'), production: 1_000 },
+      { ...month(1_000, '2026-05-01'), production: 1_000 },
+      { ...month(1_000, '2026-06-01'), production: 1_000 },
     ]
     const payback = calculatePayback({
       rows,
@@ -182,20 +182,21 @@ describe('payback', () => {
         monthlyKwh: [3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000],
         dailyKwh: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
       },
+      today: new Date('2026-07-01T00:00:00'),
     })
 
-    expect(result.recovered).toBeCloseTo(667_138.89)
-    expect(result.progress).toBeCloseTo(66.71)
+    expect(result.recovered).toBeCloseTo(255_472.22)
+    expect(result.progress).toBeCloseTo(25.55)
     expect(result.details?.annualProduction).toEqual({
-      kwh: 36_000,
-      source: 'pvgis',
+      kwh: 12_000,
+      source: 'pvgis-adjusted',
       closedYearCount: 0,
     })
   })
 
   it('projects young plants from PVGIS when no closed years exist', () => {
     const rows = [
-      month(1_900, '2026-06-01'),
+      { ...month(1_900, '2026-06-01'), production: 1_900 },
     ]
     const payback = calculatePayback({
       rows,
@@ -219,10 +220,16 @@ describe('payback', () => {
         monthlyKwh: [3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000],
         dailyKwh: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
       },
+      today: new Date('2026-07-01T00:00:00'),
     })
 
-    expect(result.recovered).toBeCloseTo(543_472.22)
-    expect(result.progress).toBeCloseTo(54.35)
+    expect(result.recovered).toBeCloseTo(306_972.22)
+    expect(result.progress).toBeCloseTo(30.70)
+    expect(result.details?.annualProduction).toEqual({
+      kwh: 22_800,
+      source: 'pvgis-adjusted',
+      closedYearCount: 0,
+    })
     expect(dateKey(result.details?.commercialStartDate)).toBe('2026-06-01')
   })
 
@@ -250,6 +257,7 @@ describe('payback', () => {
         monthlyKwh: Array.from({ length: 12 }, () => 25_000 / 12),
         dailyKwh: Array.from({ length: 12 }, () => 1),
       },
+      today: new Date('2026-01-01T00:00:00'),
     })
 
     expect(result.recovered).toBeCloseTo(97_866.67)
@@ -294,6 +302,50 @@ describe('payback', () => {
     expect(result.details?.annualSurplus.kwh).toBeCloseTo(0)
   })
 
+  it('uses actual closed months and the full-month forecast for the current month', () => {
+    const closed = Array.from({ length: 13 }, (_, index) => {
+      const date = new Date(2025, 8 + index, 1)
+      return {
+        ...month(1_000, `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`),
+        production: 1_000,
+      }
+    })
+    const partial = { ...month(100, '2026-10-01'), production: 100 }
+    const inflatedPartial = { ...partial, electricitySavings: 9_000, roiUsd: 180, production: 9_000 }
+    const payback = calculatePayback({
+      rows: [...closed, partial],
+      investmentUsd: 1_000_000,
+      currency: 'UAH',
+      launchUsdRate: 1,
+      launchDate: new Date('2025-09-01T00:00:00'),
+      today: new Date('2026-10-03T00:00:00'),
+    })!
+    const common = {
+      payback,
+      currency: 'UAH' as const,
+      commercialDate: new Date('2025-09-01T00:00:00'),
+      launchDate: new Date('2025-09-01T00:00:00'),
+      endDate: new Date('2026-11-01T00:00:00'),
+      projection: {
+        monthlyKwh: Array.from({ length: 12 }, () => 3_000),
+        dailyKwh: Array.from({ length: 12 }, () => 1),
+      },
+      currentMonthForecast: {
+        date: new Date('2026-10-01T00:00:00'),
+        recovery: 2_000,
+      },
+      today: new Date('2026-10-03T00:00:00'),
+    }
+
+    const result = calculateCommercialEndRecovery({ ...common, rows: [...closed, partial] })
+    const changedRawSnapshot = calculateCommercialEndRecovery({ ...common, rows: [...closed, inflatedPartial] })
+
+    expect(result.recovered).toBe(15_000)
+    expect(changedRawSnapshot.recovered).toBe(15_000)
+    expect(changedRawSnapshot.details?.annualProduction).toEqual(result.details?.annualProduction)
+    expect(result.details?.annualProduction.source).toBe('pvgis-adjusted')
+  })
+
   it('annualizes all time data from the plant launch date', () => {
     const rows = Array.from({ length: 13 }, (_, index) => {
       const date = new Date(2025, 5 + index, 1)
@@ -329,8 +381,8 @@ describe('payback', () => {
       today: new Date('2026-07-01T00:00:00'),
     })
 
-    expect(result.details?.annualProduction.kwh).toBeCloseTo((13_000 / 368) * 365)
-    expect(result.details?.annualProduction.source).toBe('all-time-data')
+    expect(result.details?.annualProduction.kwh).toBeCloseTo(36_000 * (13_000 / 36_300))
+    expect(result.details?.annualProduction.source).toBe('pvgis-adjusted')
     expect(result.details?.annualProduction.closedYearCount).toBe(0)
     expect(result.details?.annualConsumption.dayKwh).toBeCloseTo((7_800 / 368) * 365)
     expect(result.details?.annualConsumption.nightKwh).toBeCloseTo((5_200 / 368) * 365)

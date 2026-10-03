@@ -177,11 +177,14 @@ export interface DataState {
   readonly readablePlantScopes: Readonly<Record<string, readonly string[]>>
   readonly scopes: readonly string[]
   readonly investmentUsd: number
+  readonly capacityKwp?: number
+  readonly modules?: number
   readonly spendings: readonly PlantSpending[]
   readonly launchDate?: Date
   readonly commercialDate?: Date
   readonly metadata?: PlantMetadata | null
   readonly projection?: ProductionProjection | null
+  readonly projectionIssue?: ProjectionIssue
   readonly sheetUpdatedAt?: Date
   readonly isLoading: boolean
   readonly updatedAt: Date
@@ -196,10 +199,13 @@ export interface PlantComparison {
   readonly dailyRows: readonly MonthRow[]
   readonly scopes: readonly string[]
   readonly investmentUsd: number
+  readonly capacityKwp?: number
+  readonly modules?: number
   readonly launchDate?: Date
   readonly commercialDate?: Date
   readonly metadata?: PlantMetadata | null
   readonly projection?: ProductionProjection | null
+  readonly projectionIssue?: ProjectionIssue
   readonly sheetUpdatedAt?: Date
 }
 
@@ -225,6 +231,8 @@ export interface EnergySnapshot {
 }
 
 export interface PvMetadata {
+  readonly id?: string
+  readonly modules?: number
   readonly azimuth: number
   readonly power: number
   readonly slope: number
@@ -240,6 +248,18 @@ export interface PlantMetadata {
 }
 
 export interface ProductionProjection {
+  readonly monthlyKwh: readonly number[]
+  readonly dailyKwh: readonly number[]
+  readonly periods?: readonly ProductionProjectionPeriod[]
+}
+
+export type ProjectionIssue = 'invalid-history'
+
+export interface ProductionProjectionPeriod {
+  readonly effectiveDate: Date
+  readonly spendingId?: number
+  readonly modules: number
+  readonly capacityKwp: number
   readonly monthlyKwh: readonly number[]
   readonly dailyKwh: readonly number[]
 }

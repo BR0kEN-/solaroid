@@ -71,6 +71,28 @@ export const Panel = z.object({
   mounting: String,
 })
 
+const PvFieldId = z.string().trim().regex(/^[a-z0-9_-]{1,59}$/)
+
+export const HistoricalPanel = Panel.extend({
+  id: PvFieldId,
+  modules: z.number().int().positive(),
+})
+
+export const PvChangeOperations = z.array(
+  z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('increase_field'),
+      field_id: PvFieldId,
+      modules_added: z.number().int().positive(),
+      power_added_w: z.number().finite().positive(),
+    }),
+    z.object({
+      kind: z.literal('add_field'),
+      field: HistoricalPanel,
+    }),
+  ]),
+).min(1)
+
 export const Dam = z.object({
   result: z.array(
     z.object({
@@ -82,4 +104,6 @@ export const Dam = z.object({
 
 export type Input = z.infer<typeof Input>
 export type Panel = z.infer<typeof Panel>
+export type HistoricalPanel = z.infer<typeof HistoricalPanel>
+export type PvChangeOperations = z.infer<typeof PvChangeOperations>
 export type Dam = z.infer<typeof Dam>
