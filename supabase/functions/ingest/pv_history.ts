@@ -21,7 +21,7 @@ export function reconstructPvConfigurationStages(
       ...change,
       operations: parseOperations(change.operations),
     }))
-    .sort((first, second) => first.spending.date.localeCompare(second.spending.date) || first.spending_id - second.spending_id)
+    .sort((first, second) => first.date.localeCompare(second.date) || first.spending_id - second.spending_id)
 
   for (const change of orderedChanges) {
     if (change.spending.id !== change.spending_id) {
@@ -30,8 +30,8 @@ export function reconstructPvConfigurationStages(
     if (change.spending.type !== 'improvement') {
       throw new InvalidPvHistoryError(`Spending ${change.spending_id} is not an improvement`)
     }
-    if (change.spending.date < launchDate) {
-      throw new InvalidPvHistoryError(`Spending ${change.spending_id} predates plant launch`)
+    if (change.date < launchDate) {
+      throw new InvalidPvHistoryError(`PV change for spending ${change.spending_id} predates plant launch`)
     }
   }
 
@@ -50,7 +50,7 @@ export function reconstructPvConfigurationStages(
       assertHistoricalConfiguration(fields)
     }
     stages.push({
-      effectiveDate: change.spending.date,
+      effectiveDate: change.date,
       spendingId: change.spending_id,
       fields: cloneFields(fields),
     })

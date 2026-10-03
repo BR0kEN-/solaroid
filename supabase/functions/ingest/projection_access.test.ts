@@ -66,6 +66,9 @@ Deno.test('PVGIS cache input is order-stable and changes with launch or operatio
   if (input === pvgisProjectionCacheInput(plant, [change(1, '2025-08-10', 11), second])) {
     throw new Error('operation changes should invalidate the cache')
   }
+  if (input === pvgisProjectionCacheInput(plant, [{ ...first, date: '2025-08-11' }, second])) {
+    throw new Error('PV change date should invalidate the cache')
+  }
   if (!isPvgisProjectionCacheHit('same', 'same') || isPvgisProjectionCacheHit('old', 'new')) {
     throw new Error('cache hit should require an exact hash match')
   }
@@ -74,6 +77,7 @@ Deno.test('PVGIS cache input is order-stable and changes with launch or operatio
 function change(id: number, date: Solaroid.Supabase.Date.Ymd, modulesAdded: number): Solaroid.Supabase.Plant.Pv.ChangeRecord {
   return {
     spending_id: id,
+    date,
     operations: [{ kind: 'increase_field', field_id: 'south', modules_added: modulesAdded, power_added_w: modulesAdded * 410 }],
     spending: { id, date, type: 'improvement' },
   }

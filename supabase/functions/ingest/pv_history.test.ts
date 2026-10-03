@@ -50,6 +50,21 @@ Deno.test('orders same-date changes by spending id', () => {
   assertEquals(stages.map((stage) => stage.fields[0].modules), [9, 10, 12])
 })
 
+Deno.test('uses the PV change date independently from the spending date', () => {
+  const stages = reconstructPvConfigurationStages(
+    { pvs: [{ ...baseField, modules: 19, power: 7_790 }] },
+    '2025-06-01',
+    [change(
+      1,
+      '2025-08-10',
+      [{ kind: 'increase_field', field_id: 'south', modules_added: 10, power_added_w: 4_100 }],
+      '2025-07-01',
+    )],
+  )
+
+  assertEquals(stages.map((stage) => stage.effectiveDate), ['2025-06-01', '2025-08-10'])
+})
+
 Deno.test('projects every distinct stage once and preserves latest top-level arrays', async () => {
   const stages = reconstructPvConfigurationStages(
     { pvs: [{ ...baseField, modules: 19, power: 7_790 }] },
@@ -124,11 +139,13 @@ function change(
   spendingId: number,
   date: Solaroid.Supabase.Date.Ymd,
   operations: readonly Solaroid.Supabase.Plant.Pv.ChangeOperation[],
+  spendingDate = date,
 ): Solaroid.Supabase.Plant.Pv.ChangeRecord {
   return {
     spending_id: spendingId,
+    date,
     operations,
-    spending: { id: spendingId, date, type: 'improvement' },
+    spending: { id: spendingId, date: spendingDate, type: 'improvement' },
   }
 }
 

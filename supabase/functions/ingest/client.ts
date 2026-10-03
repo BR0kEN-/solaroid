@@ -376,13 +376,13 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
   ): Promise<readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[]> {
     const { data, error } = await this.client
       .from('plant_pv_changes')
-      .select('spending_id,operations,spending:plant_spendings!inner(id,plant_id,date,type)')
+      .select('spending_id,date,operations,spending:plant_spendings!inner(id,plant_id,date,type)')
       .eq('spending.plant_id', plantId)
 
     if (error) throw new Error('plant PV changes lookup failed', { cause: error })
 
     return [...(data ?? []) as unknown as readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[]]
-      .sort((first, second) => first.spending.date.localeCompare(second.spending.date) || first.spending_id - second.spending_id)
+      .sort((first, second) => first.date.localeCompare(second.date) || first.spending_id - second.spending_id)
   }
 
   async #getPvgisProjection(
@@ -494,7 +494,7 @@ export function pvgisProjectionCacheInput(
   changes: readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[],
 ) {
   const orderedChanges = [...changes]
-    .sort((first, second) => first.spending.date.localeCompare(second.spending.date) || first.spending_id - second.spending_id)
+    .sort((first, second) => first.date.localeCompare(second.date) || first.spending_id - second.spending_id)
 
   return JSON.stringify({
     m: plant.metadata,

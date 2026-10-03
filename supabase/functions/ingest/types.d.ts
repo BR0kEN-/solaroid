@@ -78,6 +78,7 @@ declare global {
 
         interface ChangeRecord {
           readonly spending_id: number
+          readonly date: Date.Ymd
           readonly operations: readonly ChangeOperation[]
           readonly spending: {
             readonly id: number
