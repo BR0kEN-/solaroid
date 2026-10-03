@@ -68,7 +68,7 @@ Canonical tables:
 - `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
 - `plant_spendings`: dated additional plant costs. Supported types are `damage_replacement` and `improvement`; amounts are stored in USD.
-- `plant_pv_changes`: capacity-field operations linked one-to-one to an `improvement` spending. The spending date is the commissioning date.
+- `plant_pv_changes`: dated capacity-field operations linked one-to-one to an `improvement` spending. Spending and commissioning dates are independent.
 - `dam_prices`: hourly day-ahead market prices cached by market date, stored as UAH/kWh in `hour1` through `hour24`.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
 - `access_token_read_scopes`: extra read-only plant access for a raw token, with optional scopes.
@@ -512,22 +512,23 @@ A newly commissioned field stores its complete PVGIS configuration:
 Manual workflow after applying the migration:
 
 1. Add stable `id` and current `modules` values to every current PV field in `plants.metadata`.
-2. Insert or locate the corresponding `improvement` spending. Its `date` must be the real commissioning date.
-3. Link operations to that spending ID:
+2. Insert or locate the corresponding `improvement` spending. Its date records the expense.
+3. Link operations to that spending ID and set the independent commissioning date:
 
 ```sql
-insert into public.plant_pv_changes (spending_id, operations)
+insert into public.plant_pv_changes (spending_id, date, operations)
 values (
   123,
+  '2026-03-15',
   '[{"kind":"increase_field","field_id":"south","modules_added":10,"power_added_w":4100}]'::jsonb
 );
 ```
 
-For a 9 → 19 → 32-module history, record both capacity additions as separate improvement spendings and change rows. Solaroid sorts by spending date then ID, reverses the operations from the latest metadata to infer the launch configuration, then replays them forward. Each new configuration is active on its spending date, inclusive. Same-day records therefore follow spending-ID order.
+For a 9 → 19 → 32-module history, record both capacity additions as separate improvement spendings and change rows. Solaroid sorts by PV-change date then spending ID, reverses the operations from the latest metadata to infer the launch configuration, then replays them forward. Each new configuration is active on its own date, inclusive. Same-day records therefore follow spending-ID order.
 
 Daily expectation uses the active configuration on that date. A month covered by one configuration uses its full PVGIS month. Launch and transition months are prorated by active calendar days. Historical expected lines and performance use those stage-correct values. Current-month and long-term forecasts use the weighted all-history performance factor; future months use the latest configuration. Actual telemetry, payment, savings, taxes, and historical monthly ROI are never recalculated.
 
-The investment breakdown shows the reconstructed launch modules/kWp and capacity transitions for linked improvements. Unlinked improvements remain cost-only. Plant comparison receives sanitized projection periods, sums stage-correct expectation, and uses date-weighted capacity across upgrades.
+The investment breakdown shows the reconstructed launch modules/kWp and capacity transitions for linked improvements. Unlinked improvements remain cost-only. The Production chart shows the selected period's capacity in its title rather than as an inspector row. Plant comparison receives sanitized projection periods, sums stage-correct expectation, and uses date-weighted capacity across upgrades.
 
 The PVGIS cache key includes current metadata, launch date, ordered changes, and query settings. Any of those changes regenerates all stages while preserving top-level current-configuration arrays for older clients. Invalid or incomplete history never falls back to the latest configuration for old dates: actual dashboard data remains visible, while expected values and affected forecasts are disabled with a localized warning.
 

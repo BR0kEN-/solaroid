@@ -2040,6 +2040,7 @@ function App({
   const [comparisonError, setComparisonError] = useState("");
   const [isPlantComparisonLoading, setPlantComparisonLoading] = useState(false);
   const [infoModal, setInfoModal] = useState<InfoModal | null>(null);
+  const [monthlyProductionCapacity, setMonthlyProductionCapacity] = useState<string>();
   const [financeSummaryRow, setFinanceSummaryRow] = useState<MonthRow | null>(null);
   const [documentsModalRow, setDocumentsModalRow] = useState<MonthRow | null>(null);
   const [tariffScenarios, setTariffScenarios] = useState<Readonly<Record<string, MonthTariffScenario>>>({});
@@ -3416,6 +3417,7 @@ function App({
             dailyRangeRoiPercent,
             dataState.launchDate,
             dataState.metadata,
+            dataState.capacityKwp,
             dataState.projection,
             dataState.projectionIssue,
           ]}>
@@ -3438,6 +3440,7 @@ function App({
               selectedRangeRoiPercent={dailyRangeRoiPercent}
               launchDate={dataState.launchDate}
               metadata={dataState.metadata}
+              capacityKwp={dataState.capacityKwp}
               projection={dataState.projection}
               projectionIssue={dataState.projectionIssue}
               onUsdRateInfo={() => setInfoModal("usdRate")}
@@ -3549,6 +3552,7 @@ function App({
             tariffOverrideMonths,
             tariffScenarioCells,
             dataState.rows,
+            monthlyProductionCapacity,
           ]}>
           <>
         <PeriodCompareModal
@@ -3569,6 +3573,7 @@ function App({
           <ChartPanel
             className="dashboard-chart-production"
             title={t.production}
+            titleMeta={monthlyProductionCapacity}
             legend={[]}
             infoLabel={t.productionAndExport}
             onInfo={() => setInfoModal("productionExport")}
@@ -3621,8 +3626,10 @@ function App({
                 projection={productionProjection}
                 launchDate={dataState.launchDate}
                 metadata={dataState.metadata}
+                capacityKwp={dataState.capacityKwp}
                 projectionIssue={dataState.projectionIssue}
                 fixedBarDensity
+                onCapacityChange={setMonthlyProductionCapacity}
               />
             )}
           </ChartPanel>
@@ -6153,6 +6160,7 @@ function ChartSummary({ items, infoLabel, onInfo }: ChartSummaryProps) {
 
 function ChartPanel({
   title,
+  titleMeta,
   legend,
   children,
   className,
@@ -6169,6 +6177,7 @@ function ChartPanel({
   totalSummarySkeletonColumnCount = 1,
 }: {
   readonly title: string;
+  readonly titleMeta?: string;
   readonly legend: readonly ChartLegendItem[];
   readonly children: React.ReactNode;
   readonly className?: string;
@@ -6188,7 +6197,10 @@ function ChartPanel({
     <article className={`chart-panel${className ? ` ${className}` : ""}`}>
       <div className={`chart-head${summary ? " chart-head-with-summary" : ""}${legend.length ? "" : " chart-head-without-legend"}`}>
         <div className="chart-title">
-          <h2>{title}</h2>
+          <h2>
+            {title}
+            {titleMeta ? <span className="chart-title-meta"> · {titleMeta}</span> : null}
+          </h2>
           {headerActions || onInfo ? (
             <div className="chart-title-actions">
               {headerActions}
@@ -6537,15 +6549,19 @@ function ProductionExportChart({
   projection,
   launchDate,
   metadata,
+  capacityKwp,
   projectionIssue,
   fixedBarDensity = false,
+  onCapacityChange,
 }: {
   readonly rows: readonly MonthRow[];
   readonly projection?: ProductionProjection | null;
   readonly launchDate?: Date;
   readonly metadata?: PlantMetadata | null;
+  readonly capacityKwp?: number;
   readonly projectionIssue?: DataState["projectionIssue"];
   readonly fixedBarDensity?: boolean;
+  readonly onCapacityChange?: (capacity: string | undefined) => void;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
@@ -6571,7 +6587,6 @@ function ProductionExportChart({
           const exportPerformance = row.production
             ? `${formatNumber((exported / row.production) * 100, 2, 2)}%`
             : "";
-          const stage = projectionStageSummary(row, projection, metadata, launchDate, lang);
           return [
             row.month,
             {
@@ -6593,23 +6608,20 @@ function ProductionExportChart({
                   cells: [exportValue, exportPerformance],
                   color: colors.green,
                 },
-                ...(stage ? [
-                  {
-                    label: stage.isTransition ? t.capacityTransition : t.capacity,
-                    value: `${stage.modules} ${t.modules.toLocaleLowerCase()} · ${stage.capacity}`,
-                    cells: [`${stage.modules} ${t.modules.toLocaleLowerCase()} · ${stage.capacity}`, ""],
-                    color: colors.ink,
-                  },
-                ] : []),
               ],
             },
           ];
         }),
       ),
-    [displayRows, expectedByMonth, lang, launchDate, metadata, projection, t.actual, t.capacity, t.capacityTransition, t.export, t.expected, t.modules, t.performance, t.value],
+    [displayRows, expectedByMonth, lang, t.actual, t.export, t.expected, t.performance, t.value],
   );
   const latestRow = rows.at(-1);
   const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
+  const selectedRow = displayRows.find((row) => row.month === selectedKey);
+  const selectedCapacity = selectedRow
+    ? projectionCapacitySummary(selectedRow, projection, metadata, launchDate, capacityKwp, lang)
+    : undefined;
+  useEffect(() => onCapacityChange?.(selectedCapacity), [onCapacityChange, selectedCapacity]);
   const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
   const height = 300;
   const pad = { left: 40, right: 18, top: 18, bottom: 42 };
@@ -6720,31 +6732,24 @@ function ProductionExportChart({
   );
 }
 
-function projectionStageSummary(
+function projectionCapacitySummary(
   row: MonthRow,
   projection: ProductionProjection | null | undefined,
   metadata: PlantMetadata | null | undefined,
   launchDate: Date | undefined,
+  fallbackCapacityKwp: number | undefined,
   lang: Lang,
 ) {
   const daily = /^\d{4}-\d{2}-\d{2}$/.test(row.month);
   const end = daily ? row.date : new Date(row.date.getFullYear(), row.date.getMonth() + 1, 0);
   const start = launchDate && launchDate > row.date && launchDate <= end ? launchDate : row.date;
-  const startModules = projectionModulesForDate(start, projection, metadata);
-  const endModules = projectionModulesForDate(end, projection, metadata);
-  const startCapacity = projectionCapacityForDate(start, projection, metadata);
-  const endCapacity = projectionCapacityForDate(end, projection, metadata);
-  if (startModules === undefined || startCapacity === undefined) return undefined;
+  const startCapacity = projectionCapacityForDate(start, projection, metadata) ?? fallbackCapacityKwp;
+  const endCapacity = projectionCapacityForDate(end, projection, metadata) ?? fallbackCapacityKwp;
+  if (startCapacity === undefined) return undefined;
 
-  const isTransition = startModules !== endModules || startCapacity !== endCapacity;
-  const modules = isTransition && endModules !== undefined
-    ? `${formatNumber(startModules, 0, 0)} → ${formatNumber(endModules, 0, 0)}`
-    : formatNumber(startModules, 0, 0);
-  const capacity = isTransition && endCapacity !== undefined
+  return startCapacity !== endCapacity && endCapacity !== undefined
     ? `${formatKwp(startCapacity, lang)} → ${formatKwp(endCapacity, lang)}`
     : formatKwp(startCapacity, lang);
-
-  return { modules, capacity, isTransition };
 }
 
 interface FinanceRoiPoint {
@@ -7508,6 +7513,7 @@ function DailyDashboard({
   selectedRangeRoiPercent,
   launchDate,
   metadata,
+  capacityKwp,
   projection,
   projectionIssue,
   onUsdRateInfo,
@@ -7537,6 +7543,7 @@ function DailyDashboard({
   readonly selectedRangeRoiPercent: number;
   readonly launchDate?: Date;
   readonly metadata?: PlantMetadata | null;
+  readonly capacityKwp?: number;
   readonly projection?: ProductionProjection | null;
   readonly projectionIssue?: DataState["projectionIssue"];
   readonly onUsdRateInfo: () => void;
@@ -7551,6 +7558,7 @@ function DailyDashboard({
   readonly onExportPriceInfo: (row: MonthRow) => void;
   readonly onRoiValueInfo: (row: MonthRow) => void;
 }) {
+  const [productionCapacity, setProductionCapacity] = useState<string>();
   const selectedRows = rows;
   const chartRows = selectedRows;
   const totals = useMemo(() => selectedRows.reduce(
@@ -7612,6 +7620,7 @@ function DailyDashboard({
         <ChartPanel
           className="dashboard-chart-production"
           title={t.production}
+          titleMeta={productionCapacity}
           legend={[]}
           totalSummary={{
             month: t.totals,
@@ -7642,8 +7651,10 @@ function DailyDashboard({
             projection={projection}
             launchDate={launchDate}
             metadata={metadata}
+            capacityKwp={capacityKwp}
             projectionIssue={projectionIssue}
             fixedBarDensity
+            onCapacityChange={setProductionCapacity}
           />
         </ChartPanel>
         <ChartPanel
