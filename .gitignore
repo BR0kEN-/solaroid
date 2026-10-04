@@ -41,6 +41,7 @@
 
 !supabase/config.toml
 !supabase/functions/ingest/**
+!supabase/manual/*.sql
 !supabase/migrations/*.sql
 
 **/.DS_Store

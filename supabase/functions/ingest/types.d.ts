@@ -44,6 +44,8 @@ declare global {
       }
 
       namespace Pv {
+        type ChangeType = 'commissioning' | Spending.Type
+
         interface Field {
           readonly id?: string
           readonly modules?: number
@@ -96,7 +98,7 @@ declare global {
           readonly id: number
           readonly plant_id: Id
           readonly date: Date.Ymd
-          readonly type: Spending.Type
+          readonly type: ChangeType
           readonly spending_id: number | null
           readonly operations: readonly ChangeOperation[]
         }

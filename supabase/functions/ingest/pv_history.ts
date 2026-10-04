@@ -1,4 +1,4 @@
-import { HistoricalPanel, PvChangeOperations } from './schema.ts'
+import { PvChangeOperations } from './schema.ts'
 
 export interface PvConfigurationStage {
   readonly effectiveDate: Solaroid.Supabase.Date.Ymd
@@ -8,45 +8,64 @@ export interface PvConfigurationStage {
 
 export class InvalidPvHistoryError extends Error {}
 
+export function comparePvChanges(
+  first: Solaroid.Supabase.Plant.Pv.ChangeRecord,
+  second: Solaroid.Supabase.Plant.Pv.ChangeRecord,
+) {
+  const dateOrder = first.date.localeCompare(second.date)
+  if (dateOrder) return dateOrder
+  if (first.type === 'commissioning' && second.type !== 'commissioning') return -1
+  if (second.type === 'commissioning' && first.type !== 'commissioning') return 1
+  return first.id - second.id
+}
+
 export function reconstructPvConfigurationStages(
-  metadata: Solaroid.Supabase.Plant.Metadata,
   launchDate: Solaroid.Supabase.Date.Ymd,
   changes: readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[],
 ): readonly PvConfigurationStage[] {
-  if (!changes.length) return []
-
-  const currentFields = parseCurrentFields(metadata)
   const orderedChanges = [...changes]
     .map((change) => ({
       ...change,
       operations: parseOperations(change.operations),
     }))
-    .sort((first, second) => first.date.localeCompare(second.date) || first.id - second.id)
+    .sort(comparePvChanges)
+
+  const commissioningEvents = orderedChanges.filter((change) => change.type === 'commissioning')
+  if (commissioningEvents.length !== 1) {
+    throw new InvalidPvHistoryError('PV history requires exactly one commissioning event')
+  }
+  if (orderedChanges[0]?.id !== commissioningEvents[0].id) {
+    throw new InvalidPvHistoryError('PV commissioning must be the first event')
+  }
 
   for (const change of orderedChanges) {
     if (change.date < launchDate) {
       throw new InvalidPvHistoryError(`PV change ${change.id} predates plant launch`)
+    }
+    if (change.type === 'commissioning') {
+      if (change.date !== launchDate) {
+        throw new InvalidPvHistoryError('PV commissioning date must match plant launch date')
+      }
+      if (change.spending_id !== null) {
+        throw new InvalidPvHistoryError('PV commissioning cannot link to spending')
+      }
+      if (change.operations.some((operation) => operation.kind !== 'add_field')) {
+        throw new InvalidPvHistoryError('PV commissioning may only add fields')
+      }
     }
     if (change.type === 'improvement' && change.operations.some(isCapacityReduction)) {
       throw new InvalidPvHistoryError(`Improvement PV change ${change.id} cannot reduce capacity`)
     }
   }
 
-  let fields = cloneFields(currentFields)
-  for (const change of [...orderedChanges].reverse()) {
-    for (const operation of [...change.operations].reverse()) {
-      fields = undoOperation(fields, operation)
-      assertHistoricalConfiguration(fields, true)
-    }
-  }
-  assertHistoricalConfiguration(fields)
-
-  const stages: PvConfigurationStage[] = [{ effectiveDate: launchDate, fields: cloneFields(fields) }]
+  let fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[] = []
+  const stages: PvConfigurationStage[] = []
   for (const change of orderedChanges) {
     for (const operation of change.operations) {
       fields = applyOperation(fields, operation)
       assertHistoricalConfiguration(fields, true)
     }
+    if (change.type === 'commissioning') assertHistoricalConfiguration(fields)
     stages.push({
       effectiveDate: change.date,
       ...(change.spending_id === null ? {} : { spendingId: change.spending_id }),
@@ -54,70 +73,13 @@ export function reconstructPvConfigurationStages(
     })
   }
 
-  if (normalizedFields(fields) !== normalizedFields(currentFields)) {
-    throw new InvalidPvHistoryError('PV changes do not reconstruct current plant metadata')
-  }
-
   return stages
-}
-
-function parseCurrentFields(metadata: Solaroid.Supabase.Plant.Metadata) {
-  const parsed = HistoricalPanel.array().safeParse(metadata.pvs)
-  if (!parsed.success) {
-    throw new InvalidPvHistoryError('Current PV fields require id and modules')
-  }
-  assertUniqueIds(parsed.data)
-  return parsed.data
 }
 
 function parseOperations(operations: readonly Solaroid.Supabase.Plant.Pv.ChangeOperation[]) {
   const parsed = PvChangeOperations.safeParse(operations)
   if (!parsed.success) throw new InvalidPvHistoryError('PV change operations are invalid')
   return parsed.data
-}
-
-function undoOperation(
-  fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[],
-  operation: Solaroid.Supabase.Plant.Pv.ChangeOperation,
-) {
-  if (operation.kind === 'add_field') {
-    const field = fields.find((candidate) => candidate.id === operation.field.id)
-    if (!field) {
-      throw new InvalidPvHistoryError(`Added PV field ${operation.field.id} is missing from current metadata`)
-    }
-    if (normalizedFields([field]) !== normalizedFields([operation.field])) {
-      throw new InvalidPvHistoryError(`Added PV field ${operation.field.id} does not match its recorded configuration`)
-    }
-    return fields.filter((field) => field.id !== operation.field.id)
-  }
-
-  if (operation.kind === 'remove_field') {
-    if (fields.some((field) => field.id === operation.field.id)) {
-      throw new InvalidPvHistoryError(`Removed PV field ${operation.field.id} still exists after its event`)
-    }
-    return [...fields, { ...operation.field }]
-  }
-
-  const field = fields.find((candidate) => candidate.id === operation.field_id)
-  if (!field) throw new InvalidPvHistoryError(`PV field ${operation.field_id} does not exist`)
-
-  if (operation.kind === 'decrease_field') {
-    return fields.map((candidate) => candidate.id === operation.field_id
-      ? {
-        ...candidate,
-        modules: candidate.modules + operation.modules_removed,
-        power: candidate.power + operation.power_removed_w,
-      }
-      : candidate)
-  }
-
-  const modules = field.modules - operation.modules_added
-  const power = field.power - operation.power_added_w
-  if (modules <= 0 || power <= 0) {
-    throw new InvalidPvHistoryError(`PV field ${operation.field_id} has invalid historical capacity`)
-  }
-
-  return fields.map((candidate) => candidate.id === operation.field_id ? { ...candidate, modules, power } : candidate)
 }
 
 function applyOperation(
