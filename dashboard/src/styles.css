@@ -4223,6 +4223,10 @@ h2 {
   table-layout: fixed;
 }
 
+.production-capacity-inspector {
+  margin-top: 0;
+}
+
 .production-capacity-table thead th:first-child,
 .production-capacity-table tbody th:first-child {
   width: 34%;
@@ -4231,18 +4235,6 @@ h2 {
 .production-capacity-table thead th:not(:first-child),
 .production-capacity-table tbody td {
   width: 33%;
-}
-
-.production-capacity-table thead th {
-  color: var(--text);
-  font-size: var(--fs-xs);
-  font-weight: 700;
-}
-
-.production-capacity-table tbody th {
-  color: var(--muted);
-  font-size: var(--fs-base);
-  font-weight: 600;
 }
 
 .production-capacity-value {
@@ -4288,19 +4280,9 @@ h2 {
 }
 
 .production-setup-card {
-  display: grid;
-  gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-}
-
-.production-setup-card > strong {
-  color: var(--text);
-  font-size: var(--fs-base);
-  line-height: 1.35;
+  margin-top: 0;
 }
 
 .production-setup-table {
@@ -4315,27 +4297,6 @@ h2 {
 .production-setup-table thead th:not(:first-child),
 .production-setup-table tbody td {
   width: 35%;
-}
-
-.production-setup-table thead th {
-  color: var(--text);
-  font-size: var(--fs-xs);
-  font-weight: 700;
-}
-
-.production-setup-table tbody th {
-  color: var(--muted);
-  font-size: var(--fs-base);
-  font-weight: 600;
-}
-
-.production-setup-table tbody td {
-  color: var(--text);
-  font-size: var(--fs-base);
-  font-weight: 700;
-  line-height: 1.35;
-  text-align: right;
-  overflow-wrap: anywhere;
 }
 
 .production-setup-map-link {

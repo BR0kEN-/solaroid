@@ -147,6 +147,18 @@ describe('Supabase data mapping', () => {
         ...plant,
         capacity_kwp: 11.16,
         modules: 32,
+        pvs: [{
+          id: 'south',
+          modules: 32,
+          power: 11_160,
+          azimuth: 155,
+          slope: 35,
+          elevation: 78,
+          lat: 48.3355,
+          lng: 35.0425,
+          loss: 10,
+          mounting: 'building',
+        }],
       },
       months: [],
       days: [],
@@ -157,6 +169,7 @@ describe('Supabase data mapping', () => {
 
     expect(loaded.capacityKwp).toBe(11.16)
     expect(loaded.modules).toBe(32)
+    expect(loaded.pvs).toEqual([{ id: 'south', modules: 32, power: 11_160, azimuth: 155, slope: 35, elevation: 78, lat: 48.3355, lng: 35.0425, loss: 10, mounting: 'building' }])
     expect(loaded.projection).toEqual({
       ...projection,
       periods: [{

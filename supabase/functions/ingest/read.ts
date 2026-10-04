@@ -28,13 +28,15 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
   }
 
   const granularity = params.get('granularity')
+  const includePrivateData = plantId === token.plant_id
+  const includeLocation = (token.kind === 'ingest' && includePrivateData) || token.reads[plantId]?.includes('loc') === true
 
   if (granularity) {
-    return client.getPlantDataForGranularity(plantId, granularity, plantId === token.plant_id)
+    return client.getPlantDataForGranularity(plantId, granularity, includePrivateData, includeLocation)
   }
 
   return {
-    ...await client.getPlant(plantId, plantId === token.plant_id),
+    ...await client.getPlant(plantId, includePrivateData, includeLocation),
     reads: token.reads,
   }
 }

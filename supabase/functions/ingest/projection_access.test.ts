@@ -30,24 +30,46 @@ const projection: Solaroid.Supabase.Pvgis.Projection = {
   ],
 }
 
-Deno.test('own plant projection keeps spending linkage and derived capacity', () => {
+const fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[] = [{
+  id: 'south',
+  modules: 32,
+  power: 13_120,
+  azimuth: 180,
+  slope: 30,
+  elevation: 120,
+  lat: 48.45,
+  lng: 34.98,
+  loss: 14,
+  mounting: 'building',
+}]
+
+Deno.test('own plant projection keeps spending linkage, derived capacity, and location', () => {
   const visibleProjection = projectionForAccess(projection, true)
-  const visiblePlant = plantForAccess(plant, projection)
+  const visiblePlant = plantForAccess(plant, projection, fields, true)
 
   if (visibleProjection?.periods?.[1].spendingId !== 7) throw new Error('spending linkage should remain visible')
   if (visiblePlant.capacity_kwp !== 13.12 || visiblePlant.modules !== 32) {
     throw new Error('own plant should receive current capacity from projection events')
   }
+  if (visiblePlant.pvs?.[0].lat !== 48.45 || visiblePlant.pvs?.[0].lng !== 34.98) {
+    throw new Error('location access should retain current field coordinates')
+  }
 })
 
-Deno.test('comparison projection exposes capacity but strips spending linkage', () => {
+Deno.test('comparison projection exposes field setup but strips spending linkage and coordinates without loc', () => {
   const visibleProjection = projectionForAccess(projection, false)
-  const visiblePlant = plantForAccess(plant, projection)
+  const visiblePlant = plantForAccess(plant, projection, fields, false)
 
   if (visibleProjection?.periods?.some((period) => period.spendingId !== undefined)) {
     throw new Error('spending linkage should be private')
   }
   if (visiblePlant.capacity_kwp !== 13.12 || visiblePlant.modules !== 32) throw new Error('derived capacity should remain visible')
+  if (visiblePlant.pvs?.[0].power !== 13_120 || visiblePlant.pvs?.[0].modules !== 32) {
+    throw new Error('current field setup should remain visible')
+  }
+  if (visiblePlant.pvs?.[0].lat !== undefined || visiblePlant.pvs?.[0].lng !== undefined) {
+    throw new Error('coordinates should be omitted without loc access')
+  }
 })
 
 Deno.test('PVGIS cache input is order-stable and changes with launch or operations', () => {

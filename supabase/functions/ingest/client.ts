@@ -5,6 +5,12 @@ import { comparePvChanges, InvalidPvHistoryError, reconstructPvConfigurationStag
 import { hash } from './utils/crypto.ts'
 import { dateUtil } from './utils/date.ts'
 
+interface PvgisProjectionResult {
+  readonly projection: Solaroid.Supabase.Pvgis.Projection | null
+  readonly fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[]
+  readonly issue?: 'invalid-history'
+}
+
 function toReads(
   input: readonly { readonly plant_id: Solaroid.Supabase.Plant.Id, scopes: Solaroid.Supabase.Access.Scope[] }[],
 ): Solaroid.Supabase.Access.Reads {
@@ -244,7 +250,11 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     if (error) throw new Error('DAM price upsert failed', { cause: error })
   }
 
-  async getPlant(plantId: Solaroid.Supabase.Plant.Id, includePrivateData = true) {
+  async getPlant(
+    plantId: Solaroid.Supabase.Plant.Id,
+    includePrivateData = true,
+    includeLocation = includePrivateData,
+  ) {
     const plant = await this.#getPlant(plantId)
     const [days, months, tariffs, spendings, pvChanges] = await Promise.all([
       this.#getPlantRows(plantId, 'days'),
@@ -256,7 +266,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     const projectionResult = await this.#getPvgisProjection(plant, pvChanges)
 
     return {
-      plant: plantForAccess(plant, projectionResult.projection),
+      plant: plantForAccess(plant, projectionResult.projection, projectionResult.fields, includeLocation),
       days,
       tariffs,
       projection: projectionForAccess(projectionResult.projection, includePrivateData),
@@ -280,6 +290,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     plantId: Solaroid.Supabase.Plant.Id,
     granularity: Solaroid.Supabase.Date.Granularity,
     includePrivateData = false,
+    includeLocation = includePrivateData,
   ) {
     let table: string
     let range: Solaroid.Supabase.Date.Range
@@ -310,7 +321,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     const projectionResult = await this.#getPvgisProjection(plant, pvChanges)
 
     return {
-      plant: plantForAccess(plant, projectionResult.projection),
+      plant: plantForAccess(plant, projectionResult.projection, projectionResult.fields, includeLocation),
       records,
       tariffs,
       projection: projectionForAccess(projectionResult.projection, includePrivateData),
@@ -389,15 +400,17 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
   async #getPvgisProjection(
     plant: Solaroid.Supabase.Plant.Record,
     changes: readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[],
-  ): Promise<{ readonly projection: Solaroid.Supabase.Pvgis.Projection | null, readonly issue?: 'invalid-history' }> {
+  ): Promise<PvgisProjectionResult> {
     let stages
     try {
       stages = reconstructPvConfigurationStages(plant.launch_date, changes)
     } catch (error) {
       if (!(error instanceof InvalidPvHistoryError)) throw error
       console.error('PV configuration history is invalid', { operation: error.message })
-      return { projection: null, issue: 'invalid-history' }
+      return { projection: null, fields: [], issue: 'invalid-history' }
     }
+
+    const fields = stages.at(-1)?.fields ?? []
 
     const currentHash = await hash(pvgisProjectionCacheInput(plant, changes))
     const { data: cache, error: cacheError } = await this.client
@@ -407,11 +420,13 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
       .maybeSingle()
 
     if (cacheError) throw new Error('PVGIS projection cache lookup failed', { cause: cacheError })
-    if (isPvgisProjectionCacheHit(cache?.metadata_hash, currentHash)) return { projection: cache?.projection ?? null }
+    if (isPvgisProjectionCacheHit(cache?.metadata_hash, currentHash)) {
+      return { projection: cache?.projection ?? null, fields }
+    }
 
     const projection = await projectionForStages(stages)
 
-    if (!projection) return { projection: null }
+    if (!projection) return { projection: null, fields }
 
     const { error: upsertError } = await this.client
       .from('plant_pvgis_projections')
@@ -423,7 +438,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
 
     if (upsertError) throw new Error('PVGIS projection cache upsert failed', { cause: upsertError })
 
-    return { projection }
+    return { projection, fields }
   }
 }
 
@@ -482,12 +497,24 @@ export function projectionForAccess(
 export function plantForAccess(
   plant: Solaroid.Supabase.Plant.Record,
   projection: Solaroid.Supabase.Pvgis.Projection | null,
+  fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[],
+  includeLocation: boolean,
 ): Solaroid.Supabase.Plant.Record {
   const latestPeriod = projection?.periods?.at(-1)
+  const capacityKwp = latestPeriod?.capacityKwp ?? fields.reduce((sum, field) => sum + field.power, 0) / 1000
+  const modules = latestPeriod?.modules ?? fields.reduce((sum, field) => sum + field.modules, 0)
+  const pvs = fields.map((field) => {
+    if (includeLocation) return field
+
+    const { lat: _lat, lng: _lng, ...accessibleField } = field
+    return accessibleField
+  })
 
   return {
     ...plant,
-    ...(latestPeriod ? { capacity_kwp: latestPeriod.capacityKwp, modules: latestPeriod.modules } : {}),
+    ...(latestPeriod || capacityKwp > 0 ? { capacity_kwp: capacityKwp } : {}),
+    ...(latestPeriod || modules > 0 ? { modules } : {}),
+    pvs,
   }
 }
 
