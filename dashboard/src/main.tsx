@@ -37,10 +37,7 @@ import {
   importCostBreakdown,
   investmentUsdRateForDate,
   normalizedProductionPerformance,
-  projectionCapacityForDate,
   projectionCapacityRangeForRow,
-  projectionModulesForDate,
-  productionProjectionTransitionsForSpending,
   projectConsumptionWithoutPlant,
   repriceMonthRow,
   regularImportDayPrice,
@@ -49,7 +46,7 @@ import {
   totalInvestmentMoney,
   type ImportCostBreakdown,
 } from "./domain/formulas";
-import type { DataState, LoadedData, MonthRow, PlantComparison, PlantMetadata, PlantSpending, ProductionProjection, PvMetadata, Tariff } from "./domain/types";
+import type { DataState, LoadedData, MonthRow, PlantComparison, PlantSpending, ProductionProjection, Tariff } from "./domain/types";
 import { PdfPreview } from "./PdfPreview";
 import {
   EMPTY_CALCULATION_LINK_STATE,
@@ -152,8 +149,6 @@ interface PortalUser {
 
 interface PortalPlant {
   readonly id: string;
-  readonly domain?: string | null;
-  readonly metadata?: PlantMetadata | null;
 }
 
 interface PortalAuthResponse {
@@ -197,7 +192,6 @@ interface PortalCopy {
   readonly signOut: string;
   readonly loading: string;
   readonly switchPlant: string;
-  readonly missingDomain: string;
   readonly configMissing: string;
   readonly sessionExpired: string;
   readonly retry: string;
@@ -893,7 +887,6 @@ const portalCopy: Record<Lang, PortalCopy> = {
     signOut: "Sign out",
     loading: "Loading",
     switchPlant: "Switch plant",
-    missingDomain: "Plant domain is missing. Add plants.domain in Supabase.",
     configMissing: "Portal config is missing.",
     sessionExpired: "Session expired. Sign in again.",
     retry: "Retry",
@@ -923,7 +916,6 @@ const portalCopy: Record<Lang, PortalCopy> = {
     signOut: "Вийти",
     loading: "Завантаження",
     switchPlant: "Змінити станцію",
-    missingDomain: "У станції немає домену. Додайте plants.domain у Supabase.",
     configMissing: "Немає конфігурації порталу.",
     sessionExpired: "Сесію завершено. Увійдіть ще раз.",
     retry: "Повторити",
@@ -1173,99 +1165,6 @@ function comparisonDisplayDelta(value: number, invertSign?: boolean) {
   return invertSign ? -value : value;
 }
 
-interface PvFieldPair {
-  readonly first?: PvMetadata;
-  readonly second?: PvMetadata;
-}
-
-function azimuthDistance(first: number, second: number) {
-  const diff = Math.abs(first - second) % 360;
-  return Math.min(diff, 360 - diff);
-}
-
-function pairPvFieldsByAzimuth(firstFields: readonly PvMetadata[], secondFields: readonly PvMetadata[]): readonly PvFieldPair[] {
-  const firstSorted = [...firstFields].sort((a, b) => a.azimuth - b.azimuth);
-  const remainingSecond = [...secondFields].sort((a, b) => a.azimuth - b.azimuth);
-  const pairs: PvFieldPair[] = [];
-
-  for (const first of firstSorted) {
-    let matchIndex = -1;
-    let matchDistance = Number.POSITIVE_INFINITY;
-
-    remainingSecond.forEach((second, index) => {
-      const distance = azimuthDistance(first.azimuth, second.azimuth);
-      if (distance < matchDistance) {
-        matchDistance = distance;
-        matchIndex = index;
-      }
-    });
-
-    const second = matchIndex >= 0 ? remainingSecond.splice(matchIndex, 1)[0] : undefined;
-    pairs.push({ first, second });
-  }
-
-  remainingSecond.forEach((second) => pairs.push({ second }));
-
-  return pairs.sort((a, b) => (a.first?.azimuth ?? a.second?.azimuth ?? 0) - (b.first?.azimuth ?? b.second?.azimuth ?? 0));
-}
-
-function averageCoordinate(fields: readonly PvMetadata[]) {
-  const valid = fields.filter((field) => Number.isFinite(field.lat) && Number.isFinite(field.lng));
-  if (!valid.length) return undefined;
-  return {
-    lat: valid.reduce((sum, field) => sum + field.lat, 0) / valid.length,
-    lng: valid.reduce((sum, field) => sum + field.lng, 0) / valid.length,
-  };
-}
-
-function distanceKm(
-  first?: { readonly lat: number; readonly lng: number },
-  second?: { readonly lat: number; readonly lng: number },
-) {
-  if (!first || !second) return undefined;
-  const toRad = (value: number) => (value * Math.PI) / 180;
-  const earthKm = 6371;
-  const dLat = toRad(second.lat - first.lat);
-  const dLng = toRad(second.lng - first.lng);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(first.lat)) * Math.cos(toRad(second.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * earthKm * Math.asin(Math.sqrt(a));
-}
-
-function formatPvDistance(firstFields: readonly PvMetadata[], secondFields: readonly PvMetadata[]) {
-  const km = distanceKm(averageCoordinate(firstFields), averageCoordinate(secondFields));
-  if (km === undefined) return undefined;
-  if (km < 1) return `${formatNumber(km * 1000, 0, 0)} m`;
-  return `${formatNumber(km, 1, 1)} km`;
-}
-
-function formatPvFieldValue(field: PvMetadata | undefined, row: "power" | "mounting" | "azimuth" | "slope" | "location" | "elevation", lang: Lang, allowLocation = true) {
-  if (!field) return "—";
-  if (row === "power") return formatKwp(field.power / 1000, lang);
-  if (row === "mounting") return formatMounting(field.mounting, lang);
-  if (row === "azimuth") return `${formatNumber(field.azimuth, 0, 0)}°`;
-  if (row === "slope") return `${formatNumber(field.slope, 0, 0)}°`;
-  if (row === "location") {
-    if (!allowLocation) return "—";
-
-    return (
-      <a
-        className="production-setup-map-link"
-        href={`https://www.google.com/maps?q=${field.lat},${field.lng}`}
-        target="_blank"
-        rel="noreferrer"
-      >
-        <span>{formatNumber(field.lat, 6, 4)}</span>
-        <span>{formatNumber(field.lng, 6, 4)}</span>
-      </a>
-    );
-  }
-  return `${formatNumber(field.elevation, 0, 0)} m`;
-}
-
-function hasLocationScope(scopes: readonly string[] | undefined) {
-  return scopes?.includes("loc") ?? false;
-}
-
 function ProductionCapacityInfo({
   firstLabel,
   secondLabel,
@@ -1275,10 +1174,6 @@ function ProductionCapacityInfo({
   secondCapacity,
   firstExpected,
   secondExpected,
-  firstMetadata,
-  secondMetadata,
-  firstScopes,
-  secondScopes,
   lang,
 }: {
   readonly firstLabel: string;
@@ -1289,10 +1184,6 @@ function ProductionCapacityInfo({
   readonly secondCapacity?: number;
   readonly firstExpected?: number;
   readonly secondExpected?: number;
-  readonly firstMetadata?: PlantMetadata | null;
-  readonly secondMetadata?: PlantMetadata | null;
-  readonly firstScopes?: readonly string[];
-  readonly secondScopes?: readonly string[];
   readonly lang: Lang;
 }) {
   const capacityPct = firstCapacity && secondCapacity ? capacityDeltaPct(firstCapacity, secondCapacity) : undefined;
@@ -1312,21 +1203,6 @@ function ProductionCapacityInfo({
   const capacityNote = lang === "uk"
     ? "Для періоду зі зміною конфігурації потужність зважена за активними календарними днями."
     : "For a period spanning an upgrade, capacity is weighted by active calendar days.";
-  const firstFields = firstMetadata?.pvs ?? [];
-  const secondFields = secondMetadata?.pvs ?? [];
-  const setupPairs = pairPvFieldsByAzimuth(firstFields, secondFields);
-  const canShowFirstLocation = hasLocationScope(firstScopes);
-  const canShowSecondLocation = hasLocationScope(secondScopes);
-  const setupDistance = canShowFirstLocation && canShowSecondLocation && setupPairs.length ? formatPvDistance(firstFields, secondFields) : undefined;
-  const setupRows: readonly (readonly [string, Parameters<typeof formatPvFieldValue>[1]])[] = [
-    [lang === "uk" ? "Потужність" : "Capacity", "power"],
-    [lang === "uk" ? "Монтаж" : "Mounting", "mounting"],
-    [lang === "uk" ? "Азимут" : "Azimuth", "azimuth"],
-    [lang === "uk" ? "Нахил" : "Tilt", "slope"],
-    [lang === "uk" ? "Висота" : "Elevation", "elevation"],
-    ...(canShowFirstLocation || canShowSecondLocation ? [[lang === "uk" ? "Локація" : "Location", "location"] as const] : []),
-  ];
-
   return (
     <div className="info-stack">
       <table className="price-comparison-table production-capacity-table">
@@ -1390,41 +1266,6 @@ function ProductionCapacityInfo({
           </div>
         </section>
       </div>
-      {setupPairs.length > 0 && (
-        <section className="production-setup">
-          <strong>{lang === "uk" ? "Налаштування масивів" : "Array setup"}</strong>
-          <div className="production-setup-scroller">
-            {setupPairs.map((pair, index) => (
-              <section className="production-setup-card" key={index}>
-                <table className="price-comparison-table production-setup-table">
-                  <thead>
-                    <tr>
-                      <th>{lang === "uk" ? `Масив ${index + 1}` : `Array ${index + 1}`}</th>
-                      <th>{firstLabel}</th>
-                      <th>{secondLabel}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {setupRows.map(([label, row]) => (
-                      <tr key={row}>
-                        <th>{label}</th>
-                        <td>{formatPvFieldValue(pair.first, row, lang, row !== "location" || canShowFirstLocation)}</td>
-                        <td>{formatPvFieldValue(pair.second, row, lang, row !== "location" || canShowSecondLocation)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-            ))}
-          </div>
-          {setupDistance && (
-            <div className="production-capacity-card-row production-setup-distance">
-              <span>{lang === "uk" ? "Відстань між станціями" : "Plant distance"}</span>
-              <b>{setupDistance}</b>
-            </div>
-          )}
-        </section>
-      )}
     </div>
   );
 }
@@ -1572,15 +1413,6 @@ function useDesktopChartEndScroll(
 function projectedProduction(row: MonthRow, projection?: ProductionProjection | null, launchDate?: Date) {
   const value = expectedProductionForRow(row, projection, launchDate);
   return value !== undefined && Number.isFinite(value) ? value : undefined;
-}
-
-function formatMounting(value: string, lang: Lang) {
-  if (lang !== "uk") return value;
-  const mounting: Record<string, string> = {
-    building: "на будівлі",
-    free: "на землі",
-  };
-  return mounting[value] ?? value;
 }
 
 function pct(value: number) {
@@ -1910,13 +1742,11 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
     readablePlantScopes: initialData?.readablePlantScopes ?? {},
     scopes: initialData?.scopes ?? [],
     plantId: initialData?.plantId ?? "",
-    investmentUsd: initialData?.investmentUsd ?? 0,
     capacityKwp: initialData?.capacityKwp,
     modules: initialData?.modules,
     spendings: initialData?.spendings ?? [],
     launchDate: initialData?.launchDate,
     commercialDate: initialData?.commercialDate,
-    metadata: initialData?.metadata,
     projection: initialData?.projection,
     projectionIssue: initialData?.projectionIssue,
     sheetUpdatedAt: initialData?.sheetUpdatedAt,
@@ -1961,12 +1791,10 @@ interface PlantComparisonSource {
   readonly rows: readonly MonthRow[];
   readonly dailyRows: readonly MonthRow[];
   readonly scopes: readonly string[];
-  readonly investmentUsd: number;
   readonly capacityKwp?: number;
   readonly modules?: number;
   readonly launchDate?: Date;
   readonly commercialDate?: Date;
-  readonly metadata?: PlantMetadata | null;
   readonly projection?: ProductionProjection | null;
   readonly projectionIssue?: DataState["projectionIssue"];
   readonly sheetUpdatedAt?: Date;
@@ -1978,12 +1806,10 @@ function toPlantComparison(source: PlantComparisonSource): PlantComparison {
     rows: source.rows,
     dailyRows: source.dailyRows,
     scopes: source.scopes,
-    investmentUsd: source.investmentUsd,
     capacityKwp: source.capacityKwp,
     modules: source.modules,
     launchDate: source.launchDate,
     commercialDate: source.commercialDate,
-    metadata: source.metadata,
     projection: source.projection,
     projectionIssue: source.projectionIssue,
     sheetUpdatedAt: source.sheetUpdatedAt,
@@ -2222,9 +2048,7 @@ function App({
   const activePlantComparison = useMemo<PlantComparison>(() => toPlantComparison(dataState), [
     dataState.commercialDate,
     dataState.dailyRows,
-    dataState.investmentUsd,
     dataState.launchDate,
-    dataState.metadata,
     dataState.plantId,
     dataState.projection,
     dataState.rows,
@@ -2515,8 +2339,6 @@ function App({
     const payments = rows.reduce((sum, row) => sum + row.electricityPayment, 0);
     const paymentsDisplay = sumRowsFromUah(rows, (row) => row.electricityPayment, monthlyCurrency);
     const launchDate = dataState.launchDate ?? rows[0]?.date;
-    const usdRate = latest?.usdRate || [...rows].reverse().find((row) => row.usdRate > 0)?.usdRate || 1;
-    const launchUsdRate = launchDate ? monthlySourceRows.find((row) => sameMonth(row.date, launchDate))?.usdRate || usdRate : usdRate;
     return {
       latest,
       production,
@@ -2540,22 +2362,18 @@ function App({
       payments,
       paymentsDisplay,
       launchDate,
-      usdRate,
-      launchUsdRate,
     };
   }, [dataState.launchDate, monthlyCurrency, monthlySourceRows, rows]);
 
   const investmentByMonth = useMemo(() => new Map(rows.map((row) => [
     row.month,
     totalInvestmentMoney({
-      initialInvestmentUsd: dataState.investmentUsd,
-      launchUsdRate: totals.launchUsdRate,
       spendings: dataState.spendings,
       currency: monthlyCurrency,
       spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
       throughMonth: row.date,
     }),
-  ] as const)), [dataState.investmentUsd, dataState.spendings, monthlyCurrency, rows, spendingUsdRateById, totals.launchUsdRate]);
+  ] as const)), [dataState.spendings, monthlyCurrency, rows, spendingUsdRateById]);
 
   const cumulativeRoiPercent = useMemo(() => {
     const latestRow = rows.at(-1);
@@ -2566,14 +2384,12 @@ function App({
   const dailyInvestmentByDay = useMemo(() => new Map(dailyRows.map((row) => [
     row.month,
     totalInvestmentMoney({
-      initialInvestmentUsd: dataState.investmentUsd,
-      launchUsdRate: totals.launchUsdRate,
       spendings: dataState.spendings,
       currency: dailyCurrency,
       spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
       throughMonth: row.date,
     }),
-  ] as const)), [dailyCurrency, dailyRows, dataState.investmentUsd, dataState.spendings, spendingUsdRateById, totals.launchUsdRate]);
+  ] as const)), [dailyCurrency, dailyRows, dataState.spendings, spendingUsdRateById]);
 
   const dailyRangeRoiPercent = useMemo(() => {
     const latestRow = dailyRows.at(-1);
@@ -2585,14 +2401,12 @@ function App({
   const payback = useMemo(() => {
     return calculatePayback({
       rows,
-      investmentUsd: dataState.investmentUsd,
       currency: monthlyCurrency,
-      launchUsdRate: totals.launchUsdRate,
       launchDate: totals.launchDate,
       spendings: dataState.spendings,
       spendingUsdRate: (spending) => spendingUsdRateById.get(spending.id) ?? 1,
     });
-  }, [dataState.investmentUsd, dataState.spendings, monthlyCurrency, rows, spendingUsdRateById, totals.launchDate, totals.launchUsdRate]);
+  }, [dataState.spendings, monthlyCurrency, rows, spendingUsdRateById, totals.launchDate]);
 
   const forecast = useMemo(() => {
     if (dataState.projectionIssue === "invalid-history") return null;
@@ -2969,7 +2783,6 @@ function App({
       };
     }
     if (infoModal === "investmentDetails") {
-      const fields = dataState.metadata?.pvs ?? [];
       return {
         title: t.plantInformation,
         body: (
@@ -3021,32 +2834,10 @@ function App({
               <InvestmentBreakdown
                 t={t}
                 lang={lang}
-                initialInvestmentUsd={dataState.investmentUsd}
-                launchDate={dataState.launchDate}
-                launchUsdRate={totals.launchUsdRate}
                 spendings={dataState.spendings}
                 spendingUsdRateById={spendingUsdRateById}
-                metadata={dataState.metadata}
-                projection={dataState.projection}
               />
             </section>
-            {fields.length > 0 ? (
-              <section className="info-modal-section">
-                <h3>{t.pvgisFields} ({fields.length})</h3>
-                <div className="info-stack">
-                  {fields.map((field, index) => (
-                    <PvSpecTable
-                      field={field}
-                      t={t}
-                      lang={lang}
-                      showLocation={hasLocationScope(dataState.scopes)}
-                      title={lang === "uk" ? `Поле ${index + 1}` : `Field ${index + 1}`}
-                      key={`${field.azimuth}-${field.power}-${index}`}
-                    />
-                  ))}
-                </div>
-              </section>
-            ) : null}
           </div>
         ),
       };
@@ -3309,10 +3100,7 @@ function App({
     currency,
     dataState.commercialDate,
     dataState.dailyRows,
-    dataState.investmentUsd,
     dataState.launchDate,
-    dataState.metadata,
-    dataState.scopes,
     dataState.spendings,
     commercialEndRecovery,
     forecast,
@@ -3329,7 +3117,6 @@ function App({
     totals.imported,
     totals.importedDay,
     totals.importedNight,
-    totals.launchUsdRate,
     totals.production,
     totals.productionSoldDisplay,
     totals.consumed,
@@ -3425,7 +3212,6 @@ function App({
             dailyInvestmentByDay,
             dailyRangeRoiPercent,
             dataState.launchDate,
-            dataState.metadata,
             dataState.capacityKwp,
             dataState.projection,
             dataState.projectionIssue,
@@ -3448,7 +3234,6 @@ function App({
               investmentByDay={dailyInvestmentByDay}
               selectedRangeRoiPercent={dailyRangeRoiPercent}
               launchDate={dataState.launchDate}
-              metadata={dataState.metadata}
               capacityKwp={dataState.capacityKwp}
               projection={dataState.projection}
               projectionIssue={dataState.projectionIssue}
@@ -3634,7 +3419,6 @@ function App({
                 rows={rows}
                 projection={productionProjection}
                 launchDate={dataState.launchDate}
-                metadata={dataState.metadata}
                 capacityKwp={dataState.capacityKwp}
                 projectionIssue={dataState.projectionIssue}
                 fixedBarDensity
@@ -5134,7 +4918,7 @@ async function getPortalPlants(apiUrl: string, accessToken: string, t: PortalCop
   if (!accessToken) throw new Error(t.sessionExpired);
 
   const url = new URL(apiUrl);
-  url.searchParams.set("metadata", "1");
+  url.searchParams.set("plants", "1");
 
   const response = await fetch(url, {
     headers: {
@@ -5601,13 +5385,11 @@ function PlantPeriodComparisonCharts({
 
   const periodPlants = plants.map((plant) => ({
     plantId: plant.plantId,
-    metadata: plant.metadata,
     projection: plant.projection,
     projectionIssue: plant.projectionIssue,
     launchDate: plant.launchDate,
     capacityKwp: plant.capacityKwp,
     modules: plant.modules,
-    scopes: plant.scopes,
     rows:
       mode === "monthly"
         ? plant.rows.filter((row) => String(row.date.getFullYear()) === period)
@@ -5731,11 +5513,9 @@ function PlantPeriodLineChart({
   readonly plants: readonly {
     readonly plantId: string;
     readonly rows: readonly MonthRow[];
-    readonly scopes: readonly string[];
     readonly launchDate?: Date;
     readonly capacityKwp?: number;
     readonly modules?: number;
-    readonly metadata?: PlantMetadata | null;
     readonly projection?: ProductionProjection | null;
     readonly projectionIssue?: DataState["projectionIssue"];
   }[];
@@ -5834,14 +5614,10 @@ function PlantPeriodLineChart({
                 secondLabel={secondPlant.plantId}
                 firstProduction={value(firstRow)}
                 secondProduction={value(secondRow)}
-                firstCapacity={dateWeightedProjectionCapacity([firstRow], firstPlant.projection, firstPlant.metadata, firstPlant.launchDate) ?? firstPlant.capacityKwp}
-                secondCapacity={dateWeightedProjectionCapacity([secondRow], secondPlant.projection, secondPlant.metadata, secondPlant.launchDate) ?? secondPlant.capacityKwp}
+                firstCapacity={dateWeightedProjectionCapacity([firstRow], firstPlant.projection, firstPlant.launchDate) ?? firstPlant.capacityKwp}
+                secondCapacity={dateWeightedProjectionCapacity([secondRow], secondPlant.projection, secondPlant.launchDate) ?? secondPlant.capacityKwp}
                 firstExpected={firstExpected}
                 secondExpected={secondExpected}
-                firstMetadata={firstPlant.metadata}
-                secondMetadata={secondPlant.metadata}
-                firstScopes={firstPlant.scopes}
-                secondScopes={secondPlant.scopes}
                 lang={lang}
               />
             )
@@ -6252,57 +6028,6 @@ function ChartPanel({
   );
 }
 
-function PvSpecTable({
-  field,
-  t,
-  lang,
-  showLocation,
-  title,
-}: {
-  readonly field: PvMetadata;
-  readonly t: Record<string, string>;
-  readonly lang: Lang;
-  readonly showLocation: boolean;
-  readonly title: string;
-}) {
-  const location = `${formatNumber(field.lat, 6, 4)}, ${formatNumber(field.lng, 6, 4)}`;
-  const items: readonly ChartInspectorItem[] = [
-    { label: t.power, color: colors.amber, value: formatKwp(field.power / 1000, lang), cells: [formatKwp(field.power / 1000, lang)] },
-    { label: t.azimuth, color: colors.blue, value: `${formatNumber(field.azimuth, 0, 0)}°`, cells: [`${formatNumber(field.azimuth, 0, 0)}°`] },
-    { label: t.slope, color: colors.indigo, value: `${formatNumber(field.slope, 0, 0)}°`, cells: [`${formatNumber(field.slope, 0, 0)}°`] },
-    { label: t.loss, color: colors.rose, value: `${formatNumber(field.loss, 2, 0)}%`, cells: [`${formatNumber(field.loss, 2, 0)}%`] },
-    { label: t.mounting, color: colors.green, value: formatMounting(field.mounting, lang), cells: [formatMounting(field.mounting, lang)] },
-    { label: t.elevation, color: colors.ink, value: `${formatNumber(field.elevation, 0, 0)} m`, cells: [`${formatNumber(field.elevation, 0, 0)} m`] },
-    ...(showLocation ? [{
-      label: t.location,
-      color: colors.ink,
-      value: location,
-      cells: [
-        <a
-          className="pv-location-link"
-          href={`https://www.google.com/maps?q=${field.lat},${field.lng}`}
-          target="_blank"
-          rel="noreferrer"
-          key="location"
-        >
-          {location}
-        </a>,
-      ],
-    }] : []),
-  ];
-
-  return (
-    <ChartInspector
-      hint=""
-      selection={{
-        month: title,
-        columns: [t.value],
-        items,
-      }}
-    />
-  );
-}
-
 function axisMax(values: number[]) {
   const max = Math.max(...values.filter((value) => Number.isFinite(value)), 0);
   if (max <= 0) return 1;
@@ -6557,7 +6282,6 @@ function ProductionExportChart({
   rows,
   projection,
   launchDate,
-  metadata,
   capacityKwp,
   projectionIssue,
   fixedBarDensity = false,
@@ -6566,7 +6290,6 @@ function ProductionExportChart({
   readonly rows: readonly MonthRow[];
   readonly projection?: ProductionProjection | null;
   readonly launchDate?: Date;
-  readonly metadata?: PlantMetadata | null;
   readonly capacityKwp?: number;
   readonly projectionIssue?: DataState["projectionIssue"];
   readonly fixedBarDensity?: boolean;
@@ -6628,7 +6351,7 @@ function ProductionExportChart({
   const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
   const selectedRow = displayRows.find((row) => row.month === selectedKey);
   const selectedCapacity = selectedRow
-    ? projectionCapacitySummary(selectedRow, projection, metadata, launchDate, capacityKwp, lang)
+    ? projectionCapacitySummary(selectedRow, projection, launchDate, capacityKwp, lang)
     : undefined;
   useEffect(() => onCapacityChange?.(selectedCapacity), [onCapacityChange, selectedCapacity]);
   const [chartScrollRef, chartViewportWidth] = useDesktopChartEndScroll(isMobile, fixedBarDensity, rows.length, rows[0]?.month, latestRow?.month);
@@ -6744,12 +6467,11 @@ function ProductionExportChart({
 function projectionCapacitySummary(
   row: MonthRow,
   projection: ProductionProjection | null | undefined,
-  metadata: PlantMetadata | null | undefined,
   launchDate: Date | undefined,
   fallbackCapacityKwp: number | undefined,
   lang: Lang,
 ) {
-  const range = projectionCapacityRangeForRow(row, projection, metadata, launchDate, fallbackCapacityKwp);
+  const range = projectionCapacityRangeForRow(row, projection, launchDate, fallbackCapacityKwp);
   if (!range) return undefined;
 
   return range.startKwp !== range.endKwp
@@ -7517,7 +7239,6 @@ function DailyDashboard({
   investmentByDay,
   selectedRangeRoiPercent,
   launchDate,
-  metadata,
   capacityKwp,
   projection,
   projectionIssue,
@@ -7547,7 +7268,6 @@ function DailyDashboard({
   readonly investmentByDay: ReadonlyMap<string, number>;
   readonly selectedRangeRoiPercent: number;
   readonly launchDate?: Date;
-  readonly metadata?: PlantMetadata | null;
   readonly capacityKwp?: number;
   readonly projection?: ProductionProjection | null;
   readonly projectionIssue?: DataState["projectionIssue"];
@@ -7655,7 +7375,6 @@ function DailyDashboard({
             rows={chartRows}
             projection={projection}
             launchDate={launchDate}
-            metadata={metadata}
             capacityKwp={capacityKwp}
             projectionIssue={projectionIssue}
             fixedBarDensity
@@ -10490,96 +10209,42 @@ function commercialTransitionRows(row: MonthRow, commercialDate: Date | undefine
   };
 }
 
-interface InvestmentBreakdownEvent {
-  readonly label: string;
-  readonly date: string;
-  readonly capacity: string;
-}
-
 interface InvestmentBreakdownRow {
   readonly id: string;
   readonly label: string;
-  readonly date: string;
+  readonly date?: string;
   readonly amountUsd: number;
   readonly usdRate: number;
   readonly tone: string;
-  readonly capacity?: string;
-  readonly events?: readonly InvestmentBreakdownEvent[];
 }
 
 function InvestmentBreakdown({
   t,
   lang,
-  initialInvestmentUsd,
-  launchDate,
-  launchUsdRate,
   spendings,
   spendingUsdRateById,
-  metadata,
-  projection,
 }: {
   readonly t: Record<string, string>;
   readonly lang: Lang;
-  readonly initialInvestmentUsd: number;
-  readonly launchDate?: Date;
-  readonly launchUsdRate: number;
   readonly spendings: readonly PlantSpending[];
   readonly spendingUsdRateById: ReadonlyMap<number, number>;
-  readonly metadata?: PlantMetadata | null;
-  readonly projection?: ProductionProjection | null;
 }) {
   const sortedSpendings = [...spendings].sort((first, second) => (
     first.date.getTime() - second.date.getTime() || first.id - second.id
   ));
   const spendingLabels = {
+    initialInvestment: t.initialInvestment,
     damageReplacement: t.damageReplacement,
     improvement: t.improvement,
   };
-  const initialPeriod = projection?.periods?.[0];
-  const initialModules = initialPeriod?.modules ?? projectionModulesForDate(launchDate ?? new Date(0), projection, metadata);
-  const initialCapacity = initialPeriod?.capacityKwp ?? projectionCapacityForDate(launchDate ?? new Date(0), projection, metadata);
-  const investmentRows: readonly InvestmentBreakdownRow[] = [
-    {
-      id: "initial",
-      label: t.initialInvestment,
-      date: launchDate ? formatLaunchDate(launchDate, lang) : "-",
-      amountUsd: initialInvestmentUsd,
-      usdRate: launchUsdRate,
-      tone: "green",
-      capacity: initialModules !== undefined && initialCapacity !== undefined
-        ? `${formatNumber(initialModules, 0, 0)} ${t.modules.toLocaleLowerCase()} · ${formatKwp(initialCapacity, lang)}`
-        : undefined,
-    },
-    ...sortedSpendings.map((spending) => {
-      const events = productionProjectionTransitionsForSpending(projection, spending.id).map((transition) => {
-        const capacityReduced = transition.toCapacityKwp < transition.fromCapacityKwp;
-        const capacityIncreased = transition.toCapacityKwp > transition.fromCapacityKwp;
-        const label = capacityReduced
-          ? t.capacityReduction
-          : capacityIncreased && spending.type === "damage_replacement"
-            ? t.capacityRestoration
-            : capacityIncreased
-              ? t.capacityImprovement
-              : t.capacityChange;
-
-        return {
-          label,
-          date: formatLaunchDate(transition.effectiveDate, lang),
-          capacity: `${formatNumber(transition.fromModules, 0, 0)} → ${formatNumber(transition.toModules, 0, 0)} ${t.modules.toLocaleLowerCase()} · ${formatKwp(transition.fromCapacityKwp, lang)} → ${formatKwp(transition.toCapacityKwp, lang)}`,
-        };
-      });
-
-      return {
-        id: `spending-${spending.id}`,
-        label: plantSpendingTypeLabel(spending.type, spendingLabels),
-        date: formatLaunchDate(spending.date, lang),
-        amountUsd: spending.amountUsd,
-        usdRate: spendingUsdRateById.get(spending.id) ?? 1,
-        tone: spending.type === "damage_replacement" ? "rose" : "indigo",
-        events,
-      };
-    }),
-  ];
+  const investmentRows: readonly InvestmentBreakdownRow[] = sortedSpendings.map((spending) => ({
+    id: `spending-${spending.id}`,
+    label: plantSpendingTypeLabel(spending.type, spendingLabels),
+    date: spending.type === "initial" ? undefined : formatLaunchDate(spending.date, lang),
+    amountUsd: spending.amountUsd,
+    usdRate: spendingUsdRateById.get(spending.id) ?? 1,
+    tone: spending.type === "initial" ? "green" : spending.type === "damage_replacement" ? "rose" : "indigo",
+  }));
   const totalUsd = investmentRows.reduce((sum, row) => sum + row.amountUsd, 0);
   const totalUah = investmentRows.reduce((sum, row) => sum + moneyFromUsd(row.amountUsd, "UAH", row.usdRate), 0);
 
@@ -10607,9 +10272,7 @@ function InvestmentBreakdown({
                   <th colSpan={3} scope="rowgroup">
                     <span className="investment-breakdown-subheading-content">
                       <span>{row.label}</span>
-                      <span className="investment-breakdown-subheading-date">
-                        {row.date}{row.capacity ? ` · ${row.capacity}` : ""}
-                      </span>
+                      {row.date ? <span className="investment-breakdown-subheading-date">{row.date}</span> : null}
                     </span>
                   </th>
                 </tr>
@@ -10618,17 +10281,6 @@ function InvestmentBreakdown({
                   <td>{formatDisplayMoney(row.usdRate, "UAH", lang)}</td>
                   <td>{formatDisplayMoney(moneyFromUsd(row.amountUsd, "UAH", row.usdRate), "UAH", lang)}</td>
                 </tr>
-                {row.events?.map((event, index) => (
-                  <tr className="investment-breakdown-event" key={`${row.id}-event-${index}`}>
-                    <td colSpan={3}>
-                      <span className="investment-breakdown-event-content">
-                        <span>{event.label}</span>
-                        <span>{event.date}</span>
-                        <span>{event.capacity}</span>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
               </React.Fragment>
             ))}
             <tr className="investment-breakdown-subheading investment-breakdown-total-heading">
@@ -10656,6 +10308,7 @@ interface ExpensesInfoProps {
 
 function ExpensesInfo({ t, lang, currency, spendings, spendingUsdRateById }: ExpensesInfoProps) {
   const spendingLabels = {
+    initialInvestment: t.initialInvestment,
     damageReplacement: t.damageReplacement,
     improvement: t.improvement,
   };

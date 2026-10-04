@@ -79,14 +79,14 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     return access
   }
 
-  async getPlantsMetadata(
+  async getPlants(
     plantIds: readonly Solaroid.Supabase.Plant.Id[],
   ): Promise<readonly Solaroid.Supabase.Json[]> {
     if (!plantIds.length) return []
 
     const { data, error } = await this.client
       .from('plants')
-      .select('id,domain')
+      .select('id')
       .in('id', plantIds)
       .order('id', { ascending: true })
 
@@ -245,7 +245,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
   }
 
   async getPlant(plantId: Solaroid.Supabase.Plant.Id, includePrivateData = true) {
-    const plant = await this.#getPlantMetadata(plantId)
+    const plant = await this.#getPlant(plantId)
     const [days, months, tariffs, spendings, pvChanges] = await Promise.all([
       this.#getPlantRows(plantId, 'days'),
       this.#getPlantRows(plantId, 'months'),
@@ -256,7 +256,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     const projectionResult = await this.#getPvgisProjection(plant, pvChanges)
 
     return {
-      plant: plantForAccess(plant, projectionResult.projection, includePrivateData),
+      plant: plantForAccess(plant, projectionResult.projection),
       days,
       tariffs,
       projection: projectionForAccess(projectionResult.projection, includePrivateData),
@@ -301,7 +301,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
       throw new Error('Invalid granularity.')
     }
 
-    const plant = await this.#getPlantMetadata(plantId)
+    const plant = await this.#getPlant(plantId)
     const [records, tariffs, pvChanges] = await Promise.all([
       this.#getPlantRows(plantId, table, range),
       this.#getPlantRows(plantId, 'month_tariffs', month),
@@ -310,7 +310,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     const projectionResult = await this.#getPvgisProjection(plant, pvChanges)
 
     return {
-      plant: plantForAccess(plant, projectionResult.projection, includePrivateData),
+      plant: plantForAccess(plant, projectionResult.projection),
       records,
       tariffs,
       projection: projectionForAccess(projectionResult.projection, includePrivateData),
@@ -318,7 +318,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     }
   }
 
-  async #getPlantMetadata(plantId: Solaroid.Supabase.Plant.Id): Promise<Solaroid.Supabase.Plant.Record> {
+  async #getPlant(plantId: Solaroid.Supabase.Plant.Id): Promise<Solaroid.Supabase.Plant.Record> {
     const { data, error } = await this.client
       .from('plants')
       .select('*')
@@ -409,7 +409,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     if (cacheError) throw new Error('PVGIS projection cache lookup failed', { cause: cacheError })
     if (isPvgisProjectionCacheHit(cache?.metadata_hash, currentHash)) return { projection: cache?.projection ?? null }
 
-    const projection = await projectionForStages(plant.metadata, stages)
+    const projection = await projectionForStages(stages)
 
     if (!projection) return { projection: null }
 
@@ -428,9 +428,8 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
 }
 
 export async function projectionForStages(
-  metadata: Solaroid.Supabase.Plant.Metadata,
   stages: ReturnType<typeof reconstructPvConfigurationStages>,
-  getProjection: (metadata: Solaroid.Supabase.Plant.Metadata) => Promise<Solaroid.Supabase.Pvgis.Projection | null> = (value) => Pvgis.getProjection(value),
+  getProjection: (fields: readonly Solaroid.Supabase.Plant.Pv.Field[]) => Promise<Solaroid.Supabase.Pvgis.Projection | null> = (fields) => Pvgis.getProjection(fields),
 ): Promise<Solaroid.Supabase.Pvgis.Projection | null> {
   const projectionByConfiguration = new Map<string, Promise<Solaroid.Supabase.Pvgis.Projection | null>>()
   const stageProjections = await Promise.all(stages.map((stage) => {
@@ -445,10 +444,7 @@ export async function projectionForStages(
     const cached = projectionByConfiguration.get(key)
     if (cached) return cached
 
-    const request = getProjection({
-      ...metadata,
-      pvs: stage.fields,
-    })
+    const request = getProjection(stage.fields)
     projectionByConfiguration.set(key, request)
     return request
   }))
@@ -486,43 +482,25 @@ export function projectionForAccess(
 export function plantForAccess(
   plant: Solaroid.Supabase.Plant.Record,
   projection: Solaroid.Supabase.Pvgis.Projection | null,
-  includePrivateData: boolean,
 ): Solaroid.Supabase.Plant.Record {
-  const fields = plant.metadata?.pvs ?? []
   const latestPeriod = projection?.periods?.at(-1)
-  const capacityKwp = latestPeriod?.capacityKwp ?? fields.reduce((sum, field) => sum + field.power, 0) / 1000
-  const modules = latestPeriod?.modules ?? fields.reduce((sum, field) => sum + (field.modules ?? 0), 0)
-
-  if (includePrivateData) {
-    return {
-      ...plant,
-      ...(latestPeriod || capacityKwp > 0 ? { capacity_kwp: capacityKwp } : {}),
-      ...(latestPeriod || modules > 0 ? { modules } : {}),
-    }
-  }
-
-  const { pvs: _pvs, ...publicMetadata } = plant.metadata ?? {}
 
   return {
     ...plant,
-    metadata: publicMetadata,
-    ...(latestPeriod || capacityKwp > 0 ? { capacity_kwp: capacityKwp } : {}),
-    ...(latestPeriod || modules > 0 ? { modules } : {}),
+    ...(latestPeriod ? { capacity_kwp: latestPeriod.capacityKwp, modules: latestPeriod.modules } : {}),
   }
 }
 
 export function pvgisProjectionCacheInput(
-  plant: Pick<Solaroid.Supabase.Plant.Record, 'metadata' | 'launch_date'>,
+  plant: Pick<Solaroid.Supabase.Plant.Record, 'launch_date'>,
   changes: readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[],
 ) {
-  const { pvs: _legacyPvs, ...metadata } = plant.metadata
   const orderedChanges = [...changes]
     .sort(comparePvChanges)
     .map(({ id, date, type, operations }) => ({ id, date, type, operations }))
 
   return JSON.stringify({
-    v: 3,
-    m: metadata,
+    v: 4,
     launch: plant.launch_date,
     changes: orderedChanges,
     q: Pvgis.BaseQuery,

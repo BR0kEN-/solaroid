@@ -36,8 +36,8 @@ class Pvgis {
     return url
   }
 
-  static async getProjection(metadata: Solaroid.Supabase.Plant.Metadata): Promise<Solaroid.Supabase.Pvgis.Projection | null> {
-    const panels = metadata.pvs?.map((panel) => Panel.parse(panel)) ?? []
+  static async getProjection(fields: readonly Solaroid.Supabase.Plant.Pv.Field[]): Promise<Solaroid.Supabase.Pvgis.Projection | null> {
+    const panels = fields.map((panel) => Panel.parse(panel))
 
     if (!panels.length) return null
 

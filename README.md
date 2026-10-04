@@ -63,11 +63,11 @@ Migrations live in `supabase/migrations/`.
 
 Canonical tables:
 
-- `plants`: plant metadata, investment, launch date, commercial date, optional electric-heating import threshold, and optional public `domain`.
+- `plants`: plant ID, launch date, commercial date, and optional electric-heating import threshold.
 - `days`: daily cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and daily currency rates.
 - `months`: monthly cumulative snapshots, including production, day/night export, import, consumption, inverter-reported losses, and optional manual USD/UAH fallback rates.
 - `month_tariffs`: immutable monthly import/export tariffs and export taxes.
-- `plant_spendings`: dated additional plant costs. Supported types are `damage_replacement` and `improvement`; amounts are stored in USD.
+- `plant_spendings`: every dated plant cost in USD. Supported types are `initial`, `damage_replacement`, and `improvement`.
 - `plant_pv_changes`: complete plant-owned PV timeline. One launch-date `commissioning` event establishes initial fields; later events may optionally link to matching `improvement` or `damage_replacement` spending.
 - `dam_prices`: hourly day-ahead market prices cached by market date, stored as UAH/kWh in `hour1` through `hour24`.
 - `access_tokens`: raw Home Assistant tokens. A token owns full read/write access to its own `plant_id`.
@@ -88,7 +88,7 @@ Important auth model:
 - `reads` is an object shaped as `{ [plantId]: scopes[] }`.
 - For raw ingest tokens, `reads` lists extra readable plants only. It does not need to include the token's own plant because own-plant access is full.
 - For Supabase Auth tokens, `reads` includes every assigned readable plant, including the current/main plant. Scopes on the current plant matter for external users.
-- The only current scope is `loc`. Without `loc`, plant coordinates are not disclosed.
+- Existing scope arrays remain available for access policy extensions. PV field configuration and coordinates are never returned by plant reads.
 - Writes must only affect the token's own plant.
 - Reads can target the token plant or plants listed in read scopes.
 - Tokens are stored as SHA-256 hashes, not raw strings.
@@ -104,7 +104,7 @@ Example read scope:
 
 ```sql
 insert into public.access_token_read_scopes (token_id, plant_id, scopes)
-select id, 'bondas', '["loc"]'::jsonb
+select id, 'bondas', '[]'::jsonb
 from public.access_tokens
 where plant_id = 'levched';
 ```
@@ -113,22 +113,7 @@ Example plant assignment for a confirmed Supabase Auth user:
 
 ```sql
 insert into public.user_plant_access (user_id, plant_id, scopes)
-values ('AUTH_USER_ID', 'PLANT_ID', '["loc"]'::jsonb);
-```
-
-Omit `loc` to let a user read plant energy and finance data without seeing panel coordinates:
-
-```sql
-insert into public.user_plant_access (user_id, plant_id, scopes)
 values ('AUTH_USER_ID', 'PLANT_ID', '[]'::jsonb);
-```
-
-Example plant domain:
-
-```sql
-update public.plants
-set domain = 'ha.example.com'
-where id = 'PLANT_ID';
 ```
 
 ## Edge Function API
@@ -433,13 +418,19 @@ Currency rules:
 - UAH values are native and summed directly.
 - USD monthly totals convert each month using that month's USD/UAH rate.
 - Monthly USD/UAH uses the latest available daily rate from that month first. If a month has no daily rates, `months.uah_usd_rate` can be filled manually as the fallback.
-- Initial investment and additional spending are stored in USD. In UAH mode, initial investment uses the launch-month USD/UAH rate while each spending uses its own month's rate. A missing spending-month rate falls back to the latest positive plant rate. A matching What-if USD-rate override affects only that month's conversion.
+- Every investment payment is stored as a dated USD spending. In UAH mode, each payment uses its own month's USD/UAH rate. A missing spending-month rate falls back to the latest positive plant rate. A matching What-if USD-rate override affects only that month's conversion.
 
-### Additional plant spending
+### Plant spending
 
-The dashboard is read-only for plant spending. Add an already-incurred cost through Supabase SQL or the table editor:
+The dashboard is read-only for plant spending. Initial investment may be split into several real payments with independent dates and rates:
 
 ```sql
+insert into public.plant_spendings (plant_id, date, type, amount_usd)
+values ('your-plant-id', '2025-04-10', 'initial', 5000);
+
+insert into public.plant_spendings (plant_id, date, type, amount_usd)
+values ('your-plant-id', '2025-06-15', 'initial', 3000);
+
 insert into public.plant_spendings (plant_id, date, type, amount_usd)
 values ('your-plant-id', '2026-08-20', 'damage_replacement', 2000);
 
@@ -447,13 +438,15 @@ insert into public.plant_spendings (plant_id, date, type, amount_usd)
 values ('your-plant-id', '2026-09-05', 'improvement', 750);
 ```
 
-The header always shows the all-time total of the original investment plus every spending record, independent of the selected dashboard range. Its Info popup shows the launch investment, each dated additional spending with its type, the conversion rate used in UAH mode, and the total. The cumulative ROI line in the Finance chart keeps prior months on their original investment basis and applies spending from its month onward. The Finance chart's Expenses popup groups spending by type for the selected month.
+The header always shows the all-time total of every spending record, independent of the selected dashboard range. Its Info popup shows every payment, its conversion rate in UAH mode, and the total. The cumulative ROI line applies each payment from its recorded month onward. The Finance chart's Expenses popup groups selected-month spending by type.
+
+Migration `20261004030000_initial_investment_spendings.sql` creates one `initial` spending from each former `plants.investment_usd` value using the plant launch date, then drops that column. Split the generated row manually when the real payment schedule is known; keep the same USD total.
 
 `improvement` can represent any already-incurred plant upgrade. By itself it remains cost-only. Link it through `plant_pv_changes` when it commissioned added PV capacity. A `damage_replacement` spending may link to both the demount and later restoration events. One spending can therefore have several capacity events, while an event can remain unlinked until the expense exists. Spending timestamps do not replace the telemetry freshness timestamp in the footer. Future/planned costs, compensation, notes, attachments, and geometry edits are not supported.
 
 ### Capacity-aware PV history
 
-`plant_pv_changes` is the only PV configuration source. `plants.metadata.pvs` is removed after migration. History starts with exactly one `commissioning` event on `plants.launch_date`. It has no spending and adds every launch field with full PVGIS configuration:
+`plant_pv_changes` is the only PV configuration source. The legacy `plants.metadata` and unused `plants.domain` columns are removed after migration. History starts with exactly one `commissioning` event on `plants.launch_date`. It has no spending and adds every launch field with full PVGIS configuration:
 
 ```json
 [
@@ -552,7 +545,10 @@ Existing metadata migration:
 1. Apply `20261004010000_pv_commissioning_events.sql`.
 2. Verify every legacy `metadata.pvs` field has `id`, `modules`, and `power`.
 3. Run `supabase/manual/move_pv_metadata_to_events.sql` before deploying the new Edge Function. The transaction reverses existing improvement operations, inserts each launch commissioning event, validates every plant, then removes `metadata.pvs`.
-4. Inspect the resulting event timelines, then deploy the Edge Function and dashboard.
+4. Inspect the resulting event timelines.
+5. Apply `20261004020000_drop_plant_legacy_columns.sql`. It refuses to drop the legacy columns until every plant has a launch-date commissioning event.
+6. Apply `20261004030000_initial_investment_spendings.sql` to move the former plant investment into dated spending.
+7. Deploy the Edge Function and dashboard.
 
 New physical events use their actual change date. Link a matching spending when one exists, or leave `spending_id` null:
 
@@ -581,9 +577,9 @@ For a 9 → 19 → 32-module history, commissioning adds 9 modules; later improv
 
 Daily expectation uses the active configuration on that date. A month covered by one configuration uses its full PVGIS month. Launch and transition months are prorated by active calendar days. Historical expected lines and performance use those stage-correct values. Current-month and long-term forecasts use the weighted all-history performance factor; future months use the latest configuration. Actual telemetry, payment, savings, taxes, and historical monthly ROI are never recalculated.
 
-The investment breakdown shows commissioning modules/kWp. Each spending lists all linked capacity events beneath its single expense row, including reduction/restoration date and transition. Unlinked events still affect projections but do not appear in the expense breakdown. The Production chart shows the selected period's capacity in its title rather than as an inspector row. Transition months show both capacities; a full outage shows `0.00 kWp`. Plant comparison receives sanitized projection periods, sums stage-correct expectation, and uses date-weighted capacity across changes.
+The investment breakdown shows financial spending only; PV capacity transitions are intentionally omitted. Linked and unlinked PV events still affect projections. The Production chart shows the selected period's capacity in its title rather than as an inspector row. Transition months show both capacities; a full outage shows `0.00 kWp`. Plant comparison receives sanitized projection periods, sums stage-correct expectation, and uses date-weighted capacity across changes.
 
-The PVGIS cache key includes non-PV metadata, launch date, event ID/date/type/operations, projection algorithm version, and query settings. Spending amount/date/linkage do not affect it. Identical configurations share one PVGIS request; zero-capacity stages use local zero arrays without a request. A relevant change regenerates all stages while preserving top-level latest-active arrays for older clients. Missing or invalid commissioning/history never falls back to another source: actual dashboard data remains visible, while expected values and affected forecasts are disabled with a localized warning.
+The PVGIS cache key includes launch date, event ID/date/type/operations, projection algorithm version, and query settings. Spending amount/date/linkage do not affect it. Identical configurations share one PVGIS request; zero-capacity stages use local zero arrays without a request. A relevant change regenerates all stages while preserving top-level latest-active arrays for older clients. Missing or invalid commissioning/history never falls back to another source: actual dashboard data remains visible, while expected values and affected forecasts are disabled with a localized warning.
 
 ## UI Conventions
 

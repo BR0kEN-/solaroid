@@ -2262,24 +2262,6 @@ h2 {
   font-weight: 600;
 }
 
-.investment-breakdown-table tbody .investment-breakdown-event td {
-  padding-block: 7px;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  background: var(--panel);
-}
-
-.investment-breakdown-event-content {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px 6px;
-}
-
-.investment-breakdown-event-content > span + span::before {
-  margin-right: 6px;
-  content: "·";
-}
-
 .chart-inspector tbody tr:hover > * {
   background: var(--panel);
 }

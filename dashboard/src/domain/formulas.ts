@@ -5,7 +5,6 @@ import type {
   GreenTariffReceiptReconciliation,
   MonthTariffScenario,
   MonthRow,
-  PlantMetadata,
   PlantSpending,
   ProductionProjection,
   ProductionProjectionPeriod,
@@ -17,8 +16,6 @@ export const PERCENT_DIVISOR = 100
 export const ELECTRIC_HEATING_REGULAR_PRICE_MULTIPLIER = 4.32 / 2.64
 
 export interface TotalInvestmentMoneyInput {
-  readonly initialInvestmentUsd: number
-  readonly launchUsdRate: number
   readonly spendings: readonly PlantSpending[]
   readonly currency: Currency
   readonly spendingUsdRate: (spending: PlantSpending) => number
@@ -39,27 +36,24 @@ function spendingApplies(spending: PlantSpending, throughMonth?: Date) {
 }
 
 export function totalInvestmentUsd(
-  initialInvestmentUsd: number,
   spendings: readonly PlantSpending[],
   throughMonth?: Date,
 ) {
-  return initialInvestmentUsd + spendings.reduce(
+  return spendings.reduce(
     (sum, spending) => sum + (spendingApplies(spending, throughMonth) ? spending.amountUsd : 0),
     0,
   )
 }
 
 export function totalInvestmentMoney({
-  initialInvestmentUsd,
-  launchUsdRate,
   spendings,
   currency,
   spendingUsdRate,
   throughMonth,
 }: TotalInvestmentMoneyInput) {
-  if (currency === 'USD') return totalInvestmentUsd(initialInvestmentUsd, spendings, throughMonth)
+  if (currency === 'USD') return totalInvestmentUsd(spendings, throughMonth)
 
-  return initialInvestmentUsd * launchUsdRate + spendings.reduce(
+  return spendings.reduce(
     (sum, spending) => sum + (
       spendingApplies(spending, throughMonth)
         ? spending.amountUsd * spendingUsdRate(spending)
@@ -114,11 +108,6 @@ export function solarCoveragePercent(consumed: number, imported: number) {
 
 export function exportTotal(row: EnergySnapshot) {
   return row.exportDay + row.exportNight
-}
-
-export function plantCapacityKwp(metadata?: PlantMetadata | null) {
-  const watts = metadata?.pvs?.reduce((sum, field) => sum + field.power, 0) ?? 0
-  return watts > 0 ? watts / 1000 : undefined
 }
 
 export function productionProjectionPeriodAt(
@@ -217,20 +206,15 @@ export function normalizedProductionPerformance(
 export function projectionCapacityForDate(
   date: Date,
   projection?: ProductionProjection | null,
-  metadata?: PlantMetadata | null,
 ) {
-  if (projection?.periods?.length) return productionProjectionPeriodAt(date, projection)?.capacityKwp
-  return plantCapacityKwp(metadata)
+  return productionProjectionPeriodAt(date, projection)?.capacityKwp
 }
 
 export function projectionModulesForDate(
   date: Date,
   projection?: ProductionProjection | null,
-  metadata?: PlantMetadata | null,
 ) {
-  if (projection?.periods?.length) return productionProjectionPeriodAt(date, projection)?.modules
-  const modules = metadata?.pvs?.reduce((sum, field) => sum + (field.modules ?? 0), 0) ?? 0
-  return modules > 0 ? modules : undefined
+  return productionProjectionPeriodAt(date, projection)?.modules
 }
 
 export interface ProjectionCapacityRange {
@@ -241,15 +225,14 @@ export interface ProjectionCapacityRange {
 export function projectionCapacityRangeForRow(
   row: Pick<MonthRow, 'date' | 'month'>,
   projection?: ProductionProjection | null,
-  metadata?: PlantMetadata | null,
   launchDate?: Date,
   fallbackCapacityKwp?: number,
 ): ProjectionCapacityRange | undefined {
   const daily = /^\d{4}-\d{2}-\d{2}$/.test(row.month)
   const end = daily ? row.date : new Date(row.date.getFullYear(), row.date.getMonth() + 1, 0)
   const start = launchDate && launchDate > row.date && launchDate <= end ? launchDate : row.date
-  const startKwp = projectionCapacityForDate(start, projection, metadata) ?? fallbackCapacityKwp
-  const endKwp = projectionCapacityForDate(end, projection, metadata) ?? fallbackCapacityKwp
+  const startKwp = projectionCapacityForDate(start, projection) ?? fallbackCapacityKwp
+  const endKwp = projectionCapacityForDate(end, projection) ?? fallbackCapacityKwp
   if (startKwp === undefined || endKwp === undefined) return undefined
 
   return { startKwp, endKwp }
@@ -286,7 +269,6 @@ export function productionProjectionTransitionsForSpending(
 export function dateWeightedProjectionCapacity(
   rows: readonly Pick<MonthRow, 'date' | 'month'>[],
   projection?: ProductionProjection | null,
-  metadata?: PlantMetadata | null,
   launchDate?: Date,
 ) {
   let weightedCapacity = 0
@@ -295,7 +277,7 @@ export function dateWeightedProjectionCapacity(
   for (const row of rows) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(row.month)) {
       if (launchDate && startOfLocalDay(row.date) < startOfLocalDay(launchDate)) continue
-      const capacity = projectionCapacityForDate(row.date, projection, metadata)
+      const capacity = projectionCapacityForDate(row.date, projection)
       if (capacity === undefined) continue
       weightedCapacity += capacity
       activeDays += 1
@@ -309,7 +291,7 @@ export function dateWeightedProjectionCapacity(
     if (start > end) continue
     for (let day = start.getDate(); day <= end.getDate(); day += 1) {
       const current = new Date(row.date.getFullYear(), row.date.getMonth(), day)
-      const capacity = projectionCapacityForDate(current, projection, metadata)
+      const capacity = projectionCapacityForDate(current, projection)
       if (capacity === undefined) continue
       weightedCapacity += capacity
       activeDays += 1

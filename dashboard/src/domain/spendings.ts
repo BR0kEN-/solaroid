@@ -1,11 +1,13 @@
 import type { PlantSpending, PlantSpendingType } from './types'
 
 export const PLANT_SPENDING_TYPE_ORDER = [
+  'initial',
   'damage_replacement',
   'improvement',
 ] as const satisfies readonly PlantSpendingType[]
 
 export interface PlantSpendingTypeLabels {
+  readonly initialInvestment: string
   readonly damageReplacement: string
   readonly improvement: string
 }
@@ -20,6 +22,7 @@ export function plantSpendingTypeLabel(
   labels: PlantSpendingTypeLabels,
 ) {
   const labelsByType: Record<PlantSpendingType, string> = {
+    initial: labels.initialInvestment,
     damage_replacement: labels.damageReplacement,
     improvement: labels.improvement,
   }

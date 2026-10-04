@@ -1,22 +1,6 @@
 import type { SupabaseClient } from './client.ts'
 import { ForbiddenError } from './errors.ts'
 
-function applyAccess<T extends { readonly plant: Solaroid.Supabase.Plant.Record }>(
-  token: Solaroid.Supabase.Access.Token,
-  data: T,
-): T {
-  const ownPlant = token.kind === 'ingest' && data.plant.id === token.plant_id
-
-  if (!ownPlant && !token.reads[data.plant.id]?.includes('loc')) {
-    for (const pv of data.plant.metadata?.pvs || []) {
-      // @ts-expect-error no permission to access location, suppressing.
-      pv.lat = pv.lng = 0
-    }
-  }
-
-  return data
-}
-
 async function read(request: Request, token: Solaroid.Supabase.Access.Token, client: SupabaseClient) {
   const params = new URL(request.url).searchParams
   const plantId = params.get('plant') || token.plant_id
@@ -37,20 +21,20 @@ async function read(request: Request, token: Solaroid.Supabase.Access.Token, cli
     }
   }
 
-  if (token.kind === 'auth' && params.has('metadata')) {
+  if (token.kind === 'auth' && (params.has('plants') || params.has('metadata'))) {
     return {
-      plants: await client.getPlantsMetadata([token.plant_id, ...Object.keys(token.reads)]),
+      plants: await client.getPlants([token.plant_id, ...Object.keys(token.reads)]),
     }
   }
 
   const granularity = params.get('granularity')
 
   if (granularity) {
-    return applyAccess(token, await client.getPlantDataForGranularity(plantId, granularity, plantId === token.plant_id))
+    return client.getPlantDataForGranularity(plantId, granularity, plantId === token.plant_id)
   }
 
   return {
-    ...applyAccess(token, await client.getPlant(plantId, plantId === token.plant_id)),
+    ...await client.getPlant(plantId, plantId === token.plant_id),
     reads: token.reads,
   }
 }

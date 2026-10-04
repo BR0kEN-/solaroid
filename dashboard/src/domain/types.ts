@@ -38,7 +38,7 @@ export interface MonthTariffScenario {
   readonly usdRate: number
 }
 
-export type PlantSpendingType = 'damage_replacement' | 'improvement'
+export type PlantSpendingType = 'initial' | 'damage_replacement' | 'improvement'
 
 export interface PlantSpending {
   readonly id: number
@@ -176,13 +176,11 @@ export interface DataState {
   readonly readablePlantIds: readonly string[]
   readonly readablePlantScopes: Readonly<Record<string, readonly string[]>>
   readonly scopes: readonly string[]
-  readonly investmentUsd: number
   readonly capacityKwp?: number
   readonly modules?: number
   readonly spendings: readonly PlantSpending[]
   readonly launchDate?: Date
   readonly commercialDate?: Date
-  readonly metadata?: PlantMetadata | null
   readonly projection?: ProductionProjection | null
   readonly projectionIssue?: ProjectionIssue
   readonly sheetUpdatedAt?: Date
@@ -198,12 +196,10 @@ export interface PlantComparison {
   readonly rows: readonly MonthRow[]
   readonly dailyRows: readonly MonthRow[]
   readonly scopes: readonly string[]
-  readonly investmentUsd: number
   readonly capacityKwp?: number
   readonly modules?: number
   readonly launchDate?: Date
   readonly commercialDate?: Date
-  readonly metadata?: PlantMetadata | null
   readonly projection?: ProductionProjection | null
   readonly projectionIssue?: ProjectionIssue
   readonly sheetUpdatedAt?: Date
@@ -228,23 +224,6 @@ export interface EnergySnapshot {
   readonly importNight: number
   readonly consumedDay: number
   readonly consumedNight: number
-}
-
-export interface PvMetadata {
-  readonly id?: string
-  readonly modules?: number
-  readonly azimuth: number
-  readonly power: number
-  readonly slope: number
-  readonly elevation: number
-  readonly lat: number
-  readonly lng: number
-  readonly loss: number
-  readonly mounting: string
-}
-
-export interface PlantMetadata {
-  readonly pvs?: readonly PvMetadata[]
 }
 
 export interface ProductionProjection {
