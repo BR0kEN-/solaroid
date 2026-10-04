@@ -2,9 +2,6 @@ import { isPvgisProjectionCacheHit, plantForAccess, projectionForAccess, pvgisPr
 
 const plant: Solaroid.Supabase.Plant.Record = {
   id: 'test-plant',
-  domain: 'example.test',
-  metadata: {},
-  investment_usd: 10_000,
   launch_date: '2025-06-28',
   commercial_date: '2026-01-01',
   created_at: '2025-06-28 00:00:00.000+00',
@@ -35,7 +32,7 @@ const projection: Solaroid.Supabase.Pvgis.Projection = {
 
 Deno.test('own plant projection keeps spending linkage and derived capacity', () => {
   const visibleProjection = projectionForAccess(projection, true)
-  const visiblePlant = plantForAccess(plant, projection, true)
+  const visiblePlant = plantForAccess(plant, projection)
 
   if (visibleProjection?.periods?.[1].spendingId !== 7) throw new Error('spending linkage should remain visible')
   if (visiblePlant.capacity_kwp !== 13.12 || visiblePlant.modules !== 32) {
@@ -45,7 +42,7 @@ Deno.test('own plant projection keeps spending linkage and derived capacity', ()
 
 Deno.test('comparison projection exposes capacity but strips spending linkage', () => {
   const visibleProjection = projectionForAccess(projection, false)
-  const visiblePlant = plantForAccess(plant, projection, false)
+  const visiblePlant = plantForAccess(plant, projection)
 
   if (visibleProjection?.periods?.some((period) => period.spendingId !== undefined)) {
     throw new Error('spending linkage should be private')
@@ -58,7 +55,7 @@ Deno.test('PVGIS cache input is order-stable and changes with launch or operatio
   const second = change(2, '2026-03-15', 13)
   const input = pvgisProjectionCacheInput(plant, [second, first])
 
-  if (!input.includes('"v":3')) throw new Error('cache input should include projection algorithm version')
+  if (!input.includes('"v":4')) throw new Error('cache input should include projection algorithm version')
   if (input !== pvgisProjectionCacheInput(plant, [first, second])) throw new Error('cache input should use ordered changes')
   if (input === pvgisProjectionCacheInput({ ...plant, launch_date: '2025-06-29' }, [first, second])) {
     throw new Error('launch date should invalidate the cache')
@@ -77,15 +74,6 @@ Deno.test('PVGIS cache input is order-stable and changes with launch or operatio
   }
   if (input !== pvgisProjectionCacheInput(plant, [{ ...first, spending_id: null }, second])) {
     throw new Error('spending linkage should not invalidate the cache')
-  }
-  if (input !== pvgisProjectionCacheInput({
-    ...plant,
-    metadata: { pvs: [{
-      id: 'legacy', modules: 1, power: 999, azimuth: 180, slope: 30,
-      elevation: 100, lat: 1, lng: 2, loss: 14, mounting: 'building',
-    }] },
-  }, [first, second])) {
-    throw new Error('legacy metadata PV fields should not affect the cache')
   }
   if (!isPvgisProjectionCacheHit('same', 'same') || isPvgisProjectionCacheHit('old', 'new')) {
     throw new Error('cache hit should require an exact hash match')

@@ -30,7 +30,7 @@ declare global {
       type Id = string
 
       namespace Spending {
-        type Type = 'damage_replacement' | 'improvement'
+        type Type = 'initial' | 'damage_replacement' | 'improvement'
 
         interface Record {
           readonly id: number
@@ -44,7 +44,7 @@ declare global {
       }
 
       namespace Pv {
-        type ChangeType = 'commissioning' | Spending.Type
+        type ChangeType = 'commissioning' | 'improvement' | 'damage_replacement'
 
         interface Field {
           readonly id?: string
@@ -104,16 +104,8 @@ declare global {
         }
       }
 
-      interface Metadata {
-        readonly pvs?: readonly Pv.Field[]
-      }
-
       interface Record {
         readonly id: Id
-        readonly domain: string
-        readonly metadata: Metadata
-        // In USD.
-        readonly investment_usd: number
         readonly launch_date: Date.Ymd
         readonly commercial_date: Date.Ymd
         readonly electric_heating_import_threshold_kwh?: number

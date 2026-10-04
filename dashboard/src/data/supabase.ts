@@ -1,11 +1,9 @@
 import { API_URL } from '../config'
-import { balance, consumedPrice, consumedTotal, importTotal, payment, plantCapacityKwp, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantMetadata, PlantSpending, PlantSpendingType, ProductionProjection, ProjectionIssue, Tariff, UtilityMeterRecordDates } from '../domain/types'
+import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
+import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantSpending, PlantSpendingType, ProductionProjection, ProjectionIssue, Tariff, UtilityMeterRecordDates } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
-  readonly metadata?: PlantMetadata | null
-  readonly investment_usd: number
   readonly launch_date: string
   readonly commercial_date: string
   readonly electric_heating_import_threshold_kwh?: number | null
@@ -214,12 +212,10 @@ export function toLoadedPlant({
     rows,
     dailyRows,
     scopes: [],
-    investmentUsd: plant.investment_usd,
-    capacityKwp: plant.capacity_kwp ?? plantCapacityKwp(plant.metadata),
-    modules: plant.modules ?? (plant.metadata?.pvs?.reduce((sum, field) => sum + (field.modules ?? 0), 0) || undefined),
+    capacityKwp: plant.capacity_kwp,
+    modules: plant.modules,
     launchDate: parseDate(plant.launch_date),
     commercialDate,
-    metadata: plant.metadata ?? null,
     projection: toProductionProjection(projection),
     projectionIssue,
     sheetUpdatedAt: latestUpdatedAt([plant.updated_at, ...months.map((row) => row.updated_at), ...days.map((row) => row.updated_at), ...tariffs.map((row) => row.updated_at)]),

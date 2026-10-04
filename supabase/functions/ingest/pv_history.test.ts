@@ -35,8 +35,8 @@ Deno.test('uses open damage capacity for latest forecast arrays', async () => {
     commissioning(1, '2025-06-01', [baseField]),
     change(2, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)]),
   ])
-  const projection = await projectionForStages({}, stages, (metadata) => {
-    const modules = metadata.pvs?.[0]?.modules ?? 0
+  const projection = await projectionForStages(stages, (fields) => {
+    const modules = fields[0]?.modules ?? 0
     return Promise.resolve({
       monthlyKwh: Array.from({ length: 12 }, () => modules * 100),
       dailyKwh: Array.from({ length: 12 }, () => modules),
@@ -109,9 +109,9 @@ Deno.test('projects zero-capacity stages locally and reuses identical PVGIS conf
     change(2, '2026-10-01', 'damage_replacement', [{ kind: 'remove_field', field: baseField }], 7),
     change(3, '2026-11-15', 'damage_replacement', [{ kind: 'add_field', field: baseField }], 7),
   ])
-  const calls: Solaroid.Supabase.Plant.Metadata[] = []
-  const projection = await projectionForStages({}, stages, (metadata) => {
-    calls.push(metadata)
+  const calls: (readonly Solaroid.Supabase.Plant.Pv.Field[])[] = []
+  const projection = await projectionForStages(stages, (fields) => {
+    calls.push(fields)
     return Promise.resolve({
       monthlyKwh: Array.from({ length: 12 }, () => 3_200),
       dailyKwh: Array.from({ length: 12 }, () => 100),

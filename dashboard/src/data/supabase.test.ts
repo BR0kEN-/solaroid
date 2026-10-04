@@ -4,7 +4,6 @@ import { toLoadedPlant, toPlantSpending } from './supabase'
 
 const plant = {
   id: 'bondas',
-  investment_usd: 12_366,
   launch_date: '2025-06-28',
   commercial_date: '2026-01-15',
   updated_at: '2026-06-06T20:04:45.872243+00:00',
@@ -44,6 +43,23 @@ const greenTariffReport = {
 }
 
 describe('Supabase data mapping', () => {
+  it('maps an initial investment payment as a dated spending', () => {
+    const spending = toPlantSpending({
+      id: 6,
+      plant_id: 'bondas',
+      date: '2025-06-28',
+      type: 'initial',
+      amount_usd: 5_000,
+    })
+
+    expect(spending).toEqual({
+      id: 6,
+      date: new Date('2025-06-28T00:00:00'),
+      type: 'initial',
+      amountUsd: 5_000,
+    })
+  })
+
   it('maps a damage-replacement spending without changing its USD amount or exact date', () => {
     const spending = toPlantSpending({
       id: 7,
@@ -114,23 +130,7 @@ describe('Supabase data mapping', () => {
     expect(loaded.dailyRows.map((row) => row.usdRate)).toEqual([41, 0, 43])
   })
 
-  it('keeps plant metadata and projection from the plant payload', () => {
-    const metadata = {
-      pvs: [
-        {
-          id: 'south',
-          modules: 32,
-          azimuth: 155,
-          power: 11160,
-          slope: 35,
-          elevation: 74,
-          lat: 48.33552356395866,
-          lng: 35.04246667027474,
-          loss: 2,
-          mounting: 'building',
-        },
-      ],
-    }
+  it('keeps derived plant capacity and projection from the plant payload', () => {
     const projection = {
       monthlyKwh: Array.from({ length: 12 }, (_, index) => index + 1),
       dailyKwh: Array.from({ length: 12 }, (_, index) => (index + 1) / 10),
@@ -145,7 +145,8 @@ describe('Supabase data mapping', () => {
     const loaded = toLoadedPlant({
       plant: {
         ...plant,
-        metadata,
+        capacity_kwp: 11.16,
+        modules: 32,
       },
       months: [],
       days: [],
@@ -154,7 +155,6 @@ describe('Supabase data mapping', () => {
       projectionIssue: 'invalid-history',
     })
 
-    expect(loaded.metadata).toEqual(metadata)
     expect(loaded.capacityKwp).toBe(11.16)
     expect(loaded.modules).toBe(32)
     expect(loaded.projection).toEqual({

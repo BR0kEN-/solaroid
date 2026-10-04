@@ -21,7 +21,6 @@ import {
   netExportNightPrice,
   normalizedProductionPerformance,
   payment,
-  plantCapacityKwp,
   projectionCapacityRangeForRow,
   productionProjectionPeriodAt,
   productionProjectionTransitionsForSpending,
@@ -69,25 +68,24 @@ const electricHeatingTariff: Tariff = {
 }
 
 const spendings: readonly PlantSpending[] = [
+  { id: 0, date: new Date('2025-06-28T00:00:00'), type: 'initial', amountUsd: 10_000 },
   { id: 1, date: new Date('2026-08-20T00:00:00'), type: 'damage_replacement', amountUsd: 2_000 },
   { id: 2, date: new Date('2026-10-01T00:00:00'), type: 'improvement', amountUsd: 500 },
 ]
 
 describe('plant investment', () => {
   it('adds spendings only from their month onward', () => {
-    expect(totalInvestmentUsd(10_000, spendings, new Date('2026-07-01T00:00:00'))).toBe(10_000)
-    expect(totalInvestmentUsd(10_000, spendings, new Date('2026-08-01T00:00:00'))).toBe(12_000)
-    expect(totalInvestmentUsd(10_000, spendings)).toBe(12_500)
+    expect(totalInvestmentUsd(spendings, new Date('2026-07-01T00:00:00'))).toBe(10_000)
+    expect(totalInvestmentUsd(spendings, new Date('2026-08-01T00:00:00'))).toBe(12_000)
+    expect(totalInvestmentUsd(spendings)).toBe(12_500)
     expect(spendingUsdInMonth(spendings, new Date('2026-08-01T00:00:00'))).toBe(2_000)
   })
 
-  it('converts the initial investment and each spending with its own rate', () => {
+  it('converts every dated spending with its own rate', () => {
     const result = totalInvestmentMoney({
-      initialInvestmentUsd: 10_000,
-      launchUsdRate: 40,
       spendings,
       currency: 'UAH',
-      spendingUsdRate: (spending) => spending.id === 1 ? 42 : 44,
+      spendingUsdRate: (spending) => spending.id === 0 ? 40 : spending.id === 1 ? 42 : 44,
     })
 
     expect(result).toBe(506_000)
@@ -140,15 +138,6 @@ describe('energy totals', () => {
 })
 
 describe('plant production capacity', () => {
-  it('sums PV field power as kWp', () => {
-    expect(plantCapacityKwp({
-      pvs: [
-        { azimuth: 0, power: 11160, slope: 30, elevation: 120, lat: 0, lng: 0, loss: 14, mounting: 'building' },
-        { azimuth: 90, power: 8680, slope: 30, elevation: 120, lat: 0, lng: 0, loss: 14, mounting: 'building' },
-      ],
-    })).toBeCloseTo(19.84)
-  })
-
   it('calculates capacity percent from first plant vs second plant', () => {
     expect(capacityDeltaPct(19.84, 14.88)).toBeCloseTo(33.3333)
   })
@@ -162,8 +151,6 @@ describe('plant production capacity', () => {
   })
 
   it('returns undefined for missing or zero capacity inputs', () => {
-    expect(plantCapacityKwp(null)).toBeUndefined()
-    expect(plantCapacityKwp({ pvs: [] })).toBeUndefined()
     expect(productionYieldKwhPerKwp(100, 0)).toBeUndefined()
     expect(capacityDeltaPct(10, 0)).toBeUndefined()
     expect(capacityAdjustedProductionSurplus(100, 80, 10, 0)).toBeUndefined()

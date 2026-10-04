@@ -64,7 +64,35 @@ Deno.test('read forbids document URLs for comparison plants', async () => {
   }
 })
 
+Deno.test('read lists assigned plant ids for portal auth', async () => {
+  const requestedPlantIds: string[][] = []
+  const client = {
+    getPlants: (plantIds: readonly string[]) => {
+      requestedPlantIds.push([...plantIds])
+      return Promise.resolve(plantIds.map((id) => ({ id })))
+    },
+  } as unknown as SupabaseClient
+
+  const data = await read(new Request('https://example.test/ingest?plants=1'), token, client)
+
+  if (JSON.stringify(requestedPlantIds) !== JSON.stringify([['bondas', 'levched']])) {
+    throw new Error('portal plant list should contain assigned plant ids')
+  }
+  if (!('plants' in data) || JSON.stringify(data.plants) !== JSON.stringify([{ id: 'bondas' }, { id: 'levched' }])) {
+    throw new Error('portal plant list should expose ids only')
+  }
+})
+
 const spendings: readonly Solaroid.Supabase.Plant.Spending.Record[] = [
+  {
+    id: 0,
+    plant_id: 'bondas',
+    date: '2025-06-28',
+    type: 'initial',
+    amount_usd: 10_000,
+    created_at: '2025-06-28 00:00:00.000+00',
+    updated_at: '2025-06-28 00:00:00.000+00',
+  },
   {
     id: 1,
     plant_id: 'bondas',
@@ -98,9 +126,6 @@ function plantData(id: string, includePrivateData: boolean) {
   return {
     plant: {
       id,
-      domain: 'example.test',
-      metadata: {},
-      investment_usd: 0,
       launch_date: '2026-01-01',
       commercial_date: '2026-01-01',
       created_at: '2026-01-01 00:00:00.000+00',

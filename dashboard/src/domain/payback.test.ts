@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { calculateCommercialEndRecovery, calculatePayback, daysBetween, fullDurationBetween } from './payback'
-import type { MonthRow } from './types'
+import { calculateCommercialEndRecovery, calculatePayback as calculatePaybackFromSpendings, daysBetween, fullDurationBetween } from './payback'
+import type { Currency } from './money'
+import type { MonthRow, PlantSpending } from './types'
 
 function month(electricitySavings: number, date = '2026-01-01', usdRate = 50): MonthRow {
   return {
@@ -37,6 +38,48 @@ function dateKey(date: Date | null | undefined) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+interface LegacyPaybackInput {
+  readonly rows: readonly MonthRow[]
+  readonly investmentUsd: number
+  readonly currency: Currency
+  readonly launchUsdRate: number
+  readonly launchDate?: Date
+  readonly spendings?: readonly PlantSpending[]
+  readonly spendingUsdRate?: (spending: PlantSpending) => number
+  readonly today?: Date
+}
+
+function calculatePayback({
+  rows,
+  investmentUsd,
+  currency,
+  launchUsdRate,
+  launchDate,
+  spendings = [],
+  spendingUsdRate,
+  today,
+}: LegacyPaybackInput) {
+  const initialSpendings: readonly PlantSpending[] = investmentUsd > 0
+    ? [{
+      id: -1,
+      date: launchDate ?? rows[0]?.date ?? new Date(0),
+      type: 'initial',
+      amountUsd: investmentUsd,
+    }]
+    : []
+
+  return calculatePaybackFromSpendings({
+    rows,
+    currency,
+    launchDate,
+    spendings: [...initialSpendings, ...spendings],
+    spendingUsdRate: (spending) => spending.type === 'initial'
+      ? launchUsdRate
+      : spendingUsdRate?.(spending) ?? launchUsdRate,
+    today,
+  })
+}
+
 describe('date durations', () => {
   it('calculates full months and days between dates', () => {
     expect(fullDurationBetween(new Date('2026-01-15T00:00:00'), new Date('2027-03-20T00:00:00'))).toEqual({ months: 14, days: 5 })
@@ -45,6 +88,22 @@ describe('date durations', () => {
 })
 
 describe('payback', () => {
+  it('uses split initial payments with their own dates and rates', () => {
+    const result = calculatePaybackFromSpendings({
+      rows: [month(0, '2026-03-01', 50)],
+      spendings: [
+        { id: 1, date: new Date('2025-12-20T00:00:00'), type: 'initial', amountUsd: 100 },
+        { id: 2, date: new Date('2026-02-10T00:00:00'), type: 'initial', amountUsd: 50 },
+      ],
+      spendingUsdRate: (spending) => spending.id === 1 ? 40 : 50,
+      currency: 'UAH',
+      launchDate: new Date('2026-03-01T00:00:00'),
+    })
+
+    expect(result?.investmentUsd).toBe(150)
+    expect(result?.investment).toBe(6_500)
+  })
+
   it('adds both spending types to payback while keeping monthly operational ROI unchanged', () => {
     const rows = [month(5_000, '2026-08-01', 50)]
     const result = calculatePayback({

@@ -61,32 +61,26 @@ const ROI_FORECAST_MAX_YEARS = 60
 
 export function calculatePayback({
   rows,
-  investmentUsd,
   currency,
-  launchUsdRate,
   launchDate,
-  spendings = [],
+  spendings,
   spendingUsdRate,
   today = new Date(),
 }: {
   readonly rows: readonly MonthRow[]
-  readonly investmentUsd: number
   readonly currency: Currency
-  readonly launchUsdRate: number
   readonly launchDate?: Date
-  readonly spendings?: readonly PlantSpending[]
-  readonly spendingUsdRate?: (spending: PlantSpending) => number
+  readonly spendings: readonly PlantSpending[]
+  readonly spendingUsdRate: (spending: PlantSpending) => number
   readonly today?: Date
 }): PaybackResult | null {
-  const totalInvestment = totalInvestmentUsd(investmentUsd, spendings)
+  const totalInvestment = totalInvestmentUsd(spendings)
   if (!totalInvestment) return null
 
   const investment = totalInvestmentMoney({
-    initialInvestmentUsd: investmentUsd,
-    launchUsdRate,
     spendings,
     currency,
-    spendingUsdRate: spendingUsdRate ?? (() => launchUsdRate),
+    spendingUsdRate,
   })
   const recovered = sumRowsRoiMoney(rows, currency)
   const remaining = Math.max(0, investment - recovered)
