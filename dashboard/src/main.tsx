@@ -2150,6 +2150,14 @@ function App({
     }
     selectViewMode(nextViewMode);
   };
+  // Views stay mounted and are only hidden/shown, so the document keeps the previous view's scroll
+  // offset. Reset it as soon as the new view is committed (before paint), whatever triggered the switch.
+  const previousViewModeRef = useRef(viewMode);
+  React.useLayoutEffect(() => {
+    if (previousViewModeRef.current === viewMode) return;
+    previousViewModeRef.current = viewMode;
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [viewMode]);
   const closeMobileSettings = React.useCallback(() => {
     setMobileSettingsOpen(false);
     window.requestAnimationFrame(() => mobileSettingsButtonRef.current?.focus());
