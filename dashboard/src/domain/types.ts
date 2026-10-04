@@ -178,6 +178,7 @@ export interface DataState {
   readonly scopes: readonly string[]
   readonly capacityKwp?: number
   readonly modules?: number
+  readonly pvs: readonly PvField[]
   readonly spendings: readonly PlantSpending[]
   readonly launchDate?: Date
   readonly commercialDate?: Date
@@ -198,6 +199,7 @@ export interface PlantComparison {
   readonly scopes: readonly string[]
   readonly capacityKwp?: number
   readonly modules?: number
+  readonly pvs: readonly PvField[]
   readonly launchDate?: Date
   readonly commercialDate?: Date
   readonly projection?: ProductionProjection | null
@@ -224,6 +226,19 @@ export interface EnergySnapshot {
   readonly importNight: number
   readonly consumedDay: number
   readonly consumedNight: number
+}
+
+export interface PvField {
+  readonly id: string
+  readonly modules: number
+  readonly azimuth: number
+  readonly power: number
+  readonly slope: number
+  readonly elevation: number
+  readonly lat?: number
+  readonly lng?: number
+  readonly loss: number
+  readonly mounting: string
 }
 
 export interface ProductionProjection {

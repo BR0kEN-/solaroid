@@ -1,6 +1,6 @@
 import { API_URL } from '../config'
 import { balance, consumedPrice, consumedTotal, importTotal, payment, savings } from '../domain/formulas'
-import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantSpending, PlantSpendingType, ProductionProjection, ProjectionIssue, Tariff, UtilityMeterRecordDates } from '../domain/types'
+import type { EnergySnapshot, ExportTax, GreenTariffReport, LoadedData, MonthReceipt, MonthRow, PlantComparison, PlantSpending, PlantSpendingType, ProductionProjection, ProjectionIssue, PvField, Tariff, UtilityMeterRecordDates } from '../domain/types'
 
 interface PlantRecord {
   readonly id: string
@@ -9,6 +9,7 @@ interface PlantRecord {
   readonly electric_heating_import_threshold_kwh?: number | null
   readonly capacity_kwp?: number
   readonly modules?: number
+  readonly pvs?: readonly PvField[]
   readonly updated_at?: string
 }
 
@@ -214,6 +215,7 @@ export function toLoadedPlant({
     scopes: [],
     capacityKwp: plant.capacity_kwp,
     modules: plant.modules,
+    pvs: plant.pvs ?? [],
     launchDate: parseDate(plant.launch_date),
     commercialDate,
     projection: toProductionProjection(projection),

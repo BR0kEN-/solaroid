@@ -64,6 +64,19 @@ declare global {
           readonly modules: number
         }
 
+        interface AccessibleField {
+          readonly id: string
+          readonly modules: number
+          readonly azimuth: number
+          readonly power: number
+          readonly slope: number
+          readonly elevation: number
+          readonly lat?: number
+          readonly lng?: number
+          readonly loss: number
+          readonly mounting: string
+        }
+
         interface IncreaseFieldOperation {
           readonly kind: 'increase_field'
           readonly field_id: string
@@ -111,6 +124,7 @@ declare global {
         readonly electric_heating_import_threshold_kwh?: number
         readonly capacity_kwp?: number
         readonly modules?: number
+        readonly pvs?: readonly Pv.AccessibleField[]
         readonly created_at: Date.Iso8601
         readonly updated_at: Date.Iso8601
       }

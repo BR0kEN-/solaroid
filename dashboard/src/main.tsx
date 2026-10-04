@@ -46,7 +46,7 @@ import {
   totalInvestmentMoney,
   type ImportCostBreakdown,
 } from "./domain/formulas";
-import type { DataState, LoadedData, MonthRow, PlantComparison, PlantSpending, ProductionProjection, Tariff } from "./domain/types";
+import type { DataState, LoadedData, MonthRow, PlantComparison, PlantSpending, ProductionProjection, PvField, Tariff } from "./domain/types";
 import { PdfPreview } from "./PdfPreview";
 import {
   EMPTY_CALCULATION_LINK_STATE,
@@ -1165,6 +1165,107 @@ function comparisonDisplayDelta(value: number, invertSign?: boolean) {
   return invertSign ? -value : value;
 }
 
+interface PvFieldPair {
+  readonly first?: PvField;
+  readonly second?: PvField;
+}
+
+interface PvCoordinate {
+  readonly lat: number;
+  readonly lng: number;
+}
+
+function azimuthDistance(first: number, second: number) {
+  const diff = Math.abs(first - second) % 360;
+  return Math.min(diff, 360 - diff);
+}
+
+function pairPvFieldsByAzimuth(firstFields: readonly PvField[], secondFields: readonly PvField[]): readonly PvFieldPair[] {
+  const firstSorted = [...firstFields].sort((a, b) => a.azimuth - b.azimuth);
+  const remainingSecond = [...secondFields].sort((a, b) => a.azimuth - b.azimuth);
+  const pairs: PvFieldPair[] = [];
+
+  for (const first of firstSorted) {
+    let matchIndex = -1;
+    let matchDistance = Number.POSITIVE_INFINITY;
+
+    remainingSecond.forEach((second, index) => {
+      const distance = azimuthDistance(first.azimuth, second.azimuth);
+      if (distance < matchDistance) {
+        matchDistance = distance;
+        matchIndex = index;
+      }
+    });
+
+    const second = matchIndex >= 0 ? remainingSecond.splice(matchIndex, 1)[0] : undefined;
+    pairs.push({ first, second });
+  }
+
+  remainingSecond.forEach((second) => pairs.push({ second }));
+  return pairs.sort((a, b) => (a.first?.azimuth ?? a.second?.azimuth ?? 0) - (b.first?.azimuth ?? b.second?.azimuth ?? 0));
+}
+
+function pvCoordinate(field: PvField): PvCoordinate | undefined {
+  if (typeof field.lat !== "number" || !Number.isFinite(field.lat)) return undefined;
+  if (typeof field.lng !== "number" || !Number.isFinite(field.lng)) return undefined;
+  return { lat: field.lat, lng: field.lng };
+}
+
+function averageCoordinate(fields: readonly PvField[]): PvCoordinate | undefined {
+  const coordinates = fields.map(pvCoordinate).filter((coordinate): coordinate is PvCoordinate => coordinate !== undefined);
+  if (!coordinates.length) return undefined;
+  return {
+    lat: coordinates.reduce((sum, field) => sum + field.lat, 0) / coordinates.length,
+    lng: coordinates.reduce((sum, field) => sum + field.lng, 0) / coordinates.length,
+  };
+}
+
+function distanceKm(first?: PvCoordinate, second?: PvCoordinate) {
+  if (!first || !second) return undefined;
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const earthKm = 6371;
+  const dLat = toRad(second.lat - first.lat);
+  const dLng = toRad(second.lng - first.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(first.lat)) * Math.cos(toRad(second.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthKm * Math.asin(Math.sqrt(a));
+}
+
+function formatPvDistance(firstFields: readonly PvField[], secondFields: readonly PvField[]) {
+  const km = distanceKm(averageCoordinate(firstFields), averageCoordinate(secondFields));
+  if (km === undefined) return undefined;
+  if (km < 1) return `${formatNumber(km * 1000, 0, 0)} m`;
+  return `${formatNumber(km, 1, 1)} km`;
+}
+
+function formatPvFieldValue(field: PvField | undefined, row: "power" | "mounting" | "azimuth" | "slope" | "location" | "elevation", lang: Lang) {
+  if (!field) return "—";
+  if (row === "power") return formatKwp(field.power / 1000, lang);
+  if (row === "mounting") return formatMounting(field.mounting, lang);
+  if (row === "azimuth") return `${formatNumber(field.azimuth, 0, 0)}°`;
+  if (row === "slope") return `${formatNumber(field.slope, 0, 0)}°`;
+  if (row === "location") {
+    const coordinate = pvCoordinate(field);
+    if (!coordinate) return "—";
+
+    return (
+      <a
+        className="production-setup-map-link"
+        href={`https://www.google.com/maps?q=${coordinate.lat},${coordinate.lng}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        <span>{formatNumber(coordinate.lat, 6, 4)}</span>
+        <span>{formatNumber(coordinate.lng, 6, 4)}</span>
+      </a>
+    );
+  }
+  return `${formatNumber(field.elevation, 0, 0)} m`;
+}
+
+function hasLocationScope(scopes: readonly string[] | undefined) {
+  return scopes?.includes("loc") ?? false;
+}
+
 function ProductionCapacityInfo({
   firstLabel,
   secondLabel,
@@ -1174,6 +1275,10 @@ function ProductionCapacityInfo({
   secondCapacity,
   firstExpected,
   secondExpected,
+  firstPvs,
+  secondPvs,
+  firstScopes,
+  secondScopes,
   lang,
 }: {
   readonly firstLabel: string;
@@ -1184,6 +1289,10 @@ function ProductionCapacityInfo({
   readonly secondCapacity?: number;
   readonly firstExpected?: number;
   readonly secondExpected?: number;
+  readonly firstPvs: readonly PvField[];
+  readonly secondPvs: readonly PvField[];
+  readonly firstScopes: readonly string[];
+  readonly secondScopes: readonly string[];
   readonly lang: Lang;
 }) {
   const capacityPct = firstCapacity && secondCapacity ? capacityDeltaPct(firstCapacity, secondCapacity) : undefined;
@@ -1203,44 +1312,60 @@ function ProductionCapacityInfo({
   const capacityNote = lang === "uk"
     ? "Для періоду зі зміною конфігурації потужність зважена за активними календарними днями."
     : "For a period spanning an upgrade, capacity is weighted by active calendar days.";
+  const setupPairs = pairPvFieldsByAzimuth(firstPvs, secondPvs);
+  const canShowFirstLocation = hasLocationScope(firstScopes) && firstPvs.some((field) => pvCoordinate(field) !== undefined);
+  const canShowSecondLocation = hasLocationScope(secondScopes) && secondPvs.some((field) => pvCoordinate(field) !== undefined);
+  const setupDistance = canShowFirstLocation && canShowSecondLocation && setupPairs.length
+    ? formatPvDistance(firstPvs, secondPvs)
+    : undefined;
+  const setupRows: readonly (readonly [string, Parameters<typeof formatPvFieldValue>[1]])[] = [
+    [lang === "uk" ? "Потужність" : "Capacity", "power"],
+    [lang === "uk" ? "Монтаж" : "Mounting", "mounting"],
+    [lang === "uk" ? "Азимут" : "Azimuth", "azimuth"],
+    [lang === "uk" ? "Нахил" : "Tilt", "slope"],
+    [lang === "uk" ? "Висота" : "Elevation", "elevation"],
+    ...(canShowFirstLocation || canShowSecondLocation ? [[lang === "uk" ? "Локація" : "Location", "location"] as const] : []),
+  ];
   return (
     <div className="info-stack">
-      <table className="price-comparison-table production-capacity-table">
-        <thead>
-          <tr>
-            <th />
-            <th>{firstLabel}</th>
-            <th>{secondLabel}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th>{productionLabel}</th>
-            <td><span className="production-capacity-value">{formatKwh(firstProduction, lang)}</span></td>
-            <td><span className="production-capacity-value">{formatKwh(secondProduction, lang)}</span></td>
-          </tr>
-          <tr>
-            <th>{capacityLabel}</th>
-            <td><span className="production-capacity-value">{firstCapacity === undefined ? "—" : formatNumber(firstCapacity, 2, 2)}</span></td>
-            <td><span className="production-capacity-value">{secondCapacity === undefined ? "—" : formatNumber(secondCapacity, 2, 2)}</span></td>
-          </tr>
-          <tr>
-            <th>{expectedLabel}</th>
-            <td><span className="production-capacity-value">{firstExpected === undefined ? "—" : formatKwh(firstExpected, lang)}</span></td>
-            <td><span className="production-capacity-value">{secondExpected === undefined ? "—" : formatKwh(secondExpected, lang)}</span></td>
-          </tr>
-          <tr>
-            <th>{performanceLabel}</th>
-            <td><span className="production-capacity-value">{firstPerformance === undefined ? "—" : `${formatNumber(firstPerformance, 2, 2)}%`}</span></td>
-            <td><span className="production-capacity-value">{secondPerformance === undefined ? "—" : `${formatNumber(secondPerformance, 2, 2)}%`}</span></td>
-          </tr>
-          <tr>
-            <th>{varianceLabel}</th>
-            <td><span className="production-capacity-value">{firstVariance === undefined ? "—" : formatSignedKwh(firstVariance, lang)}</span></td>
-            <td><span className="production-capacity-value">{secondVariance === undefined ? "—" : formatSignedKwh(secondVariance, lang)}</span></td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="chart-inspector production-capacity-inspector">
+        <table className="chart-inspector-table production-capacity-table">
+          <thead>
+            <tr>
+              <th />
+              <th>{firstLabel}</th>
+              <th>{secondLabel}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th>{productionLabel}</th>
+              <td><span className="production-capacity-value">{formatKwh(firstProduction, lang)}</span></td>
+              <td><span className="production-capacity-value">{formatKwh(secondProduction, lang)}</span></td>
+            </tr>
+            <tr>
+              <th>{capacityLabel}</th>
+              <td><span className="production-capacity-value">{firstCapacity === undefined ? "—" : formatNumber(firstCapacity, 2, 2)}</span></td>
+              <td><span className="production-capacity-value">{secondCapacity === undefined ? "—" : formatNumber(secondCapacity, 2, 2)}</span></td>
+            </tr>
+            <tr>
+              <th>{expectedLabel}</th>
+              <td><span className="production-capacity-value">{firstExpected === undefined ? "—" : formatKwh(firstExpected, lang)}</span></td>
+              <td><span className="production-capacity-value">{secondExpected === undefined ? "—" : formatKwh(secondExpected, lang)}</span></td>
+            </tr>
+            <tr>
+              <th>{performanceLabel}</th>
+              <td><span className="production-capacity-value">{firstPerformance === undefined ? "—" : `${formatNumber(firstPerformance, 2, 2)}%`}</span></td>
+              <td><span className="production-capacity-value">{secondPerformance === undefined ? "—" : `${formatNumber(secondPerformance, 2, 2)}%`}</span></td>
+            </tr>
+            <tr>
+              <th>{varianceLabel}</th>
+              <td><span className="production-capacity-value">{firstVariance === undefined ? "—" : formatSignedKwh(firstVariance, lang)}</span></td>
+              <td><span className="production-capacity-value">{secondVariance === undefined ? "—" : formatSignedKwh(secondVariance, lang)}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <p className="production-capacity-note production-capacity-note-below">{capacityNote}</p>
       <div className="production-capacity-cards">
         <section className="production-capacity-card">
@@ -1266,6 +1391,41 @@ function ProductionCapacityInfo({
           </div>
         </section>
       </div>
+      {setupPairs.length > 0 && (
+        <section className="production-setup">
+          <strong>{lang === "uk" ? "Поточні налаштування масивів" : "Current array setup"}</strong>
+          <div className="production-setup-scroller">
+            {setupPairs.map((pair, index) => (
+              <section className="chart-inspector production-setup-card" key={`${pair.first?.id ?? "none"}-${pair.second?.id ?? "none"}-${index}`}>
+                <table className="chart-inspector-table production-setup-table">
+                  <thead>
+                    <tr>
+                      <th>{lang === "uk" ? `Масив ${index + 1}` : `Array ${index + 1}`}</th>
+                      <th>{firstLabel}</th>
+                      <th>{secondLabel}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {setupRows.map(([label, row]) => (
+                      <tr key={row}>
+                        <th>{label}</th>
+                        <td>{formatPvFieldValue(pair.first, row, lang)}</td>
+                        <td>{formatPvFieldValue(pair.second, row, lang)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            ))}
+          </div>
+          {setupDistance && (
+            <div className="production-capacity-card-row production-setup-distance">
+              <span>{lang === "uk" ? "Відстань між станціями" : "Plant distance"}</span>
+              <b>{setupDistance}</b>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -1413,6 +1573,15 @@ function useDesktopChartEndScroll(
 function projectedProduction(row: MonthRow, projection?: ProductionProjection | null, launchDate?: Date) {
   const value = expectedProductionForRow(row, projection, launchDate);
   return value !== undefined && Number.isFinite(value) ? value : undefined;
+}
+
+function formatMounting(value: string, lang: Lang) {
+  if (lang !== "uk") return value;
+  const mounting: Record<string, string> = {
+    building: "на будівлі",
+    free: "на землі",
+  };
+  return mounting[value] ?? value;
 }
 
 function pct(value: number) {
@@ -1744,6 +1913,7 @@ function useDashboardData(initialData?: LoadedData): DashboardDataState {
     plantId: initialData?.plantId ?? "",
     capacityKwp: initialData?.capacityKwp,
     modules: initialData?.modules,
+    pvs: initialData?.pvs ?? [],
     spendings: initialData?.spendings ?? [],
     launchDate: initialData?.launchDate,
     commercialDate: initialData?.commercialDate,
@@ -1793,6 +1963,7 @@ interface PlantComparisonSource {
   readonly scopes: readonly string[];
   readonly capacityKwp?: number;
   readonly modules?: number;
+  readonly pvs: readonly PvField[];
   readonly launchDate?: Date;
   readonly commercialDate?: Date;
   readonly projection?: ProductionProjection | null;
@@ -1808,6 +1979,7 @@ function toPlantComparison(source: PlantComparisonSource): PlantComparison {
     scopes: source.scopes,
     capacityKwp: source.capacityKwp,
     modules: source.modules,
+    pvs: source.pvs,
     launchDate: source.launchDate,
     commercialDate: source.commercialDate,
     projection: source.projection,
@@ -2051,6 +2223,7 @@ function App({
     dataState.launchDate,
     dataState.plantId,
     dataState.projection,
+    dataState.pvs,
     dataState.rows,
     dataState.scopes,
     dataState.sheetUpdatedAt,
@@ -2783,6 +2956,7 @@ function App({
       };
     }
     if (infoModal === "investmentDetails") {
+      const fields = dataState.pvs;
       return {
         title: t.plantInformation,
         body: (
@@ -2838,6 +3012,23 @@ function App({
                 spendingUsdRateById={spendingUsdRateById}
               />
             </section>
+            {fields.length > 0 ? (
+              <section className="info-modal-section">
+                <h3>{t.pvgisFields} ({fields.length})</h3>
+                <div className="info-stack">
+                  {fields.map((field, index) => (
+                    <PvSpecTable
+                      field={field}
+                      t={t}
+                      lang={lang}
+                      showLocation={hasLocationScope(dataState.scopes)}
+                      title={lang === "uk" ? `Поле ${index + 1}` : `Field ${index + 1}`}
+                      key={field.id}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
         ),
       };
@@ -5390,6 +5581,8 @@ function PlantPeriodComparisonCharts({
     launchDate: plant.launchDate,
     capacityKwp: plant.capacityKwp,
     modules: plant.modules,
+    pvs: plant.pvs,
+    scopes: plant.scopes,
     rows:
       mode === "monthly"
         ? plant.rows.filter((row) => String(row.date.getFullYear()) === period)
@@ -5467,27 +5660,21 @@ function PlantPeriodComparisonCharts({
       : null}
     <section className="chart-grid plant-comparison-chart-grid">
       {items.map((item) => (
-        <article className="plant-comparison-chart chart-panel" key={item.title}>
-          <div className="chart-head chart-head-without-legend">
-            <div className="chart-title">
-              <h2>{item.title}</h2>
-            </div>
-          </div>
-          <PlantPeriodLineChart
-            plants={periodPlants}
-            mode={mode}
-            value={item.value}
-            format={item.format}
-            unit={item.unit}
-            higherIsBetter={item.higherIsBetter}
-            invertDeltaSign={item.invertDeltaSign}
-            invertScale={item.invertScale}
-            capacityContext={item.capacityContext}
-            metricTitle={item.title}
-            lang={lang}
-            onDeltaInfo={onDeltaInfo}
-          />
-        </article>
+        <PlantPeriodLineChart
+          key={item.title}
+          plants={periodPlants}
+          mode={mode}
+          value={item.value}
+          format={item.format}
+          unit={item.unit}
+          higherIsBetter={item.higherIsBetter}
+          invertDeltaSign={item.invertDeltaSign}
+          invertScale={item.invertScale}
+          capacityContext={item.capacityContext}
+          metricTitle={item.title}
+          lang={lang}
+          onDeltaInfo={onDeltaInfo}
+        />
       ))}
     </section>
     </>
@@ -5516,6 +5703,8 @@ function PlantPeriodLineChart({
     readonly launchDate?: Date;
     readonly capacityKwp?: number;
     readonly modules?: number;
+    readonly pvs: readonly PvField[];
+    readonly scopes: readonly string[];
     readonly projection?: ProductionProjection | null;
     readonly projectionIssue?: DataState["projectionIssue"];
   }[];
@@ -5618,6 +5807,10 @@ function PlantPeriodLineChart({
                 secondCapacity={dateWeightedProjectionCapacity([secondRow], secondPlant.projection, secondPlant.launchDate) ?? secondPlant.capacityKwp}
                 firstExpected={firstExpected}
                 secondExpected={secondExpected}
+                firstPvs={firstPlant.pvs}
+                secondPvs={secondPlant.pvs}
+                firstScopes={firstPlant.scopes}
+                secondScopes={secondPlant.scopes}
                 lang={lang}
               />
             )
@@ -5647,9 +5840,32 @@ function PlantPeriodLineChart({
     [capacityContext, deltaByPeriod, format, higherIsBetter, invertDeltaSign, lang, metricTitle, mode, periodKeys, plants, rowByPlantAndDay, value],
   );
   const { selection, selectedKey: selectedPeriod, target } = useChartInspector(inspectors, latestPeriod);
+  const selectedInfo = capacityContext && selection?.deltaInfo
+    ? {
+      title: selection.deltaInfoTitle ?? selection.month,
+      body: selection.deltaInfo,
+    }
+    : undefined;
 
   return (
-    <>
+    <article className="plant-comparison-chart chart-panel">
+      <div className="chart-head chart-head-without-legend">
+        <div className="chart-title">
+          <h2>{metricTitle}</h2>
+          {selectedInfo ? (
+            <div className="chart-title-actions">
+              <button
+                type="button"
+                className="chart-summary-info-button chart-panel-info-button"
+                aria-label={lang === "uk" ? "Деталі генерації" : "Production details"}
+                onClick={() => onDeltaInfo(selectedInfo.title, selectedInfo.body)}
+              >
+                <Info size={14} />
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
       <div className="fixed-axis-chart-wrap">
         <FixedChartAxis
           ticks={ticks}
@@ -5723,9 +5939,8 @@ function PlantPeriodLineChart({
       <ChartInspector
         selection={selection}
         hint={i18n[lang].tapBarOrDot}
-        onDeltaInfo={capacityContext ? onDeltaInfo : undefined}
       />
-    </>
+    </article>
   );
 }
 
@@ -10295,6 +10510,58 @@ function InvestmentBreakdown({
         </table>
       </div>
     </div>
+  );
+}
+
+function PvSpecTable({
+  field,
+  t,
+  lang,
+  showLocation,
+  title,
+}: {
+  readonly field: PvField;
+  readonly t: Record<string, string>;
+  readonly lang: Lang;
+  readonly showLocation: boolean;
+  readonly title: string;
+}) {
+  const coordinate = pvCoordinate(field);
+  const location = coordinate ? `${formatNumber(coordinate.lat, 6, 4)}, ${formatNumber(coordinate.lng, 6, 4)}` : undefined;
+  const items: readonly ChartInspectorItem[] = [
+    { label: t.power, color: colors.amber, value: formatKwp(field.power / 1000, lang), cells: [formatKwp(field.power / 1000, lang)] },
+    { label: t.azimuth, color: colors.blue, value: `${formatNumber(field.azimuth, 0, 0)}°`, cells: [`${formatNumber(field.azimuth, 0, 0)}°`] },
+    { label: t.slope, color: colors.indigo, value: `${formatNumber(field.slope, 0, 0)}°`, cells: [`${formatNumber(field.slope, 0, 0)}°`] },
+    { label: t.loss, color: colors.rose, value: `${formatNumber(field.loss, 2, 0)}%`, cells: [`${formatNumber(field.loss, 2, 0)}%`] },
+    { label: t.mounting, color: colors.green, value: formatMounting(field.mounting, lang), cells: [formatMounting(field.mounting, lang)] },
+    { label: t.elevation, color: colors.ink, value: `${formatNumber(field.elevation, 0, 0)} m`, cells: [`${formatNumber(field.elevation, 0, 0)} m`] },
+    ...(showLocation && coordinate && location ? [{
+      label: t.location,
+      color: colors.ink,
+      value: location,
+      cells: [
+        <a
+          className="pv-location-link"
+          href={`https://www.google.com/maps?q=${coordinate.lat},${coordinate.lng}`}
+          target="_blank"
+          rel="noreferrer"
+          key="location"
+        >
+          {location}
+        </a>,
+      ],
+    }] : []),
+  ];
+
+  return (
+    <ChartInspector
+      hint=""
+      selection={{
+        month: title,
+        columns: [t.value],
+        items,
+      }}
+    />
   );
 }
 

@@ -81,14 +81,14 @@ Important auth model:
 - Dashboard users can list and open green-tariff documents only for the token's primary `plant_id`, but cannot upload or replace them.
 - Extra comparison/read access never grants document listing or signed-URL access.
 - Plant spending records are returned only for the token's primary plant and are omitted from comparison-plant responses.
-- Own-plant projection periods retain spending IDs for investment-breakdown linking. Comparison responses omit spending IDs, PV operations, coordinates, and PV field configuration; only derived capacity and projection periods remain.
+- Own-plant projection periods retain spending IDs. Comparison responses omit spending IDs and raw PV operations. Current PV fields are derived from the event timeline; coordinates are included only with `loc` access.
 - Raw access tokens are still used for Home Assistant ingestion.
 - Each raw access token belongs to one plant and has full access to that own plant; own-plant access is not scope-limited.
 - Extra readable plants are attached through `access_token_read_scopes` and are scope-limited.
 - `reads` is an object shaped as `{ [plantId]: scopes[] }`.
 - For raw ingest tokens, `reads` lists extra readable plants only. It does not need to include the token's own plant because own-plant access is full.
 - For Supabase Auth tokens, `reads` includes every assigned readable plant, including the current/main plant. Scopes on the current plant matter for external users.
-- Existing scope arrays remain available for access policy extensions. PV field configuration and coordinates are never returned by plant reads.
+- The `loc` scope allows current PV field coordinates. Without it, `lat` and `lng` are omitted while non-location field configuration remains readable.
 - Writes must only affect the token's own plant.
 - Reads can target the token plant or plants listed in read scopes.
 - Tokens are stored as SHA-256 hashes, not raw strings.
@@ -104,7 +104,7 @@ Example read scope:
 
 ```sql
 insert into public.access_token_read_scopes (token_id, plant_id, scopes)
-select id, 'bondas', '[]'::jsonb
+select id, 'bondas', '["loc"]'::jsonb
 from public.access_tokens
 where plant_id = 'levched';
 ```
@@ -113,8 +113,10 @@ Example plant assignment for a confirmed Supabase Auth user:
 
 ```sql
 insert into public.user_plant_access (user_id, plant_id, scopes)
-values ('AUTH_USER_ID', 'PLANT_ID', '[]'::jsonb);
+values ('AUTH_USER_ID', 'PLANT_ID', '["loc"]'::jsonb);
 ```
+
+Use an empty scope array to allow plant data without disclosing PV coordinates.
 
 ## Edge Function API
 
@@ -267,7 +269,7 @@ Current read behavior:
 - No `granularity`: returns full plant data plus `reads` as `{ [plantId]: scopes[] }`.
 - Raw ingest tokens have full access to their own plant even though own plant is not listed in `reads`.
 - Supabase Auth tokens use `reads[plantId]` for every assigned plant, including the current plant.
-- Own-plant reads without `loc` redact PV coordinates. Comparison reads omit the complete PV field configuration regardless of scope and expose only derived capacity plus sanitized projection periods. PVGIS always runs against the private stored configuration before response filtering.
+- Raw ingest tokens have full location access to their own plant. Supabase Auth users and extra readable plants require `loc`. Without it, current event-derived PV fields omit `lat` and `lng`. Raw event operations are never returned. PVGIS always runs against the complete server-side configuration before response filtering.
 - `granularity=YYYY-MM-DD`: returns daily row for that date.
 - `granularity=YYYY-MM`: intended for range-oriented reads. Check `client.ts` before relying on this, because this behavior has changed during comparison work.
 - `granularity=YYYY`: returns yearly range data.
@@ -307,8 +309,8 @@ Dashboard access behavior:
 
 - HA URLs with `#token=...` are treated as raw ingest-token access. The selected own plant has full location access.
 - Portal/Auth URLs use Supabase Auth access tokens. The dashboard uses `reads[plantId]` scopes from the Edge Function, including for the selected/current plant.
-- If a plant lacks `loc`, location links are hidden. Redacted `0,0` coordinates are not shown as map links.
-- In the monthly PVGIS popup, panel location is shown only when the current plant has `loc`.
+- If a plant lacks `loc`, location links are hidden because coordinates are omitted from the response.
+- Plant information and comparison setup show panel locations only for plants with `loc`.
 - Production comparison uses each plant's stage-correct PVGIS expectation. Its popup shows actual production, PVGIS expectation, `actual / expected` performance, variance, and date-weighted capacity for periods spanning an upgrade.
 - Comparison deltas are first plant minus second plant. For production, export, ROI, and net payment, higher is better. For import, consumed energy, and inverter losses, lower is better but the displayed sign stays mathematical. For balance, lower/negative is better and the displayed sign is inverted so a better balance reads as positive.
 
