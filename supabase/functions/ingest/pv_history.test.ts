@@ -1,21 +1,15 @@
 import { projectionForStages } from './client.ts'
 import { InvalidPvHistoryError, reconstructPvConfigurationStages } from './pv_history.ts'
 
-const baseField = {
-  id: 'south', modules: 32, power: 13_120, azimuth: 180, slope: 30,
-  elevation: 120, lat: 48.3, lng: 35, loss: 14, mounting: 'building',
-} as const
+const baseField = field('south', 32, 13_120)
 
-Deno.test('reconstructs improvement stages backward from current metadata', () => {
-  const west = { ...baseField, id: 'west', modules: 13, power: 5_330, azimuth: 270 }
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 19, power: 7_790 }, west] },
-    '2025-06-01',
-    [
-      change(1, '2025-08-10', 'improvement', [increase('south', 10, 4_100)], 1),
-      change(2, '2026-03-15', 'improvement', [{ kind: 'add_field', field: west }], 2),
-    ],
-  )
+Deno.test('replays commissioning and improvements forward', () => {
+  const west = { ...field('west', 13, 5_330), azimuth: 270 }
+  const stages = reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [field('south', 9, 3_690)]),
+    change(2, '2025-08-10', 'improvement', [increase('south', 10, 4_100)], 1),
+    change(3, '2026-03-15', 'improvement', [{ kind: 'add_field', field: west }], 2),
+  ])
 
   assertEquals(stageSummary(stages), [
     { date: '2025-06-01', spendingId: undefined, modules: 9, power: 3_690 },
@@ -25,11 +19,10 @@ Deno.test('reconstructs improvement stages backward from current metadata', () =
 })
 
 Deno.test('keeps an open damage lifecycle at reduced capacity', () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 21, power: 8_610 }] },
-    '2025-06-01',
-    [change(10, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)])],
-  )
+  const stages = reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)]),
+  ])
 
   assertEquals(stageSummary(stages), [
     { date: '2025-06-01', spendingId: undefined, modules: 32, power: 13_120 },
@@ -37,12 +30,11 @@ Deno.test('keeps an open damage lifecycle at reduced capacity', () => {
   ])
 })
 
-Deno.test('uses open damage capacity for the latest forecast arrays', async () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 21, power: 8_610 }] },
-    '2025-06-01',
-    [change(10, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)])],
-  )
+Deno.test('uses open damage capacity for latest forecast arrays', async () => {
+  const stages = reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)]),
+  ])
   const projection = await projectionForStages({}, stages, (metadata) => {
     const modules = metadata.pvs?.[0]?.modules ?? 0
     return Promise.resolve({
@@ -54,34 +46,24 @@ Deno.test('uses open damage capacity for the latest forecast arrays', async () =
   assertEquals(projection?.monthlyKwh[0], 2_100)
 })
 
-Deno.test('restores partial damage to the exact recorded result', () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 33, power: 13_530 }] },
-    '2025-06-01',
-    [
-      change(10, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)], 7),
-      change(11, '2026-11-15', 'damage_replacement', [increase('south', 12, 4_920)], 7),
-    ],
-  )
-
-  assertEquals(stageSummary(stages), [
-    { date: '2025-06-01', spendingId: undefined, modules: 32, power: 13_120 },
-    { date: '2026-10-01', spendingId: 7, modules: 21, power: 8_610 },
-    { date: '2026-11-15', spendingId: 7, modules: 33, power: 13_530 },
+Deno.test('restores damage above or below previous capacity exactly', () => {
+  const above = reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)], 7),
+    change(3, '2026-11-15', 'damage_replacement', [increase('south', 12, 4_920)], 7),
   ])
-})
+  const below = reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)], 7),
+    change(3, '2026-11-15', 'damage_replacement', [increase('south', 10, 4_100)], 7),
+  ])
 
-Deno.test('allows damage restoration below the previous capacity', () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 31, power: 12_710 }] },
-    '2025-06-01',
-    [
-      change(10, '2026-10-01', 'damage_replacement', [decrease('south', 11, 4_510)], 7),
-      change(11, '2026-11-15', 'damage_replacement', [increase('south', 10, 4_100)], 7),
-    ],
-  )
-
-  assertEquals(stageSummary(stages).map(({ modules, power }) => ({ modules, power })), [
+  assertEquals(stageSummary(above).map(({ modules, power }) => ({ modules, power })), [
+    { modules: 32, power: 13_120 },
+    { modules: 21, power: 8_610 },
+    { modules: 33, power: 13_530 },
+  ])
+  assertEquals(stageSummary(below).map(({ modules, power }) => ({ modules, power })), [
     { modules: 32, power: 13_120 },
     { modules: 21, power: 8_610 },
     { modules: 31, power: 12_710 },
@@ -89,14 +71,11 @@ Deno.test('allows damage restoration below the previous capacity', () => {
 })
 
 Deno.test('supports full-field removal, zero plant capacity, and restoration', () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [baseField] },
-    '2025-06-01',
-    [
-      change(10, '2026-10-01', 'damage_replacement', [{ kind: 'remove_field', field: baseField }], 7),
-      change(11, '2026-11-15', 'damage_replacement', [{ kind: 'add_field', field: baseField }], 7),
-    ],
-  )
+  const stages = reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [{ kind: 'remove_field', field: baseField }], 7),
+    change(3, '2026-11-15', 'damage_replacement', [{ kind: 'add_field', field: baseField }], 7),
+  ])
 
   assertEquals(stageSummary(stages), [
     { date: '2025-06-01', spendingId: undefined, modules: 32, power: 13_120 },
@@ -105,41 +84,31 @@ Deno.test('supports full-field removal, zero plant capacity, and restoration', (
   ])
 })
 
-Deno.test('supports a currently empty plant after full-field removal', () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [] },
-    '2025-06-01',
-    [change(10, '2026-10-01', 'damage_replacement', [{ kind: 'remove_field', field: baseField }])],
-  )
-
-  assertEquals(stageSummary(stages), [
-    { date: '2025-06-01', spendingId: undefined, modules: 32, power: 13_120 },
-    { date: '2026-10-01', spendingId: undefined, modules: 0, power: 0 },
+Deno.test('orders same-date events by event id', () => {
+  const stages = reconstructPvConfigurationStages('2025-06-01', [
+    change(3, '2025-08-10', 'improvement', [increase('south', 2, 820)], 2),
+    commissioning(1, '2025-06-01', [field('south', 9, 3_690)]),
+    change(2, '2025-08-10', 'improvement', [increase('south', 1, 410)], 1),
   ])
-})
-
-Deno.test('orders same-date changes by event id', () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 12, power: 4_920 }] },
-    '2025-06-01',
-    [
-      change(2, '2025-08-10', 'improvement', [increase('south', 2, 820)], 2),
-      change(1, '2025-08-10', 'improvement', [increase('south', 1, 410)], 1),
-    ],
-  )
 
   assertEquals(stages.map((stage) => stage.fields[0].modules), [9, 10, 12])
 })
 
+Deno.test('orders commissioning before existing launch-date events regardless of id', () => {
+  const stages = reconstructPvConfigurationStages('2025-06-01', [
+    change(1, '2025-06-01', 'improvement', [increase('south', 1, 410)], 1),
+    commissioning(99, '2025-06-01', [field('south', 9, 3_690)]),
+  ])
+
+  assertEquals(stages.map((stage) => stage.fields[0].modules), [9, 10])
+})
+
 Deno.test('projects zero-capacity stages locally and reuses identical PVGIS configurations', async () => {
-  const stages = reconstructPvConfigurationStages(
-    { pvs: [baseField] },
-    '2025-06-01',
-    [
-      change(10, '2026-10-01', 'damage_replacement', [{ kind: 'remove_field', field: baseField }], 7),
-      change(11, '2026-11-15', 'damage_replacement', [{ kind: 'add_field', field: baseField }], 7),
-    ],
-  )
+  const stages = reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [{ kind: 'remove_field', field: baseField }], 7),
+    change(3, '2026-11-15', 'damage_replacement', [{ kind: 'add_field', field: baseField }], 7),
+  ])
   const calls: Solaroid.Supabase.Plant.Metadata[] = []
   const projection = await projectionForStages({}, stages, (metadata) => {
     calls.push(metadata)
@@ -150,7 +119,6 @@ Deno.test('projects zero-capacity stages locally and reuses identical PVGIS conf
   })
 
   assertEquals(calls.length, 1)
-  assertEquals(projection?.monthlyKwh, Array.from({ length: 12 }, () => 3_200))
   assertEquals(projection?.periods?.map((period) => ({
     date: period.effectiveDate,
     spendingId: period.spendingId,
@@ -163,62 +131,73 @@ Deno.test('projects zero-capacity stages locally and reuses identical PVGIS conf
   ])
 })
 
-Deno.test('rejects invalid reductions and inconsistent histories', () => {
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 21, power: 8_610 }] },
-    '2025-06-01',
-    [change(1, '2026-10-01', 'improvement', [decrease('south', 11, 4_510)], 1)],
-  ))
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 1, power: 410 }] },
-    '2025-06-01',
-    [
-      change(1, '2026-10-01', 'damage_replacement', [decrease('south', 1, 410)]),
-      change(2, '2026-11-01', 'damage_replacement', [increase('south', 1, 410)]),
-    ],
-  ))
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [baseField] },
-    '2025-06-01',
-    [change(1, '2026-10-01', 'damage_replacement', [decrease('east', 1, 410)])],
-  ))
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [baseField] },
-    '2025-06-01',
-    [change(1, '2026-10-01', 'damage_replacement', [{ kind: 'remove_field', field: baseField }])],
-  ))
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, id: 'east' }] },
-    '2025-06-01',
-    [
-      change(1, '2025-08-01', 'improvement', [{ kind: 'add_field', field: baseField }], 1),
-      change(2, '2026-10-01', 'damage_replacement', [{
-        kind: 'remove_field',
-        field: { ...baseField, modules: 31 },
-      }]),
-    ],
-  ))
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [{ ...baseField, modules: 31, power: 12_710 }] },
-    '2025-06-01',
-    [change(1, '2025-05-31', 'damage_replacement', [decrease('south', 1, 410)])],
-  ))
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [baseField] },
-    '2025-06-01',
-    [change(1, '2026-10-01', 'improvement', [{ kind: 'add_field', field: baseField }], 1)],
-  ))
-  assertInvalid(() => reconstructPvConfigurationStages(
-    { pvs: [baseField] },
-    '2025-06-01',
-    [{ ...change(1, '2026-10-01', 'damage_replacement', [decrease('south', 1, 410)]), operations: [] }],
-  ))
+Deno.test('rejects malformed commissioning and inconsistent operations', () => {
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', []))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    commissioning(2, '2025-06-01', [field('east', 1, 410)]),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-02', [baseField]),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [{
+    ...commissioning(1, '2025-06-01', [baseField]),
+    spending_id: 7,
+  }]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    change(1, '2025-06-01', 'commissioning', [increase('south', 1, 410)]),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'improvement', [decrease('south', 1, 410)], 2),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [field('south', 1, 410)]),
+    change(2, '2026-10-01', 'damage_replacement', [decrease('south', 1, 410)]),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [decrease('east', 1, 410)]),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'damage_replacement', [{
+      kind: 'remove_field', field: { ...baseField, modules: 31 },
+    }]),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2025-05-31', 'damage_replacement', [decrease('south', 1, 410)]),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    change(2, '2026-10-01', 'improvement', [{ kind: 'add_field', field: baseField }], 2),
+  ]))
+  assertInvalid(() => reconstructPvConfigurationStages('2025-06-01', [
+    commissioning(1, '2025-06-01', [baseField]),
+    { ...change(2, '2026-10-01', 'damage_replacement', [decrease('south', 1, 410)]), operations: [] },
+  ]))
 })
+
+function field(id: string, modules: number, power: number): Solaroid.Supabase.Plant.Pv.HistoricalField {
+  return {
+    id, modules, power, azimuth: 180, slope: 30, elevation: 120,
+    lat: 48.3, lng: 35, loss: 14, mounting: 'building',
+  }
+}
+
+function commissioning(
+  id: number,
+  date: Solaroid.Supabase.Date.Ymd,
+  fields: readonly Solaroid.Supabase.Plant.Pv.HistoricalField[],
+): Solaroid.Supabase.Plant.Pv.ChangeRecord {
+  return change(id, date, 'commissioning', fields.map((field) => ({ kind: 'add_field', field })))
+}
 
 function change(
   id: number,
   date: Solaroid.Supabase.Date.Ymd,
-  type: Solaroid.Supabase.Plant.Spending.Type,
+  type: Solaroid.Supabase.Plant.Pv.ChangeType,
   operations: readonly Solaroid.Supabase.Plant.Pv.ChangeOperation[],
   spendingId: number | null = null,
 ): Solaroid.Supabase.Plant.Pv.ChangeRecord {

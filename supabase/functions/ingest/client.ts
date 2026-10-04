@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, UPLOAD_MAX_SIZE, UPLOAD_TYPES } from './config.ts'
 import { Pvgis } from './pvgis.ts'
-import { InvalidPvHistoryError, reconstructPvConfigurationStages } from './pv_history.ts'
+import { comparePvChanges, InvalidPvHistoryError, reconstructPvConfigurationStages } from './pv_history.ts'
 import { hash } from './utils/crypto.ts'
 import { dateUtil } from './utils/date.ts'
 
@@ -392,7 +392,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
   ): Promise<{ readonly projection: Solaroid.Supabase.Pvgis.Projection | null, readonly issue?: 'invalid-history' }> {
     let stages
     try {
-      stages = reconstructPvConfigurationStages(plant.metadata, plant.launch_date, changes)
+      stages = reconstructPvConfigurationStages(plant.launch_date, changes)
     } catch (error) {
       if (!(error instanceof InvalidPvHistoryError)) throw error
       console.error('PV configuration history is invalid', { operation: error.message })
@@ -409,9 +409,7 @@ export class SupabaseClient implements Solaroid.Supabase.Dam.Storage, Solaroid.S
     if (cacheError) throw new Error('PVGIS projection cache lookup failed', { cause: cacheError })
     if (isPvgisProjectionCacheHit(cache?.metadata_hash, currentHash)) return { projection: cache?.projection ?? null }
 
-    const projection = stages.length
-      ? await projectionForStages(plant.metadata, stages)
-      : await Pvgis.getProjection(plant.metadata)
+    const projection = await projectionForStages(plant.metadata, stages)
 
     if (!projection) return { projection: null }
 
@@ -490,12 +488,19 @@ export function plantForAccess(
   projection: Solaroid.Supabase.Pvgis.Projection | null,
   includePrivateData: boolean,
 ): Solaroid.Supabase.Plant.Record {
-  if (includePrivateData) return plant
-
   const fields = plant.metadata?.pvs ?? []
   const latestPeriod = projection?.periods?.at(-1)
   const capacityKwp = latestPeriod?.capacityKwp ?? fields.reduce((sum, field) => sum + field.power, 0) / 1000
   const modules = latestPeriod?.modules ?? fields.reduce((sum, field) => sum + (field.modules ?? 0), 0)
+
+  if (includePrivateData) {
+    return {
+      ...plant,
+      ...(latestPeriod || capacityKwp > 0 ? { capacity_kwp: capacityKwp } : {}),
+      ...(latestPeriod || modules > 0 ? { modules } : {}),
+    }
+  }
+
   const { pvs: _pvs, ...publicMetadata } = plant.metadata ?? {}
 
   return {
@@ -510,12 +515,14 @@ export function pvgisProjectionCacheInput(
   plant: Pick<Solaroid.Supabase.Plant.Record, 'metadata' | 'launch_date'>,
   changes: readonly Solaroid.Supabase.Plant.Pv.ChangeRecord[],
 ) {
+  const { pvs: _legacyPvs, ...metadata } = plant.metadata
   const orderedChanges = [...changes]
-    .sort((first, second) => first.date.localeCompare(second.date) || first.id - second.id)
+    .sort(comparePvChanges)
     .map(({ id, date, type, operations }) => ({ id, date, type, operations }))
 
   return JSON.stringify({
-    m: plant.metadata,
+    v: 3,
+    m: metadata,
     launch: plant.launch_date,
     changes: orderedChanges,
     q: Pvgis.BaseQuery,
