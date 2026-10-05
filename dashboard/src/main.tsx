@@ -365,7 +365,8 @@ const i18n = {
     investmentRecovered: "investment recovered",
     recoverableByCommercialEnd: "Possible ROI by commercial period end",
     pvgisAdjustedForecast: "PVGIS-adjusted forecast",
-    commercialRecoveryCalcInfo: "Forecast uses annual production, fixed annual consumption, current tariff rules, and monthly exchange rates. Before the commercial date, only self-consumption counts. During the commercial period, surplus is paid. After it ends, the estimate assumes annual self-sufficiency through net billing: peak-season surplus covers autumn and winter imports within the same 17 MWh/year, avoiding electricity costs without a cash payout for surplus.",
+    commercialRecoveryCalcInfo: "Forecast uses annual production, an assumed 17 MWh of annual consumption, current tariff rules, and monthly exchange rates. Before the commercial date, only self-consumption counts. During the commercial period, surplus is paid. After it ends, seasonal surplus offsets later imports within that annual consumption. Surplus has no cash payout.",
+    commercialRecoveryHistoryCalcInfo: "Forecast uses annual production, annualized consumption from stored history, current tariff rules, and monthly exchange rates. Before the commercial date, only self-consumption counts. During the commercial period, surplus is paid. After it ends, seasonal surplus offsets later imports within the annual consumption. Surplus has no cash payout.",
     annualProduction: "Annual production",
     annualConsumption: "Annual consumption",
     annualSurplus: "Annual surplus",
@@ -692,7 +693,8 @@ const i18n = {
     investmentRecovered: "інвестиції повернуто",
     recoverableByCommercialEnd: "Можливе ПІ до кінця комерційного періоду",
     pvgisAdjustedForecast: "прогноз з урахуванням PVGIS",
-    commercialRecoveryCalcInfo: "Прогноз використовує річну генерацію, фіксоване річне споживання, поточні правила тарифів і місячні курси. До комерційної дати враховується лише власне споживання. У комерційний період надлишок оплачується. Після його завершення прогноз припускає річну самодостатність через net billing: надлишок пікового сонячного сезону покриває осінній і зимовий імпорт у межах тих самих 17 МВт·г/рік, тому витрати на електроенергію не виникають, а надлишок не має грошової виплати.",
+    commercialRecoveryCalcInfo: "Прогноз використовує річну генерацію, припущення про 17 МВт·г річного споживання, поточні правила тарифів і місячні курси. До комерційної дати враховується лише власне споживання. У комерційний період надлишок оплачується. Після його завершення сезонний надлишок покриває пізніший імпорт у межах цього річного споживання. Грошової виплати за надлишок немає.",
+    commercialRecoveryHistoryCalcInfo: "Прогноз використовує річну генерацію, річне споживання за збереженою історією, поточні правила тарифів і місячні курси. До комерційної дати враховується лише власне споживання. У комерційний період надлишок оплачується. Після його завершення сезонний надлишок покриває пізніший імпорт у межах річного споживання. Грошової виплати за надлишок немає.",
     annualProduction: "Річна генерація",
     annualConsumption: "Річне споживання",
     annualSurplus: "Річний надлишок",
@@ -1266,6 +1268,20 @@ function hasLocationScope(scopes: readonly string[] | undefined) {
   return scopes?.includes("loc") ?? false;
 }
 
+interface ColorCodedTableLabelProps {
+  readonly label: string;
+  readonly color: string;
+}
+
+function ColorCodedTableLabel({ label, color }: ColorCodedTableLabelProps) {
+  return (
+    <span className="chart-inspector-label">
+      <i style={{ background: color }} />
+      <span className="chart-inspector-label-text">{label}</span>
+    </span>
+  );
+}
+
 function ProductionCapacityInfo({
   firstLabel,
   secondLabel,
@@ -1305,8 +1321,9 @@ function ProductionCapacityInfo({
     ? firstPerformance - secondPerformance
     : undefined;
   const productionLabel = lang === "uk" ? "Генерація" : "Production";
-  const capacityLabel = lang === "uk" ? "Середня потужність · кВт·п" : "Average capacity · kWp";
-  const expectedLabel = lang === "uk" ? "Очікування PVGIS" : "PVGIS expected";
+  const actualLabel = lang === "uk" ? "Факт" : "Actual";
+  const capacityLabel = lang === "uk" ? "Потужність · кВт·п" : "Capacity · kWp";
+  const expectedLabel = lang === "uk" ? "Очікування PVGIS" : "PVGIS-expected";
   const performanceLabel = lang === "uk" ? "Факт / PVGIS" : "Actual / PVGIS";
   const varianceLabel = lang === "uk" ? "Відхилення" : "Variance";
   const capacityNote = lang === "uk"
@@ -1318,13 +1335,15 @@ function ProductionCapacityInfo({
   const setupDistance = canShowFirstLocation && canShowSecondLocation && setupPairs.length
     ? formatPvDistance(firstPvs, secondPvs)
     : undefined;
-  const setupRows: readonly (readonly [string, Parameters<typeof formatPvFieldValue>[1]])[] = [
-    [lang === "uk" ? "Потужність" : "Capacity", "power"],
-    [lang === "uk" ? "Монтаж" : "Mounting", "mounting"],
-    [lang === "uk" ? "Азимут" : "Azimuth", "azimuth"],
-    [lang === "uk" ? "Нахил" : "Tilt", "slope"],
-    [lang === "uk" ? "Висота" : "Elevation", "elevation"],
-    ...(canShowFirstLocation || canShowSecondLocation ? [[lang === "uk" ? "Локація" : "Location", "location"] as const] : []),
+  const setupRows: readonly (readonly [string, Parameters<typeof formatPvFieldValue>[1], string])[] = [
+    [lang === "uk" ? "Потужність" : "Capacity", "power", colors.blue],
+    [lang === "uk" ? "Монтаж" : "Mounting", "mounting", colors.green],
+    [lang === "uk" ? "Азимут" : "Azimuth", "azimuth", colors.amber],
+    [lang === "uk" ? "Нахил" : "Tilt", "slope", colors.indigo],
+    [lang === "uk" ? "Висота" : "Elevation", "elevation", colors.orange],
+    ...(canShowFirstLocation || canShowSecondLocation
+      ? [[lang === "uk" ? "Локація" : "Location", "location", colors.rose] as const]
+      : []),
   ];
   return (
     <div className="info-stack">
@@ -1339,27 +1358,27 @@ function ProductionCapacityInfo({
           </thead>
           <tbody>
             <tr>
-              <th>{productionLabel}</th>
-              <td><span className="production-capacity-value">{formatKwh(firstProduction, lang)}</span></td>
-              <td><span className="production-capacity-value">{formatKwh(secondProduction, lang)}</span></td>
-            </tr>
-            <tr>
-              <th>{capacityLabel}</th>
+              <th><ColorCodedTableLabel label={capacityLabel} color={colors.blue} /></th>
               <td><span className="production-capacity-value">{firstCapacity === undefined ? "—" : formatNumber(firstCapacity, 2, 2)}</span></td>
               <td><span className="production-capacity-value">{secondCapacity === undefined ? "—" : formatNumber(secondCapacity, 2, 2)}</span></td>
             </tr>
             <tr>
-              <th>{expectedLabel}</th>
+              <th><ColorCodedTableLabel label={expectedLabel} color={colors.indigo} /></th>
               <td><span className="production-capacity-value">{firstExpected === undefined ? "—" : formatKwh(firstExpected, lang)}</span></td>
               <td><span className="production-capacity-value">{secondExpected === undefined ? "—" : formatKwh(secondExpected, lang)}</span></td>
             </tr>
             <tr>
-              <th>{performanceLabel}</th>
+              <th><ColorCodedTableLabel label={actualLabel} color={colors.amber} /></th>
+              <td><span className="production-capacity-value">{formatKwh(firstProduction, lang)}</span></td>
+              <td><span className="production-capacity-value">{formatKwh(secondProduction, lang)}</span></td>
+            </tr>
+            <tr>
+              <th><ColorCodedTableLabel label={performanceLabel} color={colors.green} /></th>
               <td><span className="production-capacity-value">{firstPerformance === undefined ? "—" : `${formatNumber(firstPerformance, 2, 2)}%`}</span></td>
               <td><span className="production-capacity-value">{secondPerformance === undefined ? "—" : `${formatNumber(secondPerformance, 2, 2)}%`}</span></td>
             </tr>
             <tr>
-              <th>{varianceLabel}</th>
+              <th><ColorCodedTableLabel label={varianceLabel} color={colors.rose} /></th>
               <td><span className="production-capacity-value">{firstVariance === undefined ? "—" : formatSignedKwh(firstVariance, lang)}</span></td>
               <td><span className="production-capacity-value">{secondVariance === undefined ? "—" : formatSignedKwh(secondVariance, lang)}</span></td>
             </tr>
@@ -1406,9 +1425,9 @@ function ProductionCapacityInfo({
                     </tr>
                   </thead>
                   <tbody>
-                    {setupRows.map(([label, row]) => (
+                    {setupRows.map(([label, row, color]) => (
                       <tr key={row}>
-                        <th>{label}</th>
+                        <th><ColorCodedTableLabel label={label} color={color} /></th>
                         <td>{formatPvFieldValue(pair.first, row, lang)}</td>
                         <td>{formatPvFieldValue(pair.second, row, lang)}</td>
                       </tr>
@@ -2150,8 +2169,8 @@ function App({
     }
     selectViewMode(nextViewMode);
   };
-  // Views stay mounted and are only hidden/shown, so the document keeps the previous view's scroll
-  // offset. Reset it as soon as the new view is committed (before paint), whatever triggered the switch.
+  // Mounted views retain layout state while hidden. Reset the document position when another view
+  // becomes visible so its content never inherits the previous view's scroll offset.
   const previousViewModeRef = useRef(viewMode);
   React.useLayoutEffect(() => {
     if (previousViewModeRef.current === viewMode) return;
@@ -3098,7 +3117,11 @@ function App({
             {commercialEndRecovery ? (
               <section className="info-modal-section">
                 <h3>{t.investmentRecoveryForecast}</h3>
-                <p>{t.commercialRecoveryCalcInfo}</p>
+                <p>
+                  {details?.annualConsumption.source === "all-time-data"
+                    ? t.commercialRecoveryHistoryCalcInfo
+                    : t.commercialRecoveryCalcInfo}
+                </p>
                 <MathInfo
                   rows={[
                     {

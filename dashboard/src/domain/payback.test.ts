@@ -289,6 +289,7 @@ describe('payback', () => {
       source: 'pvgis-adjusted',
       closedYearCount: 0,
     })
+    expect(result.details?.annualConsumption.source).toBe('default-assumption')
     expect(dateKey(result.details?.commercialStartDate)).toBe('2026-06-01')
   })
 
@@ -358,6 +359,7 @@ describe('payback', () => {
     expect(result.details?.annualProduction.closedYearCount).toBe(0)
     expect(result.details?.annualConsumption.dayKwh).toBe(7_200)
     expect(result.details?.annualConsumption.nightKwh).toBe(4_800)
+    expect(result.details?.annualConsumption.source).toBe('all-time-data')
     expect(result.details?.annualSurplus.kwh).toBeCloseTo(0)
   })
 
@@ -445,6 +447,7 @@ describe('payback', () => {
     expect(result.details?.annualProduction.closedYearCount).toBe(0)
     expect(result.details?.annualConsumption.dayKwh).toBeCloseTo((7_800 / 368) * 365)
     expect(result.details?.annualConsumption.nightKwh).toBeCloseTo((5_200 / 368) * 365)
+    expect(result.details?.annualConsumption.source).toBe('all-time-data')
   })
 
   it('uses self-consumption and zero export payout after the commercial period', () => {

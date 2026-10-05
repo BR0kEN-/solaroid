@@ -30,6 +30,7 @@ export interface CommercialRecoveryDetails {
     readonly closedYearCount: number
   }
   readonly annualConsumption: {
+    readonly source: 'all-time-data' | 'default-assumption'
     readonly dayKwh: number
     readonly nightKwh: number
     readonly totalKwh: number
@@ -122,7 +123,6 @@ export function calculateCommercialEndRecovery({
   }
 
   const commercialPeriodStart = monthStart(commercialDate)
-
   return projectedRecovery({
     rows,
     launchDate,
@@ -159,7 +159,7 @@ function projectedRecovery({
   readonly tariffOverrides?: ReadonlyMap<string, CommercialMonthOverride>
   readonly currentMonthForecast?: CurrentMonthRecoveryForecast
   readonly today: Date
-}) {
+}): CommercialEndRecoveryResult {
   const forecastEnd = addMonths(commercialEndDate, ROI_FORECAST_MAX_YEARS * 12)
   const currentMonth = monthStart(today)
   const activeCurrentMonthForecast = currentMonthForecast && monthKey(currentMonthForecast.date) === monthKey(currentMonth)
@@ -292,7 +292,7 @@ function annualProductionBasis(
 function commercialRecoveryDetails(
   rows: readonly MonthRow[],
   production: CommercialRecoveryDetails['annualProduction'],
-  consumptionBasis: Pick<CommercialRecoveryDetails['annualConsumption'], 'dayKwh' | 'nightKwh' | 'totalKwh'>,
+  consumptionBasis: Pick<CommercialRecoveryDetails['annualConsumption'], 'source' | 'dayKwh' | 'nightKwh' | 'totalKwh'>,
   commercialStartDate: Date,
   commercialEndDate: Date,
   currency: Currency,
@@ -314,14 +314,15 @@ function annualConsumptionBasis(
   rows: readonly MonthRow[],
   launchDate: Date,
   today: Date,
-): Pick<CommercialRecoveryDetails['annualConsumption'], 'dayKwh' | 'nightKwh' | 'totalKwh'> {
+): Pick<CommercialRecoveryDetails['annualConsumption'], 'source' | 'dayKwh' | 'nightKwh' | 'totalKwh'> {
   const dayKwh = annualizedAllTimeRows(rows, launchDate, today, (row) => row.consumedDay)
   const nightKwh = annualizedAllTimeRows(rows, launchDate, today, (row) => row.consumedNight)
   if (dayKwh !== undefined && nightKwh !== undefined) {
-    return { dayKwh, nightKwh, totalKwh: dayKwh + nightKwh }
+    return { source: 'all-time-data', dayKwh, nightKwh, totalKwh: dayKwh + nightKwh }
   }
 
   return {
+    source: 'default-assumption',
     dayKwh: DEFAULT_ANNUAL_SELF_CONSUMPTION_KWH * SELF_CONSUMPTION_DAY_SHARE,
     nightKwh: DEFAULT_ANNUAL_SELF_CONSUMPTION_KWH * (1 - SELF_CONSUMPTION_DAY_SHARE),
     totalKwh: DEFAULT_ANNUAL_SELF_CONSUMPTION_KWH,
@@ -330,7 +331,7 @@ function annualConsumptionBasis(
 
 function annualConsumptionValue(
   rows: readonly MonthRow[],
-  basis: Pick<CommercialRecoveryDetails['annualConsumption'], 'dayKwh' | 'nightKwh' | 'totalKwh'>,
+  basis: Pick<CommercialRecoveryDetails['annualConsumption'], 'source' | 'dayKwh' | 'nightKwh' | 'totalKwh'>,
   currency: Currency,
 ) {
   const monthlyDayKwh = basis.dayKwh / 12
@@ -350,6 +351,7 @@ function annualConsumptionValue(
   }
 
   return {
+    source: basis.source,
     dayKwh: basis.dayKwh,
     nightKwh: basis.nightKwh,
     totalKwh: basis.totalKwh,

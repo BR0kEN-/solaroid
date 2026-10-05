@@ -413,7 +413,9 @@ Important naming:
 
 The monthly investment-recovery strip shows one compact desktop row: the label with estimated payoff date, progress, then recovered/total investment. The strip date and the popup's Time left use the same month-by-month recovery projection, including production basis, consumption, commercial-period rules, tariffs, and total investment. The popup preserves the detailed calculation. The date and duration are estimates, not guarantees.
 
-The commercial-period recovery forecast uses actual ROI for completed months, the dashboard's full-month ROI forecast for the current month, and the latest PV configuration's annual PVGIS projection for later months. PVGIS is multiplied by one normalized all-history factor: completed actual production divided by the matching stage-correct PVGIS expectation. A partial current-month snapshot is never treated as a complete month.
+The commercial-period recovery forecast uses actual ROI for completed months, the dashboard's full-month ROI forecast for the current month, and the latest PV configuration's annual PVGIS projection for later months. PVGIS is multiplied by one normalized all-history factor: completed actual production divided by the matching stage-correct PVGIS expectation. A partial current-month snapshot is never treated as a complete month. Historical damage reduction/restoration events are used once to normalize performance for the configuration that was active then; future months use only the latest installed configuration, so damage events are never projected to repeat.
+
+Annual consumption uses annualized stored day/night history once the plant has at least 365 active days. Until then, the forecast explicitly falls back to the 17 MWh annual-consumption assumption; the popup describes only the basis currently in use.
 
 Currency rules:
 
