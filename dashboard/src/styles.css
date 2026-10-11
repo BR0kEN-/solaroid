@@ -2132,6 +2132,30 @@ h2 {
   color: var(--muted);
 }
 
+.chart-inspector tfoot th,
+.chart-inspector tfoot td {
+  position: static;
+  padding: 7px 9px;
+  background: var(--panel-soft);
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  box-shadow: none;
+  font-size: var(--fs-sm);
+  line-height: 1.25;
+}
+
+.chart-inspector tfoot th {
+  color: var(--muted);
+  font-weight: 650;
+  text-align: left;
+}
+
+.chart-inspector tfoot td {
+  font-weight: 650;
+  text-align: right;
+  border-left: 1px solid color-mix(in srgb, var(--border), transparent 28%);
+}
+
 .utility-meter-inspector .chart-inspector-table {
   table-layout: auto;
 }

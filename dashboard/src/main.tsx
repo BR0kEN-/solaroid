@@ -5850,8 +5850,12 @@ function PlantPeriodLineChart({
             periodKey,
             {
               month: mode === "monthly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang),
+              hideHeader: true,
+              deltaInFooter: true,
+              deltaLabel: i18n[lang].delta,
+              columnWidths: ["40%", "60%"],
               delta: typeof displayDelta === "number"
-                ? `Δ ${formatSignedValue(displayDelta, format)}${secondRow ? formatDeltaPctComma(displayDelta, value(secondRow)) : ""}`
+                ? `${secondRow ? `${formatSignedPercentFromDelta(displayDelta, value(secondRow))}, ` : ""}${formatSignedValue(displayDelta, format)}`
                 : undefined,
               deltaTone: typeof delta === "number" && Number.isFinite(delta) ? comparisonDeltaTone(delta, higherIsBetter) : undefined,
               deltaInfoTitle: deltaInfo ? `${metricTitle} · ${mode === "monthly" ? formatMonthYear(date, lang) : formatDayLabel(date, lang)}` : undefined,
@@ -6315,6 +6319,8 @@ interface ChartInspectorSelection {
   readonly hideHeader?: boolean;
   readonly delta?: string;
   readonly deltaTone?: string;
+  readonly deltaInFooter?: boolean;
+  readonly deltaLabel?: string;
   readonly infoLabel?: string;
   readonly infoAction?: () => void;
   readonly deltaInfoTitle?: string;
@@ -6496,6 +6502,14 @@ function ChartInspector({
             </tr>
           ))}
         </tbody>
+        {selection.deltaInFooter && selection.delta ? (
+          <tfoot>
+            <tr>
+              <th scope="row">{selection.deltaLabel ?? "Δ"}</th>
+              <td colSpan={columns.length || 1} className={selection.deltaTone}>{selection.delta}</td>
+            </tr>
+          </tfoot>
+        ) : null}
       </table>
     </div>
   );
