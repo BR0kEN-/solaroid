@@ -24,19 +24,32 @@ class FakeStore implements Solaroid.Supabase.Dam.Storage {
 
 Deno.test('DAM refresh converts UAH/MWh prices to UAH/kWh hour columns', async () => {
   const store = new FakeStore()
+  let requestHeaders: Headers | undefined
 
   const refreshed = await new Dam({
     store,
     now: new Date('2026-07-20T12:00:00.000Z'),
-    fetcher: () => Promise.resolve(response({
-      result: [{
-        date: '2026-07-20',
-        prices: fullDay(1000),
-      }],
-    })),
+    fetcher: (_url, init) => {
+      requestHeaders = new Headers(init?.headers)
+      return Promise.resolve(response({
+        result: [{
+          date: '2026-07-20',
+          prices: fullDay(1000),
+        }],
+      }))
+    },
   }).refreshPrices()
 
   if (!refreshed) throw new Error('missing cache skipped')
+  if (requestHeaders?.get('Authorization') !== 'Basic dGVzdDp0ZXN0') {
+    throw new Error('DAM Basic authorization missing')
+  }
+  if (requestHeaders?.get('CF-Access-Client-Id') !== 'test-client-id') {
+    throw new Error('DAM Cloudflare Access client ID missing')
+  }
+  if (requestHeaders?.get('CF-Access-Client-Secret') !== 'test-client-secret') {
+    throw new Error('DAM Cloudflare Access client secret missing')
+  }
   if (store.rows.length !== 1) throw new Error('DAM row not upserted')
   if (store.rows[0].date !== '2026-07-20') throw new Error('date mismatch')
   if (store.rows[0].hour1 !== 1) throw new Error('hour1 mismatch')
