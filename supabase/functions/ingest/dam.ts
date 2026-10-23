@@ -1,6 +1,6 @@
 import { Dam as DamSchema } from './schema.ts'
 import { dateUtil } from './utils/date.ts'
-import { DAM_API_AUTH } from './config.ts'
+import { DAM_API_HEADERS } from './config.ts'
 
 const API_URL = new URL('https://n8n.levko.dog/webhook/dam')
 const REFRESH_INTERVAL_MS = 50 * 60 * 1000
@@ -60,9 +60,7 @@ class Dam {
     const response = await this.config.fetcher(
       API_URL,
       {
-        headers: {
-          'Authorization': DAM_API_AUTH,
-        },
+        headers: DAM_API_HEADERS,
       },
     )
 

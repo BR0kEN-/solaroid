@@ -279,6 +279,7 @@ DAM price refresh:
 - Each successful telemetry ingestion checks the greatest `dam_prices.updated_at` value.
 - A missing cache or cache at least 50 minutes old triggers a DAM source fetch and complete-row upsert.
 - Source: `https://n8n.levko.dog/webhook/dam?date=MM.YYYY`.
+- Every source request uses Basic authentication plus Cloudflare Access service-token headers. Configure `DAM_API_USER`, `DAM_API_PASS`, `CF_ACCESS_CLIENT_ID`, and `CF_ACCESS_CLIENT_SECRET` as Supabase Edge Function secrets. The Cloudflare Access token is shared by protected upstream APIs.
 - Expected response: `{ "result": [{ "date": "YYYY-MM-DD", "prices": [24 numbers] }] }`.
 - Source prices are UAH/MWh. Each value is divided by `1000` before array indexes `0..23` map to UAH/kWh columns `hour1..hour24`.
 - DAM refresh failure is logged without failing telemetry ingestion; the next ingestion retries.

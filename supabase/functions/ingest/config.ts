@@ -13,7 +13,14 @@ const EMAIL_ALLOWED_SENDER_DOMAINS = requiredVar('EMAIL_ALLOWED_SENDER_DOMAINS',
 const EMAIL_ALLOWED_SENDER_ADDRESSES = requiredVar('EMAIL_ALLOWED_SENDER_ADDRESSES', true)
 const OPENAI_API_KEY = requiredVar('OPENAI_API_KEY')
 const OPENAI_MODEL = Deno.env.get('OPENAI_MODEL') || 'gpt-5.6-terra'
-const DAM_API_AUTH = `Basic ${btoa(`${requiredVar('DAM_API_USER')}:${requiredVar('DAM_API_PASS')}`)}`
+const API_HEADERS = {
+  'CF-Access-Client-Id': requiredVar('CF_ACCESS_CLIENT_ID'),
+  'CF-Access-Client-Secret': requiredVar('CF_ACCESS_CLIENT_SECRET'),
+} as const
+const DAM_API_HEADERS = {
+  ...API_HEADERS,
+  'Authorization': `Basic ${btoa(`${requiredVar('DAM_API_USER')}:${requiredVar('DAM_API_PASS')}`)}`,
+} as const
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, content-type',
@@ -32,7 +39,8 @@ export {
   EMAIL_ALLOWED_SENDER_ADDRESSES,
   OPENAI_API_KEY,
   OPENAI_MODEL,
-  DAM_API_AUTH,
+  API_HEADERS,
+  DAM_API_HEADERS,
   CORS_HEADERS,
   UPLOAD_MAX_SIZE,
   EMAIL_INGEST_MAX_SIZE,
