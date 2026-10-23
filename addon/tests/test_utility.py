@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from solaroid.config import DtekConfig
+from solaroid.config import CloudflareAccessConfig, CloudflareConfig, DtekConfig
 from solaroid.utility import (
     Dtek,
     UtilityMeterFetchError,
@@ -18,6 +18,12 @@ from solaroid.utility import (
 
 
 FIXTURES = Path(__file__).parent / "__fixtures__"
+
+
+def cloudflare(client_id: str = "client-id", client_secret: str = "client-secret") -> CloudflareConfig:
+    return CloudflareConfig(
+        access=CloudflareAccessConfig(clientId=client_id, clientSecret=client_secret),
+    )
 
 
 def response_payload() -> dict[str, object]:
@@ -62,8 +68,7 @@ def config() -> DtekConfig:
         phone="+380971234567",
         password="secret",
         intervalMinutes=0,
-        cf_access_client_id="client-id",
-        cf_access_client_secret="client-secret",
+        cloudflare=cloudflare(),
     )
 
 
@@ -73,8 +78,7 @@ def slow_config() -> DtekConfig:
         phone="+380971234567",
         password="secret",
         intervalMinutes=60,
-        cf_access_client_id="client-id",
-        cf_access_client_secret="client-secret",
+        cloudflare=cloudflare(),
     )
 
 
@@ -92,8 +96,7 @@ def test_https_endpoint_requires_cloudflare_access_credentials(
             phone="+380971234567",
             password="secret",
             intervalMinutes=60,
-            cf_access_client_id=client_id,
-            cf_access_client_secret=client_secret,
+            cloudflare=cloudflare(client_id, client_secret),
         )
 
 

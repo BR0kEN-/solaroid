@@ -1,5 +1,5 @@
 from base64 import b64encode
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from json import load as json_load
 from pathlib import Path
@@ -11,19 +11,29 @@ CONFIG_PATH = Path("/data/options.json")
 
 
 @dataclass(frozen=True)
+class CloudflareAccessConfig:
+    clientId: str = ""
+    clientSecret: str = ""
+
+
+@dataclass(frozen=True)
+class CloudflareConfig:
+    access: CloudflareAccessConfig = field(default_factory=CloudflareAccessConfig)
+
+
+@dataclass(frozen=True)
 class DtekConfig:
     endpoint: str
     phone: str
     password: str
     intervalMinutes: int
-    cf_access_client_id: str = ""
-    cf_access_client_secret: str = ""
+    cloudflare: CloudflareConfig = field(default_factory=CloudflareConfig)
 
     def __post_init__(self) -> None:
         if self.enabled and self.uses_cloudflare_access:
-            if not self.cf_access_client_id or not self.cf_access_client_secret:
+            if not self.cloudflare.access.clientId or not self.cloudflare.access.clientSecret:
                 raise ValueError(
-                    "dtek.cf_access_client_id and dtek.cf_access_client_secret "
+                    "dtek.cloudflare.access.clientId and dtek.cloudflare.access.clientSecret "
                     "are required for HTTPS endpoints"
                 )
 
@@ -49,8 +59,8 @@ class DtekConfig:
             return {}
 
         return {
-            "CF-Access-Client-Id": self.cf_access_client_id,
-            "CF-Access-Client-Secret": self.cf_access_client_secret,
+            "CF-Access-Client-Id": self.cloudflare.access.clientId,
+            "CF-Access-Client-Secret": self.cloudflare.access.clientSecret,
         }
 
 
@@ -79,6 +89,13 @@ def load_config(path: Path = CONFIG_PATH) -> SolaroidConfig:
     data["dtek"].pop("accountId", None)
     data["dtek"].pop("cookies", None)
     data["dtek"].pop("department", None)
+    data["dtek"].pop("cf_access_client_id", None)
+    data["dtek"].pop("cf_access_client_secret", None)
+    cloudflare = data["dtek"].get("cloudflare", {})
+    access = cloudflare.get("access", {})
+    data["dtek"]["cloudflare"] = CloudflareConfig(
+        access=CloudflareAccessConfig(**access),
+    )
     data["dtek"] = DtekConfig(**data["dtek"])
 
     data.setdefault("notifications", {"mobileServices": ("notify.notify_admins",)})

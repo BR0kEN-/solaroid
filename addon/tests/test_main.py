@@ -5,7 +5,14 @@ import pytest
 import requests
 
 from solaroid import solaroid as solaroid_client
-from solaroid.config import DtekConfig, NotificationsConfig, SolaroidConfig, load_config
+from solaroid.config import (
+    CloudflareAccessConfig,
+    CloudflareConfig,
+    DtekConfig,
+    NotificationsConfig,
+    SolaroidConfig,
+    load_config,
+)
 from solaroid.main import (
     UTILITY_METER_FAILURE_NOTIFICATION_ID,
     daily_ingest_slots,
@@ -33,8 +40,12 @@ def config() -> SolaroidConfig:
             phone="+380970000000",
             password="secret",
             intervalMinutes=60,
-            cf_access_client_id="client-id",
-            cf_access_client_secret="client-secret",
+            cloudflare=CloudflareConfig(
+                access=CloudflareAccessConfig(
+                    clientId="client-id",
+                    clientSecret="client-secret",
+                ),
+            ),
         ),
         notifications=NotificationsConfig(mobileServices=("notify.notify_admins", "notify.mobile_app_phone")),
     )
@@ -320,8 +331,14 @@ def test_loads_without_top_level_interval_minutes(tmp_path) -> None:
             "endpoint": "https://example.test",
             "phone": "+380970000000",
             "password": "secret",
-            "cf_access_client_id": "client-id",
-            "cf_access_client_secret": "client-secret",
+            "cf_access_client_id": "obsolete-client-id",
+            "cf_access_client_secret": "obsolete-client-secret",
+            "cloudflare": {
+                "access": {
+                    "clientId": "client-id",
+                    "clientSecret": "client-secret",
+                },
+            },
             "intervalMinutes": 60,
         },
         "notifications": {"mobileServices": ["notify.notify_admins"]},
@@ -335,3 +352,5 @@ def test_loads_without_top_level_interval_minutes(tmp_path) -> None:
     assert loaded.api == "https://example.supabase.co"
     assert not hasattr(loaded, "intervalMinutes")
     assert loaded.dtek.intervalMinutes == 60
+    assert loaded.dtek.cloudflare.access.clientId == "client-id"
+    assert loaded.dtek.cloudflare.access.clientSecret == "client-secret"
