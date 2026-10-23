@@ -4,6 +4,7 @@ from functools import cached_property
 from json import load as json_load
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 CONFIG_PATH = Path("/data/options.json")
@@ -15,6 +16,16 @@ class DtekConfig:
     phone: str
     password: str
     intervalMinutes: int
+    cf_access_client_id: str = ""
+    cf_access_client_secret: str = ""
+
+    def __post_init__(self) -> None:
+        if self.enabled and self.uses_cloudflare_access:
+            if not self.cf_access_client_id or not self.cf_access_client_secret:
+                raise ValueError(
+                    "dtek.cf_access_client_id and dtek.cf_access_client_secret "
+                    "are required for HTTPS endpoints"
+                )
 
     @cached_property
     def enabled(self) -> bool:
@@ -27,6 +38,20 @@ class DtekConfig:
     @cached_property
     def auth(self) -> str:
         return b64encode(f"{self.phone}:{self.password}".encode("utf-8")).decode("ascii")
+
+    @cached_property
+    def uses_cloudflare_access(self) -> bool:
+        return urlsplit(self.endpoint).scheme.lower() == "https"
+
+    @cached_property
+    def cf_access_headers(self) -> dict[str, str]:
+        if not self.uses_cloudflare_access:
+            return {}
+
+        return {
+            "CF-Access-Client-Id": self.cf_access_client_id,
+            "CF-Access-Client-Secret": self.cf_access_client_secret,
+        }
 
 
 @dataclass(frozen=True)

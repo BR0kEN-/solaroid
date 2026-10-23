@@ -2,7 +2,7 @@
 url: https://github.com/BR0kEN-/solaroid
 name: Solaroid
 slug: solaroid
-version: 0.1.22
+version: 0.1.23
 description: Push Home Assistant solar telemetry and utility meter readings to Solaroid backend.
 init: false
 arch:
@@ -17,6 +17,8 @@ options:
     endpoint: "https://example.com/um?department=dnem&accountId=nest"
     phone: "+380970000000"
     password: ""
+    cf_access_client_id: ""
+    cf_access_client_secret: ""
     intervalMinutes: 60
   notifications:
     mobileServices:
@@ -74,6 +76,8 @@ schema:
     intervalMinutes: "int(20,4320)"
     phone: "match(^\\+380\\d{9}$)"
     password: "password"
+    cf_access_client_id: "password"
+    cf_access_client_secret: "password"
   notifications:
     mobileServices:
       - "str"

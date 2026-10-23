@@ -62,6 +62,8 @@ def config() -> DtekConfig:
         phone="+380971234567",
         password="secret",
         intervalMinutes=0,
+        cf_access_client_id="client-id",
+        cf_access_client_secret="client-secret",
     )
 
 
@@ -71,7 +73,39 @@ def slow_config() -> DtekConfig:
         phone="+380971234567",
         password="secret",
         intervalMinutes=60,
+        cf_access_client_id="client-id",
+        cf_access_client_secret="client-secret",
     )
+
+
+@pytest.mark.parametrize(
+    ("client_id", "client_secret"),
+    [("", ""), ("client-id", ""), ("", "client-secret")],
+)
+def test_https_endpoint_requires_cloudflare_access_credentials(
+    client_id: str,
+    client_secret: str,
+) -> None:
+    with pytest.raises(ValueError, match="are required for HTTPS endpoints"):
+        DtekConfig(
+            endpoint="https://example.test",
+            phone="+380971234567",
+            password="secret",
+            intervalMinutes=60,
+            cf_access_client_id=client_id,
+            cf_access_client_secret=client_secret,
+        )
+
+
+def test_http_endpoint_does_not_require_cloudflare_access_credentials() -> None:
+    result = DtekConfig(
+        endpoint="http://example.test",
+        phone="+380971234567",
+        password="secret",
+        intervalMinutes=60,
+    )
+
+    assert result.cf_access_headers == {}
 
 
 def expected_two_zone_payload() -> dict[str, object]:
@@ -156,6 +190,8 @@ def test_fetch_history_calls_endpoint_with_basic_auth(monkeypatch) -> None:
             "headers": {
                 "Authorization": f"Basic {token}",
                 "Accept": "application/json",
+                "CF-Access-Client-Id": "client-id",
+                "CF-Access-Client-Secret": "client-secret",
             },
             "timeout": 45,
         }
