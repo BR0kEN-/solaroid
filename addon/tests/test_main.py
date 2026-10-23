@@ -33,6 +33,8 @@ def config() -> SolaroidConfig:
             phone="+380970000000",
             password="secret",
             intervalMinutes=60,
+            cf_access_client_id="client-id",
+            cf_access_client_secret="client-secret",
         ),
         notifications=NotificationsConfig(mobileServices=("notify.notify_admins", "notify.mobile_app_phone")),
     )
@@ -318,6 +320,8 @@ def test_loads_without_top_level_interval_minutes(tmp_path) -> None:
             "endpoint": "https://example.test",
             "phone": "+380970000000",
             "password": "secret",
+            "cf_access_client_id": "client-id",
+            "cf_access_client_secret": "client-secret",
             "intervalMinutes": 60,
         },
         "notifications": {"mobileServices": ["notify.notify_admins"]},

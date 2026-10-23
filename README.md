@@ -668,6 +668,8 @@ Do not run local Supabase tests unless the user asks. The user normally applies 
      endpoint: http://192.168.68.59:54000/webhook/um?department=dnem&accountId=nest2
      phone: "+380123456789"
      password: SECURE2
+     cf_access_client_id: ""
+     cf_access_client_secret: ""
      intervalMinutes: 60
    notifications:
      mobileServices:
@@ -725,3 +727,5 @@ Failure-notification titles include the Home Assistant instance name from `Setti
 
 > [!NOTE]
 > The `dtek.endpoint` is expected to return the same structure as `POST https://ok.dtek-dnem.com.ua/api/get-common`. Include any proxy path, account alias, department, or query parameters directly in the endpoint URL. Due to the Incapsula endpoints protection, querying it is not as simple as sending the request. A decent proxy-server is a solution.
+
+An enabled `https://` DTEK endpoint requires both `dtek.cf_access_client_id` and `dtek.cf_access_client_secret`. The addon sends them as `CF-Access-Client-Id` and `CF-Access-Client-Secret`. HTTP endpoints require neither credential and never receive these headers.

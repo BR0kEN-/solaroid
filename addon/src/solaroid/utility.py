@@ -56,6 +56,7 @@ def fetch_history(config: DtekConfig) -> dict[str, Any]:
         headers={
             "Authorization": f"Basic {config.auth}",
             "Accept": "application/json",
+            **config.cf_access_headers,
         },
         timeout=45,
     )
