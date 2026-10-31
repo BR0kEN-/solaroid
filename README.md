@@ -726,6 +726,8 @@ Do not run local Supabase tests unless the user asks. The user normally applies 
 
 The addon posts on the existing anchored 20-minute schedule. Each shot reads Home Assistant and utility-meter values once, builds one payload, and sends it up to three times when the request fails with a connection/timeout error, HTTP `408`/`429`, or any `5xx`. Request timeouts increase by attempt: 30 seconds, 60 seconds, then 90 seconds. The two retry delays are approximately 20 and 70 seconds with bounded jitter. Every attempt reuses the identical payload, which is safe because the telemetry writes are idempotent upserts or updates. Ordinary `4xx` responses are not retried. A recovered retry is logged without creating a Home Assistant notification; notifications are sent only after the retry budget is exhausted.
 
+During the first three days of a month, the addon expects the previous month's completed utility reading. Complete active automated readings dated within the final three calendar days count as month-end readings. If they are not published yet, the addon preserves the last complete payload and retries on the normal utility-meter interval without creating a fetch-failure notification.
+
 Failure-notification titles include the Home Assistant instance name from `Settings -> System -> General`, for example `Solaroid (Bondas): Ingest failed`. Give each Home Assistant instance a distinct name so notifications sent to the same device remain identifiable. The addon reads the name once at startup; a temporary lookup failure does not stop ingestion and uses `Home Assistant` as the fallback label until restart.
 
 > [!NOTE]

@@ -52,6 +52,27 @@ def stale_payload() -> dict[str, object]:
     return payload
 
 
+def automated_month_readings(read_at: str, values: tuple[int, int, int, int]) -> list[dict[str, object]]:
+    return [
+        {
+            "date": read_at,
+            "value": value,
+            "type": "А",
+            "scale": scale,
+            "blocked": "",
+            "inactive": "",
+            "energyCode": energy_code,
+            "time": "23:57",
+        }
+        for energy_code, scale, value in (
+            ("01", "04", values[0]),
+            ("01", "05", values[1]),
+            ("03", "04", values[2]),
+            ("03", "05", values[3]),
+        )
+    ]
+
+
 def load_fixture(name: str) -> dict[str, object]:
     with (FIXTURES / name).open(encoding="utf-8") as file:
         payload = json.load(file)
@@ -127,6 +148,27 @@ def test_uses_previous_reading_month_for_delta() -> None:
     payload = utility_payload(response_payload())
 
     assert payload == expected_two_zone_payload()
+
+
+def test_accepts_complete_reading_three_days_before_month_end() -> None:
+    payload = {
+        "data": {
+            "items": [
+                *automated_month_readings("29.10.2026", (120, 250, 500, 5)),
+                *automated_month_readings("30.09.2026", (100, 200, 300, 5)),
+            ],
+        },
+    }
+
+    assert utility_payload(payload, "2026-10") == {
+        "month": "2026-10",
+        "import": {"day": 20, "night": 50},
+        "export": {"day": 200, "night": 0},
+        "records": {
+            "current": "2026-10-29 23:57",
+            "previous": "2026-09-30 23:57",
+        },
+    }
 
 
 def test_record_dates_keep_minute_precision() -> None:
