@@ -124,7 +124,7 @@ def is_final_month_reading(item: dict[str, Any]) -> bool:
     item_date = parse_item_date(item.get("date"))
     last_day = monthrange(item_date.year, item_date.month)[1]
 
-    return item_date.day > last_day - 2
+    return item_date.day >= last_day - 2
 
 
 def is_automated_active_reading(item: dict[str, Any]) -> bool:
