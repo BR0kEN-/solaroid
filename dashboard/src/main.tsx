@@ -36,6 +36,7 @@ import {
   greenTariffReceiptReconciliation,
   importCostBreakdown,
   investmentUsdRateForDate,
+  monthlyPaceEstimate,
   normalizedProductionPerformance,
   projectionCapacityRangeForRow,
   projectConsumptionWithoutPlant,
@@ -242,6 +243,9 @@ const i18n = {
     financeAndRoi: "Finance",
     data: "Data",
     forecast: "Forecast",
+    estimatedForecast: "Projected",
+    ofActual: "of actual",
+    ofExpected: "of expected",
     expected: "Expected",
     expectedProduction: "Expected production",
     actual: "Actual",
@@ -570,6 +574,9 @@ const i18n = {
     financeAndRoi: "Фінанси",
     data: "Дані",
     forecast: "Прогноз",
+    estimatedForecast: "Прогноз",
+    ofActual: "від факту",
+    ofExpected: "від очікуваного",
     expected: "Очікувано",
     expectedProduction: "Очікувана генерація",
     actual: "Факт",
@@ -2608,6 +2615,11 @@ function App({
     });
   }, [dataState.spendings, monthlyCurrency, rows, spendingUsdRateById, totals.launchDate]);
 
+  const monthlyEstimateAsOf = useMemo(
+    () => dataState.sheetUpdatedAt ?? new Date(),
+    [dataState.sheetUpdatedAt],
+  );
+
   const forecast = useMemo(() => {
     if (dataState.projectionIssue === "invalid-history") return null;
     const today = new Date();
@@ -3569,6 +3581,7 @@ function App({
             tariffScenarioCells,
             dataState.rows,
             monthlyProductionCapacity,
+            monthlyEstimateAsOf,
           ]}>
           <>
         <PeriodCompareModal
@@ -3596,9 +3609,10 @@ function App({
             infoDisabled={showPlaceholders}
             totalSummaryLoading={showPlaceholders}
             totalSummarySkeletonItemCount={3}
-            totalSummarySkeletonColumnCount={2}
+            totalSummarySkeletonColumnCount={1}
             totalSummary={{
               month: t.totals,
+              responsiveComparison: true,
               columns: [t.value, t.performance],
               items: [
                 ...(projectedProductionTotal !== undefined
@@ -3614,10 +3628,21 @@ function App({
                   color: colors.amber,
                   value: formatChartEnergy(totals.production, "down", lang),
                   cells: [
-                    formatChartEnergy(totals.production, "down", lang),
+                    <StackedComparisonValue
+                      value={formatChartEnergy(totals.production, "down", lang)}
+                      comparison={projectedProductionTotal
+                        ? `${formatNumber((totals.production / projectedProductionTotal) * 100, 2, 2)}% ${t.ofExpected}`
+                        : undefined}
+                    />,
                     projectedProductionTotal
                       ? `${formatNumber((totals.production / projectedProductionTotal) * 100, 2, 2)}%`
                       : "",
+                  ],
+                  cellTitles: [
+                    undefined,
+                    projectedProductionTotal
+                      ? `${formatNumber((totals.production / projectedProductionTotal) * 100, 2, 2)}% ${t.ofExpected}`
+                      : undefined,
                   ],
                 },
                 {
@@ -3625,17 +3650,28 @@ function App({
                   color: colors.green,
                   value: formatChartEnergy(totals.exported, "down", lang),
                   cells: [
-                    formatChartEnergy(totals.exported, "down", lang),
+                    <StackedComparisonValue
+                      value={formatChartEnergy(totals.exported, "down", lang)}
+                      comparison={totals.production
+                        ? `${formatNumber((totals.exported / totals.production) * 100, 2, 2)}% ${t.ofActual}`
+                        : undefined}
+                    />,
                     totals.production
                       ? `${formatNumber((totals.exported / totals.production) * 100, 2, 2)}%`
                       : "",
+                  ],
+                  cellTitles: [
+                    undefined,
+                    totals.production
+                      ? `${formatNumber((totals.exported / totals.production) * 100, 2, 2)}% ${t.ofActual}`
+                      : undefined,
                   ],
                 },
               ],
             }}
           >
             {showPlaceholders ? (
-              <ChartSkeleton variant="paired-line" inspectorItemCount={3} inspectorColumnCount={2} />
+              <ChartSkeleton variant="paired-line" inspectorItemCount={4} inspectorColumnCount={1} />
             ) : (
               <ProductionExportChart
                 rows={rows}
@@ -3643,6 +3679,7 @@ function App({
                 launchDate={dataState.launchDate}
                 capacityKwp={dataState.capacityKwp}
                 projectionIssue={dataState.projectionIssue}
+                estimateAsOf={monthlyEstimateAsOf}
                 fixedBarDensity
                 onCapacityChange={setMonthlyProductionCapacity}
               />
@@ -3755,7 +3792,7 @@ function App({
               ],
             }}
           >
-            {showPlaceholders ? <ChartSkeleton variant="paired" inspectorItemCount={3} inspectorColumnCount={2} /> : <ConsumptionMixChart rows={rows} fixedBarDensity />}
+            {showPlaceholders ? <ChartSkeleton variant="paired" inspectorItemCount={3} inspectorColumnCount={2} /> : <ConsumptionMixChart rows={rows} estimateAsOf={monthlyEstimateAsOf} fixedBarDensity />}
           </ChartPanel>
           <ChartPanel
             className="dashboard-chart-import"
@@ -3773,7 +3810,7 @@ function App({
               ],
             }}
           >
-            {showPlaceholders ? <ChartSkeleton variant="stacked" inspectorItemCount={3} /> : <ImportMixChart rows={rows} fixedBarDensity />}
+            {showPlaceholders ? <ChartSkeleton variant="stacked" inspectorItemCount={3} /> : <ImportMixChart rows={rows} estimateAsOf={monthlyEstimateAsOf} fixedBarDensity />}
           </ChartPanel>
         </section>
 
@@ -3794,7 +3831,7 @@ function App({
               ],
             }}
           >
-            {showPlaceholders ? <ChartSkeleton variant="stacked" inspectorItemCount={3} /> : <LossesMixChart rows={rows} fixedBarDensity />}
+            {showPlaceholders ? <ChartSkeleton variant="stacked" inspectorItemCount={3} /> : <LossesMixChart rows={rows} estimateAsOf={monthlyEstimateAsOf} fixedBarDensity />}
           </ChartPanel>
         </section>
         </div>
@@ -4843,7 +4880,7 @@ function MonthlyPageSkeletonTail() {
     <>
       <div className="dashboard-charts">
       <section id="finance" className="chart-grid">
-        <ChartPanelSkeleton className="dashboard-chart-production" chartSkeletonVariant="paired-line" hasLegend={false} hasHeaderInfo hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
+        <ChartPanelSkeleton className="dashboard-chart-production" chartSkeletonVariant="paired-line" hasLegend={false} hasHeaderInfo hasTotalSummary inspectorItemCount={4} inspectorColumnCount={1} totalSummaryItemCount={3} totalSummaryColumnCount={1} />
         <ChartPanelSkeleton className="dashboard-chart-finance" chartSkeletonVariant="dual-axis-line" hasLegend={false} hasHeaderInfo headerActionCount={2} hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
       </section>
       <section id="energy" className="chart-grid">
@@ -4874,7 +4911,7 @@ function DailyPageSkeleton() {
     <>
       <div className="dashboard-charts">
       <section id="energy" className="chart-grid">
-        <ChartPanelSkeleton className="dashboard-chart-production" chartSkeletonVariant="paired-line" hasLegend={false} hasTotalSummary inspectorColumnCount={2} totalSummaryColumnCount={2} />
+        <ChartPanelSkeleton className="dashboard-chart-production" chartSkeletonVariant="paired-line" hasLegend={false} hasTotalSummary inspectorItemCount={3} inspectorColumnCount={1} totalSummaryItemCount={3} totalSummaryColumnCount={1} />
         <ChartPanelSkeleton className="dashboard-chart-finance" chartSkeletonVariant="dual-axis-line" hasLegend={false} hasTotalSummary inspectorItemCount={3} inspectorColumnCount={2} totalSummaryItemCount={3} totalSummaryColumnCount={2} />
       </section>
       <section id="finance" className="chart-grid">
@@ -6317,6 +6354,7 @@ interface ChartInspectorItem {
 interface ChartInspectorSelection {
   readonly month: string;
   readonly hideHeader?: boolean;
+  readonly responsiveComparison?: boolean;
   readonly delta?: string;
   readonly deltaTone?: string;
   readonly deltaInFooter?: boolean;
@@ -6426,6 +6464,20 @@ function StackedDateValue({
   );
 }
 
+interface StackedComparisonValueProps {
+  readonly value: string;
+  readonly comparison?: string;
+}
+
+function StackedComparisonValue({ value, comparison }: StackedComparisonValueProps) {
+  return (
+    <span className="stacked-comparison-value" title={comparison} aria-label={[value, comparison].filter(Boolean).join(", ")}>
+      <span>{value}</span>
+      {comparison ? <small>{comparison}</small> : null}
+    </span>
+  );
+}
+
 function ChartInspector({
   selection,
   hint,
@@ -6440,7 +6492,7 @@ function ChartInspector({
   const columns = selection.columns ?? [];
   return (
     <div className={`chart-inspector${hasInfo ? " has-delta-info" : ""}`}>
-      <table className={`chart-inspector-table${columns.length <= 1 ? " is-two-column" : ""}`}>
+      <table className={`chart-inspector-table${columns.length <= 1 ? " is-two-column" : ""}${selection.responsiveComparison ? " has-responsive-comparison" : ""}`}>
         {selection.columnWidths ? (
           <colgroup>
             {selection.columnWidths.map((width, index) => <col style={{ width }} key={`${width}-${index}`} />)}
@@ -6538,12 +6590,34 @@ function FixedChartAxis({ ticks, topForValue, currency, formatValue }: FixedChar
   );
 }
 
+function EstimatedBarOutline({ x, y, width, height }: {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}) {
+  if (height <= 0) return null;
+
+  return (
+    <rect
+      className="chart-estimate-outline"
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      rx="3"
+      pointerEvents="none"
+    />
+  );
+}
+
 function ProductionExportChart({
   rows,
   projection,
   launchDate,
   capacityKwp,
   projectionIssue,
+  estimateAsOf,
   fixedBarDensity = false,
   onCapacityChange,
 }: {
@@ -6552,6 +6626,7 @@ function ProductionExportChart({
   readonly launchDate?: Date;
   readonly capacityKwp?: number;
   readonly projectionIssue?: DataState["projectionIssue"];
+  readonly estimateAsOf?: Date;
   readonly fixedBarDensity?: boolean;
   readonly onCapacityChange?: (capacity: string | undefined) => void;
 }) {
@@ -6563,6 +6638,15 @@ function ProductionExportChart({
     () => new Map(displayRows.map((row) => [row.month, projectedProduction(row, projection, launchDate)])),
     [displayRows, launchDate, projection],
   );
+  const estimatedByMonth = useMemo(() => {
+    const estimates = new Map<string, number>();
+    if (!estimateAsOf) return estimates;
+    displayRows.forEach((row) => {
+      const estimate = monthlyPaceEstimate(row.production, row.date, estimateAsOf);
+      if (estimate !== undefined) estimates.set(row.month, estimate);
+    });
+    return estimates;
+  }, [displayRows, estimateAsOf]);
   const inspectors = useMemo(
     () =>
       new Map(
@@ -6579,10 +6663,17 @@ function ProductionExportChart({
           const exportPerformance = row.production
             ? `${formatNumber((exported / row.production) * 100, 2, 2)}%`
             : "";
+          const estimated = estimatedByMonth.get(row.month);
+          const estimatedValue = estimated === undefined ? "" : formatChartEnergy(estimated, "up", lang);
+          const estimatedPerformance =
+            estimated !== undefined && expected && Number.isFinite(expected) && expected > 0
+              ? `${formatNumber((estimated / expected) * 100, 2, 2)}%`
+              : "";
           return [
             row.month,
             {
               month: formatPeriodLabel(row, lang),
+              responsiveComparison: true,
               columns: [t.value, t.performance],
               items: [
                 ...(expected
@@ -6591,21 +6682,50 @@ function ProductionExportChart({
                 {
                   label: t.actual,
                   value: actualPerformance ? `${actualValue} (${actualPerformance})` : actualValue,
-                  cells: [actualValue, actualPerformance],
+                  cells: [
+                    <StackedComparisonValue
+                      value={actualValue}
+                      comparison={actualPerformance ? `${actualPerformance} ${t.ofExpected}` : undefined}
+                    />,
+                    actualPerformance,
+                  ],
+                  cellTitles: [undefined, actualPerformance ? `${actualPerformance} ${t.ofExpected}` : undefined],
                   color: colors.amber,
                 },
                 {
                   label: t.export,
                   value: exportPerformance ? `${exportValue} (${exportPerformance})` : exportValue,
-                  cells: [exportValue, exportPerformance],
+                  cells: [
+                    <StackedComparisonValue
+                      value={exportValue}
+                      comparison={exportPerformance ? `${exportPerformance} ${t.ofActual}` : undefined}
+                    />,
+                    exportPerformance,
+                  ],
+                  cellTitles: [undefined, exportPerformance ? `${exportPerformance} ${t.ofActual}` : undefined],
                   color: colors.green,
                 },
+                ...(estimated === undefined
+                  ? []
+                  : [{
+                      label: t.estimatedForecast,
+                      value: estimatedPerformance ? `${estimatedValue} (${estimatedPerformance})` : estimatedValue,
+                      cells: [
+                        <StackedComparisonValue
+                          value={estimatedValue}
+                          comparison={estimatedPerformance ? `${estimatedPerformance} ${t.ofExpected}` : undefined}
+                        />,
+                        estimatedPerformance,
+                      ],
+                      cellTitles: [undefined, estimatedPerformance ? `${estimatedPerformance} ${t.ofExpected}` : undefined],
+                      color: colors.ink,
+                    }]),
               ],
             },
           ];
         }),
       ),
-    [displayRows, expectedByMonth, lang, t.actual, t.export, t.expected, t.performance, t.value],
+    [displayRows, estimatedByMonth, expectedByMonth, lang, t.actual, t.estimatedForecast, t.export, t.expected, t.ofActual, t.ofExpected, t.performance, t.value],
   );
   const latestRow = rows.at(-1);
   const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
@@ -6623,7 +6743,7 @@ function ProductionExportChart({
   const expectedValues = displayRows
     .map((row) => expectedByMonth.get(row.month))
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
-  const max = axisMax(displayRows.flatMap((row) => [row.production, exportTotal(row), expectedByMonth.get(row.month) ?? 0]));
+  const max = axisMax(displayRows.flatMap((row) => [row.production, exportTotal(row), expectedByMonth.get(row.month) ?? 0, estimatedByMonth.get(row.month) ?? 0]));
   const band = dimensions.band;
   const bar = PAIRED_CHART_BAR_WIDTH;
   const plotStart = dimensions.plotStart;
@@ -6652,6 +6772,7 @@ function ProductionExportChart({
           {displayRows.map((row, index) => {
             const x = plotStart + band * index + band / 2;
             const inspector = inspectors.get(row.month);
+            const estimated = estimatedByMonth.get(row.month);
             return (
               <g key={row.month}>
                 <rect
@@ -6670,6 +6791,14 @@ function ProductionExportChart({
                   rx="3"
                   fill={colors.green}
                 />
+                {estimated !== undefined ? (
+                  <EstimatedBarOutline
+                    x={x - bar}
+                    y={y(estimated)}
+                    width={bar}
+                    height={pad.top + innerH - y(estimated)}
+                  />
+                ) : null}
                 {inspector && (
                   <MonthTarget
                     x={x - band / 2}
@@ -7148,15 +7277,26 @@ function MoneyChart({
 
 function ImportMixChart({
   rows,
+  estimateAsOf,
   fixedBarDensity = false,
 }: {
   readonly rows: readonly MonthRow[];
+  readonly estimateAsOf?: Date;
   readonly fixedBarDensity?: boolean;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
+  const estimatedByMonth = useMemo(() => {
+    const estimates = new Map<string, number>();
+    if (!estimateAsOf) return estimates;
+    displayRows.forEach((row) => {
+      const estimate = monthlyPaceEstimate(row.importTotal, row.date, estimateAsOf);
+      if (estimate !== undefined) estimates.set(row.month, estimate);
+    });
+    return estimates;
+  }, [displayRows, estimateAsOf]);
   const inspectors = useMemo(
     () =>
       new Map(
@@ -7169,11 +7309,19 @@ function ImportMixChart({
               { label: t.day, value: formatChartEnergy(row.importDay, "up", lang), cells: [formatChartEnergy(row.importDay, "up", lang)], color: colors.blue },
               { label: t.night, value: formatChartEnergy(row.importNight, "up", lang), cells: [formatChartEnergy(row.importNight, "up", lang)], color: colors.indigo },
               { label: t.total, value: formatChartEnergy(row.importTotal, "up", lang), cells: [formatChartEnergy(row.importTotal, "up", lang)], color: colors.ink },
+              ...(estimatedByMonth.has(row.month)
+                ? [{
+                    label: t.estimatedForecast,
+                    value: formatChartEnergy(estimatedByMonth.get(row.month) ?? 0, "up", lang),
+                    cells: [formatChartEnergy(estimatedByMonth.get(row.month) ?? 0, "up", lang)],
+                    color: colors.ink,
+                  }]
+                : []),
             ],
           },
         ]),
       ),
-    [displayRows, lang, t.day, t.night, t.total, t.value],
+    [displayRows, estimatedByMonth, lang, t.day, t.estimatedForecast, t.night, t.total, t.value],
   );
   const latestRow = rows.at(-1);
   const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
@@ -7183,7 +7331,7 @@ function ImportMixChart({
   const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
   const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
-  const max = axisMax(displayRows.map((row) => row.importDay + row.importNight));
+  const max = axisMax(displayRows.flatMap((row) => [row.importTotal, estimatedByMonth.get(row.month) ?? 0]));
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => max * tick);
   const band = dimensions.band;
   const bar = STACKED_CHART_BAR_WIDTH;
@@ -7205,6 +7353,7 @@ function ImportMixChart({
             const nightH = (row.importNight / max) * innerH;
             const base = pad.top + innerH;
             const inspector = inspectors.get(row.month);
+            const estimated = estimatedByMonth.get(row.month);
             return (
               <g key={row.month}>
                 <rect
@@ -7223,6 +7372,14 @@ function ImportMixChart({
                   rx="3"
                   fill={colors.indigo}
                 />
+                {estimated !== undefined ? (
+                  <EstimatedBarOutline
+                    x={x}
+                    y={base - (estimated / max) * innerH}
+                    width={bar}
+                    height={(estimated / max) * innerH}
+                  />
+                ) : null}
                 {inspector && (
                   <MonthTarget
                     x={x + bar / 2 - band / 2}
@@ -7248,34 +7405,64 @@ function ImportMixChart({
   );
 }
 
+interface ConsumptionPaceEstimate {
+  readonly total: number;
+  readonly solar: number;
+}
+
 function ConsumptionMixChart({
   rows,
+  estimateAsOf,
   fixedBarDensity = false,
 }: {
   readonly rows: readonly MonthRow[];
+  readonly estimateAsOf?: Date;
   readonly fixedBarDensity?: boolean;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
+  const estimatedByMonth = useMemo(() => {
+    const estimates = new Map<string, ConsumptionPaceEstimate>();
+    if (!estimateAsOf) return estimates;
+    displayRows.forEach((row) => {
+      const total = monthlyPaceEstimate(row.consumedTotal, row.date, estimateAsOf);
+      const solar = monthlyPaceEstimate(row.consumedTotal - row.importTotal, row.date, estimateAsOf);
+      if (total !== undefined && solar !== undefined) estimates.set(row.month, { total, solar });
+    });
+    return estimates;
+  }, [displayRows, estimateAsOf]);
   const inspectors = useMemo(
     () =>
       new Map(
-        displayRows.map((row) => [
-          row.month,
-          {
-            month: formatPeriodLabel(row, lang),
-            columns: [t.value, t.solarCoverage],
-            items: [
-              { label: t.day, value: formatConsumptionWithSolar(row.consumedDay, row.importDay, lang), cells: [formatChartEnergy(row.consumedDay, "up", lang), formatChartEnergy(row.consumedDay - row.importDay, "up", lang)], color: colors.blue },
-              { label: t.night, value: formatConsumptionWithSolar(row.consumedNight, row.importNight, lang), cells: [formatChartEnergy(row.consumedNight, "up", lang), formatChartEnergy(row.consumedNight - row.importNight, "up", lang)], color: colors.indigo },
-              { label: t.total, value: formatConsumptionWithSolar(row.consumedTotal, row.importTotal, lang), cells: [formatChartEnergy(row.consumedTotal, "up", lang), formatChartEnergy(row.consumedTotal - row.importTotal, "up", lang)], color: colors.ink },
-            ],
-          },
-        ]),
+        displayRows.map((row) => {
+          const estimated = estimatedByMonth.get(row.month);
+          const estimatedTotalValue = estimated ? formatChartEnergy(estimated.total, "up", lang) : "";
+          const estimatedSolarValue = estimated ? formatChartEnergy(estimated.solar, "up", lang) : "";
+          return [
+            row.month,
+            {
+              month: formatPeriodLabel(row, lang),
+              columns: [t.value, t.solarCoverage],
+              items: [
+                { label: t.day, value: formatConsumptionWithSolar(row.consumedDay, row.importDay, lang), cells: [formatChartEnergy(row.consumedDay, "up", lang), formatChartEnergy(row.consumedDay - row.importDay, "up", lang)], color: colors.blue },
+                { label: t.night, value: formatConsumptionWithSolar(row.consumedNight, row.importNight, lang), cells: [formatChartEnergy(row.consumedNight, "up", lang), formatChartEnergy(row.consumedNight - row.importNight, "up", lang)], color: colors.indigo },
+                { label: t.total, value: formatConsumptionWithSolar(row.consumedTotal, row.importTotal, lang), cells: [formatChartEnergy(row.consumedTotal, "up", lang), formatChartEnergy(row.consumedTotal - row.importTotal, "up", lang)], color: colors.ink },
+                ...(estimated
+                  ? [{
+                  label: t.estimatedForecast,
+                  value: `${estimatedTotalValue} (${estimatedSolarValue})`,
+                  cells: [estimatedTotalValue, estimatedSolarValue],
+                  color: colors.ink,
+                    }]
+                  : []),
+              ],
+            },
+          ];
+        }),
       ),
-    [displayRows, lang, t.day, t.night, t.solarCoverage, t.total, t.value],
+    [displayRows, estimatedByMonth, lang, t.day, t.estimatedForecast, t.night, t.solarCoverage, t.total, t.value],
   );
   const latestRow = rows.at(-1);
   const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
@@ -7285,7 +7472,7 @@ function ConsumptionMixChart({
   const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
   const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
-  const max = axisMax(displayRows.map((row) => row.consumedDay + row.consumedNight));
+  const max = axisMax(displayRows.flatMap((row) => [row.consumedTotal, estimatedByMonth.get(row.month)?.total ?? 0]));
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => max * tick);
   const band = dimensions.band;
   const bar = STACKED_CHART_BAR_WIDTH;
@@ -7307,6 +7494,7 @@ function ConsumptionMixChart({
             const nightH = (row.consumedNight / max) * innerH;
             const base = pad.top + innerH;
             const inspector = inspectors.get(row.month);
+            const estimated = estimatedByMonth.get(row.month)?.total;
             return (
               <g key={row.month}>
                 <rect
@@ -7325,6 +7513,14 @@ function ConsumptionMixChart({
                   rx="3"
                   fill={colors.indigo}
                 />
+                {estimated !== undefined ? (
+                  <EstimatedBarOutline
+                    x={x}
+                    y={base - (estimated / max) * innerH}
+                    width={bar}
+                    height={(estimated / max) * innerH}
+                  />
+                ) : null}
                 {inspector && (
                   <MonthTarget
                     x={x + bar / 2 - band / 2}
@@ -7352,15 +7548,26 @@ function ConsumptionMixChart({
 
 function LossesMixChart({
   rows,
+  estimateAsOf,
   fixedBarDensity = false,
 }: {
   readonly rows: readonly MonthRow[];
+  readonly estimateAsOf?: Date;
   readonly fixedBarDensity?: boolean;
 }) {
   const lang = useLanguage();
   const t = i18n[lang];
   const isMobile = useMediaQuery("(max-width: 820px)");
   const displayRows = useMemo(() => (isMobile ? newestFirst(rows) : rows), [isMobile, rows]);
+  const estimatedByMonth = useMemo(() => {
+    const estimates = new Map<string, number>();
+    if (!estimateAsOf) return estimates;
+    displayRows.forEach((row) => {
+      const estimate = monthlyPaceEstimate(lossesTotal(row), row.date, estimateAsOf);
+      if (estimate !== undefined) estimates.set(row.month, estimate);
+    });
+    return estimates;
+  }, [displayRows, estimateAsOf]);
   const inspectors = useMemo(
     () =>
       new Map(
@@ -7376,12 +7583,20 @@ function LossesMixChart({
                 { label: t.day, value: formatChartEnergy(lossesDay, "up", lang), cells: [formatChartEnergy(lossesDay, "up", lang)], color: colors.orange },
                 { label: t.night, value: formatChartEnergy(lossesNight, "up", lang), cells: [formatChartEnergy(lossesNight, "up", lang)], color: colors.rose },
                 { label: t.total, value: formatChartEnergy(lossesDay + lossesNight, "up", lang), cells: [formatChartEnergy(lossesDay + lossesNight, "up", lang)], color: colors.ink },
+                ...(estimatedByMonth.has(row.month)
+                  ? [{
+                      label: t.estimatedForecast,
+                      value: formatChartEnergy(estimatedByMonth.get(row.month) ?? 0, "up", lang),
+                      cells: [formatChartEnergy(estimatedByMonth.get(row.month) ?? 0, "up", lang)],
+                      color: colors.ink,
+                    }]
+                  : []),
               ],
             },
           ];
         }),
       ),
-    [displayRows, lang, t.day, t.night, t.total, t.value],
+    [displayRows, estimatedByMonth, lang, t.day, t.estimatedForecast, t.night, t.total, t.value],
   );
   const latestRow = rows.at(-1);
   const { selection, selectedKey, target } = useChartInspector(inspectors, latestRow?.month);
@@ -7391,7 +7606,7 @@ function LossesMixChart({
   const dimensions = chartDimensionsForItemCount(displayRows.length, isMobile, fixedBarDensity, pad.left, 0, chartViewportWidth);
   const width = dimensions.width;
   const innerH = height - pad.top - pad.bottom;
-  const max = axisMax(displayRows.map(lossesTotal));
+  const max = axisMax(displayRows.flatMap((row) => [lossesTotal(row), estimatedByMonth.get(row.month) ?? 0]));
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => max * tick);
   const band = dimensions.band;
   const bar = STACKED_CHART_BAR_WIDTH;
@@ -7415,6 +7630,7 @@ function LossesMixChart({
             const nightH = (lossesNight / max) * innerH;
             const base = pad.top + innerH;
             const inspector = inspectors.get(row.month);
+            const estimated = estimatedByMonth.get(row.month);
             return (
               <g key={row.month}>
                 <rect
@@ -7433,6 +7649,14 @@ function LossesMixChart({
                   rx="3"
                   fill={colors.rose}
                 />
+                {estimated !== undefined ? (
+                  <EstimatedBarOutline
+                    x={x}
+                    y={base - (estimated / max) * innerH}
+                    width={bar}
+                    height={(estimated / max) * innerH}
+                  />
+                ) : null}
                 {inspector && (
                   <MonthTarget
                     x={x + bar / 2 - band / 2}
@@ -7568,6 +7792,12 @@ function DailyDashboard({
       lossesNight: 0,
     },
   ), [selectedRows]);
+  const expectedProductionTotal = useMemo(() => {
+    const values = selectedRows
+      .map((row) => projectedProduction(row, projection, launchDate))
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;
+  }, [launchDate, projection, selectedRows]);
   const paymentDisplay = useMemo(
     () => sumRowsFromUah(selectedRows, (row) => row.electricityPayment, currency),
     [currency, selectedRows],
@@ -7609,23 +7839,59 @@ function DailyDashboard({
           legend={[]}
           totalSummary={{
             month: t.totals,
+            responsiveComparison: true,
             columns: [t.value, t.performance],
             items: [
+              ...(expectedProductionTotal !== undefined
+                ? [{
+                    label: t.expected,
+                    color: colors.blue,
+                    value: formatChartEnergy(expectedProductionTotal, "down", lang),
+                    cells: [formatChartEnergy(expectedProductionTotal, "down", lang), ""],
+                  }]
+                : []),
               {
                 label: t.actual,
                 color: colors.amber,
                 value: formatChartEnergy(totals.production, "down", lang),
-                cells: [formatChartEnergy(totals.production, "down", lang), ""],
+                cells: [
+                  <StackedComparisonValue
+                    value={formatChartEnergy(totals.production, "down", lang)}
+                    comparison={expectedProductionTotal
+                      ? `${formatNumber((totals.production / expectedProductionTotal) * 100, 2, 2)}% ${t.ofExpected}`
+                      : undefined}
+                  />,
+                  expectedProductionTotal
+                    ? `${formatNumber((totals.production / expectedProductionTotal) * 100, 2, 2)}%`
+                    : "",
+                ],
+                cellTitles: [
+                  undefined,
+                  expectedProductionTotal
+                    ? `${formatNumber((totals.production / expectedProductionTotal) * 100, 2, 2)}% ${t.ofExpected}`
+                    : undefined,
+                ],
               },
               {
                 label: t.export,
                 color: colors.green,
                 value: formatChartEnergy(totals.export, "down", lang),
                 cells: [
-                  formatChartEnergy(totals.export, "down", lang),
+                  <StackedComparisonValue
+                    value={formatChartEnergy(totals.export, "down", lang)}
+                    comparison={totals.production
+                      ? `${formatNumber((totals.export / totals.production) * 100, 2, 2)}% ${t.ofActual}`
+                      : undefined}
+                  />,
                   totals.production
                     ? `${formatNumber((totals.export / totals.production) * 100, 2, 2)}%`
                     : "",
+                ],
+                cellTitles: [
+                  undefined,
+                  totals.production
+                    ? `${formatNumber((totals.export / totals.production) * 100, 2, 2)}% ${t.ofActual}`
+                    : undefined,
                 ],
               },
             ],

@@ -31,6 +31,25 @@ function monthIndex(date: Date) {
   return date.getFullYear() * 12 + date.getMonth()
 }
 
+export function monthlyPaceEstimate(value: number, month: Date, asOf: Date) {
+  if (
+    !Number.isFinite(value)
+    || month.getFullYear() !== asOf.getFullYear()
+    || month.getMonth() !== asOf.getMonth()
+  ) return undefined
+
+  const monthDays = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  const dayFraction = (
+    asOf.getHours()
+    + asOf.getMinutes() / 60
+    + asOf.getSeconds() / 3_600
+    + asOf.getMilliseconds() / 3_600_000
+  ) / 24
+  const elapsedDays = Math.min(monthDays, Math.max(1, asOf.getDate() - 1 + dayFraction))
+
+  return (value / elapsedDays) * monthDays
+}
+
 function spendingApplies(spending: PlantSpending, throughMonth?: Date) {
   return !throughMonth || monthIndex(spending.date) <= monthIndex(throughMonth)
 }

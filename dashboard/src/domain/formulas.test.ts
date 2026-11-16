@@ -17,6 +17,7 @@ import {
   importCostBreakdown,
   importTotal,
   investmentUsdRateForDate,
+  monthlyPaceEstimate,
   netExportPrice,
   netExportNightPrice,
   normalizedProductionPerformance,
@@ -104,6 +105,16 @@ describe('plant investment', () => {
 })
 
 describe('energy totals', () => {
+  it('estimates a full month from the fractional calendar day', () => {
+    const month = new Date(2026, 10, 1)
+    const asOf = new Date(2026, 10, 16, 14, 24)
+
+    expect(monthlyPaceEstimate(764.7, month, asOf)).toBeCloseTo((764.7 / 15.6) * 30)
+    expect(monthlyPaceEstimate(10, month, new Date(2026, 10, 1, 6))).toBeCloseTo(300)
+    expect(monthlyPaceEstimate(15, month, new Date(2026, 10, 2, 12))).toBeCloseTo(300)
+    expect(monthlyPaceEstimate(764.7, new Date(2026, 9, 1), asOf)).toBeUndefined()
+  })
+
   it('calculates consumption, import, and grid balance', () => {
     expect(consumedTotal(row)).toBe(100)
     expect(importTotal(row)).toBe(30)
